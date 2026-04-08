@@ -299,7 +299,7 @@
     }
 
     .auto-grid {
-      grid-template-columns: minmax(0, 1.2fr) minmax(340px, 0.8fr);
+      grid-template-columns: minmax(0, 1.2fr) 400px;
       align-items: start;
     }
 
@@ -533,13 +533,9 @@
     .preview-stage {
       display: grid;
       place-items: center;
-      min-height: min(66vh, 780px);
+      /* min-height: min(66vh, 780px); */
       margin-top: 12px;
       border-radius: calc(var(--radius-xl) - 4px);
-      border: 1px solid rgba(59, 46, 32, 0.18);
-      background:
-        linear-gradient(180deg, rgba(18, 27, 16, 0.95), rgba(8, 15, 7, 0.98)),
-        radial-gradient(circle at top, rgba(104, 157, 82, 0.12), transparent 30%);
       overflow: hidden;
     }
 
@@ -577,6 +573,17 @@
       overflow: auto;
       white-space: pre-wrap;
       word-break: break-word;
+      font-family: "Consolas", "Menlo", "Monaco", monospace;
+    }
+
+    .preview-stage.mini {
+      min-height: 700px;
+      max-height: 700px;
+      margin-top: 0;
+    }
+
+    .preview-stage.mini img {
+      max-height: 700px;
     }
 
     pre.log.side {
@@ -587,6 +594,50 @@
     pre.log.full {
       min-height: 62vh;
       max-height: 72vh;
+    }
+
+    .log-entry {
+      margin: 0;
+      padding: 2px 0;
+      border-bottom: 1px solid rgba(109, 81, 50, 0.06);
+    }
+
+    .log-entry:last-child {
+      border-bottom: none;
+    }
+
+    .log-data-toggle {
+      display: inline-block;
+      margin-left: 4px;
+      padding: 1px 6px;
+      font-size: 0.72rem;
+      color: var(--accent-strong);
+      background: rgba(79, 138, 60, 0.08);
+      border: 1px solid rgba(79, 138, 60, 0.18);
+      border-radius: 4px;
+      cursor: pointer;
+      user-select: none;
+      vertical-align: middle;
+    }
+
+    .log-data-toggle:hover {
+      background: rgba(79, 138, 60, 0.16);
+    }
+
+    .log-data-full {
+      display: none;
+      margin-top: 2px;
+      padding: 4px 8px;
+      background: rgba(95, 69, 39, 0.04);
+      border-radius: 6px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 0.78rem;
+      color: #5a4a3a;
+    }
+
+    .log-data-full.open {
+      display: block;
     }
 
     @media (max-width: 1080px) {
@@ -719,84 +770,10 @@
     </section>
 
     <nav class="tabbar" role="tablist">
-      <button type="button" class="tab-btn on" data-tab="preview" role="tab">画面预览</button>
+      <button type="button" class="tab-btn on" data-tab="automation" role="tab">自动农场</button>
       <button type="button" class="tab-btn" data-tab="friends" role="tab">好友农场</button>
-      <button type="button" class="tab-btn" data-tab="automation" role="tab">自动农场</button>
       <button type="button" class="tab-btn" data-tab="logs" role="tab">消息日志</button>
     </nav>
-
-    <section class="panel on" id="panel-preview" data-tab="preview">
-      <div class="panel-grid preview-grid">
-        <article class="card stage-card">
-          <div class="card-head">
-            <div>
-              <h2>游戏画面预览</h2>
-              <p class="hint">点击预览可直接发点击，拖动预览可发送实时滑动，均直接走 CDP 输入事件。</p>
-            </div>
-            <button type="button" class="ghost" id="btnPreviewCapture">单帧截图</button>
-          </div>
-          <p class="summary-note" id="txtPreviewState">未加载预览状态</p>
-          <div class="preview-stage">
-            <img id="imgPreview" alt="游戏画面预览" style="display:none" />
-            <div class="preview-empty" id="previewEmpty">尚未收到画面帧。开始预览后，这里会持续显示小游戏当前画面。</div>
-          </div>
-          <p class="hint">建议先开启预览，再勾选“在预览上直接操作游戏”，这样更容易对齐点击和滑动坐标。</p>
-        </article>
-
-        <aside class="stack">
-          <article class="card">
-            <h2>预览参数</h2>
-            <div class="input-grid compact" style="margin-top:12px">
-              <label class="field-block">
-                <span>图片格式</span>
-                <select id="selPreviewFormat">
-                  <option value="jpeg">JPEG</option>
-                  <option value="png">PNG</option>
-                </select>
-              </label>
-              <label class="field-block">
-                <span>隔帧</span>
-                <input type="number" min="1" max="10" id="iptPreviewNth" placeholder="2" />
-              </label>
-              <label class="field-block">
-                <span>最大宽度</span>
-                <input type="number" min="64" id="iptPreviewWidth" placeholder="720" />
-              </label>
-              <label class="field-block">
-                <span>最大高度</span>
-                <input type="number" min="64" id="iptPreviewHeight" placeholder="1280" />
-              </label>
-              <label class="field-block">
-                <span>质量</span>
-                <input type="number" min="1" max="100" id="iptPreviewQuality" placeholder="60" />
-              </label>
-            </div>
-            <div class="action-row">
-              <button type="button" class="action" id="btnPreviewStart">开始预览</button>
-              <button type="button" class="action secondary" id="btnPreviewStop">停止预览</button>
-              <button type="button" class="action secondary" id="btnPreviewStatus">刷新预览状态</button>
-            </div>
-          </article>
-
-          <article class="card">
-            <h2>预览交互</h2>
-            <label class="check-card inline" style="margin-top:12px">
-              <input type="checkbox" id="chkPreviewClick" />
-              <div>
-                <strong>在预览上直接操作游戏</strong>
-                <small>勾选后，短按会发点击；按住并拖动会发送实时触摸移动。</small>
-              </div>
-            </label>
-            <div class="input-grid single">
-              <label class="field-block">
-                <span>最短按住时长(ms)</span>
-                <input type="number" min="0" id="iptPreviewHold" placeholder="32" />
-              </label>
-            </div>
-          </article>
-        </aside>
-      </div>
-    </section>
 
     <section class="panel" id="panel-friends" data-tab="friends">
       <div class="panel-grid friend-grid">
@@ -861,7 +838,7 @@
       </div>
     </section>
 
-    <section class="panel" id="panel-automation" data-tab="automation">
+    <section class="panel on" id="panel-automation" data-tab="automation">
       <div class="panel-grid auto-grid">
         <article class="card">
           <div class="card-head">
@@ -937,29 +914,42 @@
             <button type="button" class="action" id="btnAutoRunOnce">立即执行一轮</button>
             <button type="button" class="action" id="btnAutoStart">开始自动化</button>
             <button type="button" class="action secondary" id="btnAutoStop">停止自动化</button>
-            <button type="button" class="action secondary" id="btnAutoRefresh">刷新状态</button>
           </div>
         </article>
 
-        <article class="card">
-          <h2>最近执行</h2>
-          <p class="hint">服务端常驻执行。页面只是查看和控制入口，不依赖当前 tab 一直停留。</p>
-          <pre class="log side" id="logAutoFarm"></pre>
+        <article class="card" style="padding:12px">
+          <h2 style="margin-bottom:8px">画面预览</h2>
+          <div class="preview-stage mini interactive">
+            <img id="imgPreviewMini" alt="游戏画面" style="display:none" />
+            <div class="preview-empty" id="previewEmptyMini">等待预览...</div>
+          </div>
         </article>
       </div>
     </section>
 
     <section class="panel" id="panel-logs" data-tab="logs">
-      <article class="card">
-        <div class="card-head">
-          <div>
-            <h2>消息日志</h2>
-            <p class="hint">WebSocket 发送、接口返回、自动注入结果都会汇总到这里，排查时看这一页即可。</p>
+      <div class="panel-grid" style="grid-template-columns:1fr 1fr;gap:16px">
+        <article class="card">
+          <div class="card-head">
+            <h2>自动农场日志</h2>
+            <button type="button" class="ghost" id="btnAutoRefresh">刷新状态</button>
           </div>
-          <button type="button" class="ghost" id="btnClearLog">清空日志</button>
-        </div>
-        <pre class="log full" id="log"></pre>
-      </article>
+          <pre class="log side" id="logAutoFarm"></pre>
+        </article>
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <h2>消息日志</h2>
+              <p class="hint">默认仅显示关键消息。开启调试模式后显示所有 WebSocket 收发数据。</p>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button type="button" class="ghost" id="btnToggleDebug">调试模式：关</button>
+              <button type="button" class="ghost" id="btnClearLog">清空日志</button>
+            </div>
+          </div>
+          <pre class="log side" id="log"></pre>
+        </article>
+      </div>
     </section>
   </div>
 
@@ -984,17 +974,10 @@
       const txtFriendSummary = document.getElementById("txtFriendSummary");
       const txtAutoFarmState = document.getElementById("txtAutoFarmState");
       const logAutoFarm = document.getElementById("logAutoFarm");
-      const txtPreviewState = document.getElementById("txtPreviewState");
-      const imgPreview = document.getElementById("imgPreview");
-      const previewEmpty = document.getElementById("previewEmpty");
-      const previewStage = document.querySelector(".preview-stage");
-      const selPreviewFormat = document.getElementById("selPreviewFormat");
-      const iptPreviewWidth = document.getElementById("iptPreviewWidth");
-      const iptPreviewHeight = document.getElementById("iptPreviewHeight");
-      const iptPreviewQuality = document.getElementById("iptPreviewQuality");
-      const iptPreviewNth = document.getElementById("iptPreviewNth");
-      const chkPreviewClick = document.getElementById("chkPreviewClick");
-      const iptPreviewHold = document.getElementById("iptPreviewHold");
+      const txtPreviewState = null;
+      const imgPreview = document.getElementById("imgPreviewMini");
+      const previewEmpty = document.getElementById("previewEmptyMini");
+      const previewStage = imgPreview ? imgPreview.closest(".preview-stage") : null;
       const autoOwnEnabled = document.getElementById("autoOwnEnabled");
       const autoFriendEnabled = document.getElementById("autoFriendEnabled");
       const autoRefreshFriendList = document.getElementById("autoRefreshFriendList");
@@ -1015,6 +998,8 @@
       let lastPreviewFrameMeta = null;
       let previewPointer = null;
       let lastHealth = null;
+      let debugMode = false;
+      const DATA_TRUNCATE_LEN = 200;
       const pendingTags = new Map();
       const autoInject = {
         path: "button.js",
@@ -1041,12 +1026,40 @@
         return date.toLocaleString("zh-CN", { hour12: false });
       }
 
-      function appendLine(msg, obj) {
+      function appendLine(msg, obj, isDebug) {
+        if (isDebug && !debugMode) return;
+        const entry = document.createElement("div");
+        entry.className = "log-entry";
         let line = "[" + formatClock() + "] " + msg;
         if (obj !== undefined) {
-          line += "\n" + (typeof obj === "string" ? obj : JSON.stringify(obj, null, 2));
+          const dataStr = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
+          if (dataStr.length <= DATA_TRUNCATE_LEN) {
+            line += "\n" + dataStr;
+            entry.textContent = line;
+          } else {
+            const textNode = document.createTextNode(line + "\n" + dataStr.slice(0, DATA_TRUNCATE_LEN) + "...");
+            entry.appendChild(textNode);
+            const toggle = document.createElement("span");
+            toggle.className = "log-data-toggle";
+            toggle.textContent = "展开全部 (" + dataStr.length + " 字符)";
+            const fullData = document.createElement("div");
+            fullData.className = "log-data-full";
+            fullData.textContent = dataStr;
+            toggle.onclick = function () {
+              const isOpen = fullData.classList.toggle("open");
+              toggle.textContent = isOpen ? "收起" : "展开全部 (" + dataStr.length + " 字符)";
+            };
+            entry.appendChild(toggle);
+            entry.appendChild(fullData);
+          }
+        } else {
+          entry.textContent = line;
         }
-        logEl.textContent += (logEl.textContent ? "\n\n" : "") + line;
+        logEl.appendChild(entry);
+        // 限制最多保留 300 条
+        while (logEl.children.length > 300) {
+          logEl.removeChild(logEl.firstChild);
+        }
         logEl.scrollTop = logEl.scrollHeight;
       }
 
@@ -1131,7 +1144,7 @@
           pendingTags.set(String(id), tag);
         }
         const body = Object.assign({ id: String(id) }, payload);
-        if (!isQuietPreviewOp(body.op)) appendLine("→ 发送", body);
+        if (!isQuietPreviewOp(body.op)) appendLine("→ 发送 " + (body.op || ""), body, true);
         ws.send(JSON.stringify(body));
         return true;
       }
@@ -1225,6 +1238,149 @@
         };
       }
 
+      function formatFarmTypeLabel(farmType) {
+        if (farmType === "own") return "自己农场";
+        if (farmType === "friend") return "好友农场";
+        if (farmType === "unknown") return "未知农场";
+        return farmType ? String(farmType) : "未知农场";
+      }
+
+      function formatActionLabel(key) {
+        if (key === "collect") return "一键收获";
+        if (key === "water") return "一键浇水";
+        if (key === "eraseGrass") return "一键除草";
+        if (key === "killBug") return "一键杀虫";
+        return key ? String(key) : "未知动作";
+      }
+
+      function formatStageCounts(stageCounts) {
+        const src = stageCounts && typeof stageCounts === "object" ? stageCounts : {};
+        const defs = [
+          ["mature", "成熟"],
+          ["growing", "生长中"],
+          ["empty", "空地"],
+          ["dead", "枯萎"],
+          ["other", "其他"],
+          ["unknown", "未知"],
+          ["error", "异常"],
+        ];
+        const parts = [];
+        defs.forEach(function (def) {
+          const value = Number(src[def[0]]) || 0;
+          if (value > 0) {
+            parts.push(def[1] + value);
+          }
+        });
+        return parts.join("，");
+      }
+
+      function formatWorkCounts(workCounts) {
+        const src = workCounts && typeof workCounts === "object" ? workCounts : {};
+        const defs = [
+          ["collect", "可收"],
+          ["water", "待浇水"],
+          ["eraseGrass", "待除草"],
+          ["killBug", "待杀虫"],
+        ];
+        const parts = [];
+        defs.forEach(function (def) {
+          const value = Number(src[def[0]]) || 0;
+          if (value > 0) {
+            parts.push(def[1] + value);
+          }
+        });
+        return parts.join("，");
+      }
+
+      function formatFarmSnapshot(snapshot) {
+        if (!snapshot || typeof snapshot !== "object") return "无状态信息";
+        const parts = [];
+        if (snapshot.farmType) parts.push(formatFarmTypeLabel(snapshot.farmType));
+        if (snapshot.totalGrids != null) parts.push("总地块 " + snapshot.totalGrids);
+        const stageText = formatStageCounts(snapshot.stageCounts);
+        const workText = formatWorkCounts(snapshot.workCounts);
+        if (stageText) parts.push("阶段: " + stageText);
+        if (workText) parts.push("待处理: " + workText);
+        return parts.join("，") || "无状态信息";
+      }
+
+      function formatFriendName(friend) {
+        if (!friend || typeof friend !== "object") return "未知好友";
+        const name = friend.displayName || friend.name || friend.remark || (friend.gid != null ? "gid=" + friend.gid : "未知好友");
+        return friend.gid != null ? name + " (gid=" + friend.gid + ")" : name;
+      }
+
+      function buildAutoFarmLogLines(state) {
+        const lines = [];
+        if (!state) return ["暂无日志"];
+
+        // 最近一轮结果 — 精简为每个动作一行
+        var lr = state.lastResult;
+        var result = lr && lr.result ? lr.result : null;
+        if (result) {
+          var ts = result.startedAt ? "[" + formatDateTime(result.startedAt) + "] " : "";
+
+          // 自己农场
+          var own = result.ownFarm;
+          if (own && own.tasks) {
+            var actions = Array.isArray(own.tasks.actions) ? own.tasks.actions : [];
+            if (actions.length === 0) {
+              lines.push(ts + "自己农场：无待处理项");
+            }
+            actions.forEach(function (a) {
+              if (!a) return;
+              var label = formatActionLabel(a.key);
+              if (a.ok) {
+                lines.push(ts + "自己农场 " + label + "：" + (a.beforeCount || 0) + " → " + (a.afterCount || 0));
+              } else {
+                lines.push(ts + "自己农场 " + label + "：失败 " + (a.error || ""));
+              }
+            });
+          }
+
+          // 好友农场
+          var fs = result.friendSteal;
+          if (fs) {
+            var visits = Array.isArray(fs.visits) ? fs.visits : [];
+            if (visits.length === 0 && fs.stealableCandidates === 0) {
+              lines.push(ts + "好友偷菜：无可偷好友");
+            }
+            visits.forEach(function (v) {
+              if (!v) return;
+              var name = v.friend ? (v.friend.displayName || v.friend.name || v.friend.gid) : "?";
+              if (!v.ok) {
+                lines.push(ts + "好友 " + name + "：" + (v.error || v.reason || "失败"));
+              } else if (v.reason === "no_collectable_after_enter") {
+                lines.push(ts + "好友 " + name + "：无可摘，跳过");
+              } else if (v.collectBefore != null) {
+                lines.push(ts + "好友 " + name + "：摘取 " + v.collectBefore + " → " + (v.collectAfter || 0));
+              } else {
+                lines.push(ts + "好友 " + name + "：已访问");
+              }
+            });
+          }
+        }
+
+        // 调度事件
+        var events = Array.isArray(state.recentEvents) ? state.recentEvents.slice(-15).reverse() : [];
+        events.forEach(function (item) {
+          if (!item) return;
+          var t = item.time ? "[" + formatDateTime(item.time) + "] " : "";
+          var msg = item.message || "";
+          if (msg === "自动化已启动") lines.push(t + "已启动");
+          else if (msg.indexOf("自动化已停止:") === 0) lines.push(t + "已停止：" + msg.replace(/^自动化已停止:\s*/, ""));
+          else if (msg.indexOf("执行完成:") === 0) {
+            var ex = item.extra || {};
+            lines.push(t + "完成 自己" + (ex.ownActions || 0) + "动作 好友" + (ex.friendVisits || 0) + "次");
+          }
+          else if (msg.indexOf("执行失败:") === 0) lines.push(t + "失败：" + msg.replace(/^执行失败:\s*/, ""));
+          else if (msg.indexOf("调度异常:") === 0) lines.push(t + "异常：" + msg.replace(/^调度异常:\s*/, ""));
+          else lines.push(t + msg);
+        });
+
+        return lines.length ? lines : ["暂无日志"];
+      }
+
       function renderAutoFarmState(state, syncForm) {
         autoFarmState = state || null;
         if (syncForm && state && state.config) {
@@ -1244,41 +1400,17 @@
         if (state.lastFinishedAt) parts.push("上次完成: " + formatDateTime(state.lastFinishedAt));
         if (state.lastError) parts.push("最近错误: " + state.lastError);
         txtAutoFarmState.textContent = parts.join(" · ");
-
-        const lines = [];
-        const events = Array.isArray(state.recentEvents) ? state.recentEvents : [];
-        events.forEach(function (item) {
-          let line = "[" + (item.time ? formatDateTime(item.time) : "") + "] " + String(item.level || "info").toUpperCase() + " " + (item.message || "");
-          if (item.extra !== undefined) line += "\n" + JSON.stringify(item.extra, null, 2);
-          lines.push(line);
-        });
-        if (state.lastResult) {
-          lines.push("[LAST RESULT]\n" + JSON.stringify(state.lastResult, null, 2));
-        }
-        logAutoFarm.textContent = lines.join("\n\n");
+        logAutoFarm.textContent = buildAutoFarmLogLines(state).join("\n");
       }
 
       function gatherPreviewOptions() {
         return {
-          format: String(selPreviewFormat.value || "jpeg"),
-          maxWidth: Number(iptPreviewWidth.value || 720),
-          maxHeight: Number(iptPreviewHeight.value || 1280),
-          quality: Number(iptPreviewQuality.value || 60),
-          everyNthFrame: Number(iptPreviewNth.value || 2),
+          format: "jpeg",
+          maxWidth: 720,
+          maxHeight: 1280,
+          quality: 60,
+          everyNthFrame: 2,
         };
-      }
-
-      function applyPreviewOptions(opts) {
-        opts = opts || {};
-        selPreviewFormat.value = opts.format === "png" ? "png" : "jpeg";
-        iptPreviewWidth.value = opts.maxWidth != null ? opts.maxWidth : 720;
-        iptPreviewHeight.value = opts.maxHeight != null ? opts.maxHeight : 1280;
-        iptPreviewQuality.value = opts.quality != null ? opts.quality : 60;
-        iptPreviewNth.value = opts.everyNthFrame != null ? opts.everyNthFrame : 2;
-      }
-
-      function updatePreviewInteractionUi() {
-        previewStage.classList.toggle("interactive", !!chkPreviewClick.checked);
       }
 
       function getPreviewSourceSize() {
@@ -1365,25 +1497,15 @@
         imgPreview.src = "data:" + frame.mediaType + ";base64," + frame.data;
         imgPreview.style.display = "block";
         previewEmpty.style.display = "none";
-        const meta = frame.meta || {};
-        const parts = [];
-        parts.push(previewState && previewState.running ? "预览中" : "静态帧");
-        if (frame.ts) parts.push("时间: " + formatDateTime(frame.ts));
-        if (meta.width != null && meta.height != null) parts.push("尺寸: " + meta.width + "x" + meta.height);
-        if (meta.bytesBase64 != null) parts.push("base64: " + meta.bytesBase64);
-        txtPreviewState.textContent = parts.join(" · ");
       }
 
       function renderPreviewState(state, syncForm) {
         previewState = state || null;
-        if (syncForm && state && state.options) {
-          applyPreviewOptions(state.options);
-        }
         if (state && state.lastFrameMeta) {
           lastPreviewFrameMeta = state.lastFrameMeta;
         }
         if (!state) {
-          txtPreviewState.textContent = "未加载预览状态";
+          if (txtPreviewState) txtPreviewState.textContent = "未加载预览状态";
           return;
         }
         const parts = [];
@@ -1391,7 +1513,7 @@
         parts.push("订阅连接: " + (state.subscriberCount || 0));
         if (state.lastFrameAt) parts.push("最后一帧: " + formatDateTime(state.lastFrameAt));
         if (state.lastError) parts.push("错误: " + state.lastError);
-        txtPreviewState.textContent = parts.join(" · ");
+        if (txtPreviewState) txtPreviewState.textContent = parts.join(" · ");
       }
 
       function handleWsEvent(data) {
@@ -1415,16 +1537,15 @@
       }
 
       function handlePreviewPointerDown(ev) {
-        if (!chkPreviewClick.checked) return;
         if (previewPointer) return;
         if (ev.button != null && ev.button !== 0) return;
         if (!imgPreview.src) {
-          txtPreviewState.textContent = "还没有预览画面，无法发送操作";
+          if (txtPreviewState) txtPreviewState.textContent = "还没有预览画面，无法发送操作";
           return;
         }
         const mapped = mapPreviewClientPointToSource(ev.clientX, ev.clientY, false);
         if (!mapped.ok) {
-          txtPreviewState.textContent = mapped.reason;
+          if (txtPreviewState) txtPreviewState.textContent = mapped.reason;
           return;
         }
         ev.preventDefault();
@@ -1445,7 +1566,7 @@
           moveSeq: 0,
           endTimer: null,
         };
-        txtPreviewState.textContent = "手势开始: (" + mapped.point.x + ", " + mapped.point.y + ")";
+        if (txtPreviewState) txtPreviewState.textContent = "手势开始: (" + mapped.point.x + ", " + mapped.point.y + ")";
         send({
           op: "previewDragStart",
           x: mapped.point.x,
@@ -1492,7 +1613,7 @@
         } catch (_) {}
         if (cancelled) {
           clearPreviewPointer();
-          txtPreviewState.textContent = "手势已取消，正在清理触摸状态";
+          if (txtPreviewState) txtPreviewState.textContent = "手势已取消，正在清理触摸状态";
           send({
             op: "previewDragEnd",
             x: gesture.lastPoint.x,
@@ -1503,15 +1624,15 @@
         const mapped = mapPreviewClientPointToSource(ev.clientX, ev.clientY, true);
         if (!mapped.ok) {
           clearPreviewPointer();
-          txtPreviewState.textContent = mapped.reason;
+          if (txtPreviewState) txtPreviewState.textContent = mapped.reason;
           return;
         }
         gesture.lastPoint = mapped.point;
-        const minHold = Math.max(0, Number(iptPreviewHold.value || 32));
+        const minHold = 32;
         const elapsed = Date.now() - gesture.startedAt;
         const finalize = function () {
           const label = gesture.moved ? "正在结束实时滑动" : "正在结束点击";
-          txtPreviewState.textContent = label + ": (" + gesture.lastPoint.x + ", " + gesture.lastPoint.y + ")";
+          if (txtPreviewState) txtPreviewState.textContent = label + ": (" + gesture.lastPoint.x + ", " + gesture.lastPoint.y + ")";
           send({
             op: "previewDragEnd",
             x: gesture.lastPoint.x,
@@ -1792,6 +1913,9 @@
             autoInject.injected = true;
             autoInject.lastError = "";
             autoInject.lastOkAt = new Date().toISOString();
+            if (!previewState || !previewState.running) {
+              send({ op: "previewStart", options: gatherPreviewOptions() }, "previewStart");
+            }
           }
           renderInjectStatus();
           return;
@@ -1813,7 +1937,7 @@
           } else if (code === "enterFriend") {
             txtFriendSummary.textContent = "进入好友失败: " + (msg.error || "?");
           } else if (isPreviewOp) {
-            txtPreviewState.textContent = "预览操作失败: " + (msg.error || "?");
+            if (txtPreviewState) txtPreviewState.textContent = "预览操作失败: " + (msg.error || "?");
           }
           return;
         }
@@ -1843,7 +1967,7 @@
           const parts0 = ["已发送点击: (" + r.x + ", " + r.y + ")"];
           if (meta0.mode) parts0.push("模式: " + meta0.mode);
           if (meta0.fallbackFrom) parts0.push("touch 回退: " + meta0.fallbackFrom);
-          txtPreviewState.textContent = parts0.join(" · ");
+          if (txtPreviewState) txtPreviewState.textContent = parts0.join(" · ");
           return;
         }
         if (code === "previewDragStart") {
@@ -1851,7 +1975,7 @@
           const parts1 = ["实时手势已开始: (" + r.x + ", " + r.y + ")"];
           if (meta1.mode) parts1.push("模式: " + meta1.mode);
           if (meta1.fallbackFrom) parts1.push("touch 回退: " + meta1.fallbackFrom);
-          txtPreviewState.textContent = parts1.join(" · ");
+          if (txtPreviewState) txtPreviewState.textContent = parts1.join(" · ");
           return;
         }
         if (code === "previewDragEnd") {
@@ -1859,7 +1983,7 @@
           const parts2 = ["实时手势已结束: (" + r.x + ", " + r.y + ")"];
           if (meta2.mode) parts2.push("模式: " + meta2.mode);
           if (meta2.fallbackFrom) parts2.push("touch 回退: " + meta2.fallbackFrom);
-          txtPreviewState.textContent = parts2.join(" · ");
+          if (txtPreviewState) txtPreviewState.textContent = parts2.join(" · ");
           return;
         }
         if (code === "previewSwipe") {
@@ -1871,7 +1995,7 @@
           ];
           if (meta3.mode) parts3.push("模式: " + meta3.mode);
           if (meta3.fallbackFrom) parts3.push("touch 回退: " + meta3.fallbackFrom);
-          txtPreviewState.textContent = parts3.join(" · ");
+          if (txtPreviewState) txtPreviewState.textContent = parts3.join(" · ");
         }
       }
 
@@ -1905,14 +2029,14 @@
             const tag = data && data.id != null ? pendingTags.get(String(data.id)) : null;
             if (data && data.id != null) pendingTags.delete(String(data.id));
             const summary = summarizeWsMessageForLog(data, tag);
-            if (summary !== null) appendLine("← 收到", summary);
+            if (summary !== null) appendLine("← 收到", summary, true);
             if (tag != null) {
               try {
                 handleWsResult(data, tag);
               } catch (_) {}
             }
           } catch (_) {
-            appendLine("← 原始", ev.data);
+            appendLine("← 原始", ev.data, true);
           }
         };
       }
@@ -1937,22 +2061,6 @@
           path: "gameCtl.enterFriendFarm",
           args: [/^\d+$/.test(target) ? Number(target) : target],
         }, "enterFriend");
-      };
-
-      document.getElementById("btnPreviewStart").onclick = function () {
-        send({ op: "previewStart", options: gatherPreviewOptions() }, "previewStart");
-      };
-
-      document.getElementById("btnPreviewStop").onclick = function () {
-        send({ op: "previewStop" }, "previewStop");
-      };
-
-      document.getElementById("btnPreviewCapture").onclick = function () {
-        send({ op: "previewCapture", options: gatherPreviewOptions() }, "previewCapture");
-      };
-
-      document.getElementById("btnPreviewStatus").onclick = function () {
-        send({ op: "previewStatus" }, "previewStatus");
       };
 
       document.getElementById("btnAutoSave").onclick = function () {
@@ -1993,10 +2101,14 @@
       };
 
       document.getElementById("btnClearLog").onclick = function () {
-        logEl.textContent = "";
+        logEl.innerHTML = "";
       };
 
-      chkPreviewClick.onchange = updatePreviewInteractionUi;
+      document.getElementById("btnToggleDebug").onclick = function () {
+        debugMode = !debugMode;
+        this.textContent = "调试模式：" + (debugMode ? "开" : "关");
+      };
+
       imgPreview.addEventListener("pointerdown", handlePreviewPointerDown);
       imgPreview.addEventListener("pointermove", handlePreviewPointerMove);
       imgPreview.addEventListener("pointerup", handlePreviewPointerUp);
@@ -2015,9 +2127,6 @@
         });
       });
 
-      applyPreviewOptions({});
-      iptPreviewHold.value = 32;
-      updatePreviewInteractionUi();
       updateFriendMetrics(null);
       setWs(false);
       renderInjectStatus();

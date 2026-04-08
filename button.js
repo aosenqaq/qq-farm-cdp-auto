@@ -1450,6 +1450,51 @@
     }).join(', ');
   }
 
+  /**
+   * 调用 reqGameFriendsFromServer 获取好友最新植物状态（steal_plant_num, dry_num 等）。
+   * reqFriendList (SyncAll) 返回的植物状态是缓存的，只有 reqGameFriendsFromServer (GetGameFriends)
+   * 才能拿到服务端最新的可偷/可浇水等数据。
+   * 游戏好友界面也是用 doRefreshFriendList -> reqGameFriendsFromServer 实现的。
+   */
+  async function refreshFriendPlantStatus(manager, timeoutMs) {
+    timeoutMs = Math.max(500, Number(timeoutMs) || 2000);
+    const list = typeof manager.getClientFriendList === 'function'
+      ? manager.getClientFriendList()
+      : manager.clientFriendList;
+    if (!Array.isArray(list) || list.length === 0) return { refreshed: false, reason: 'empty_list' };
+
+    const gids = list.map(f => f && f.gid).filter(g => g != null);
+    if (gids.length === 0) return { refreshed: false, reason: 'no_gids' };
+
+    if (typeof manager.reqGameFriendsFromServer !== 'function') {
+      return { refreshed: false, reason: 'method_not_found' };
+    }
+
+    // 重置刷新页标记，允许重新请求
+    if (typeof manager.resetRefreshPage === 'function') {
+      try { manager.resetRefreshPage(); } catch (_) {}
+    }
+    if (typeof manager.resetFriendCanRefresh === 'function') {
+      try { manager.resetFriendCanRefresh(); } catch (_) {}
+    }
+
+    // 直接调用 reqGameFriendsFromServer，分页发送（与游戏一致，每页50个）
+    const PAGE_SIZE = manager.REFRESH_PAGE_NUM || 50;
+    let pageCount = 0;
+    for (let i = 0; i < gids.length; i += PAGE_SIZE) {
+      const chunk = gids.slice(i, i + PAGE_SIZE);
+      try {
+        manager.reqGameFriendsFromServer(chunk);
+        pageCount++;
+      } catch (_) {}
+    }
+
+    // 等待 WebSocket 异步回调完成更新 clientFriendList
+    await wait(Math.min(timeoutMs, 500 + pageCount * 200));
+
+    return { refreshed: true, gidCount: gids.length, pages: pageCount };
+  }
+
   function resolveFriendRuntimeContext() {
     const runtime = getFriendManagerRuntime();
     if (!runtime || !runtime.FriendManager) throw new Error('FriendManager not found');
@@ -1542,12 +1587,17 @@
     const requestedRefresh = shouldRequestFriendRefresh(ctx.manager, opts);
     let refreshMode = 'none';
 
-    if (requestedRefresh) {
+    // if (requestedRefresh) {
       refreshMode = 'background';
       Promise.resolve()
         .then(() => ctx.manager.reqFriendList())
+        .then(() => {
+          if (opts.refreshPlantStatus !== false) {
+            return refreshFriendPlantStatus(ctx.manager, opts.plantRefreshTimeoutMs);
+          }
+        })
         .catch(() => {});
-    }
+    // }
 
     return buildFriendEntriesResult(ctx.runtime, ctx.manager, opts, {
       requestedRefresh,
@@ -1564,23 +1614,36 @@
     let refreshed = false;
     let refreshError = null;
     let refreshMode = 'none';
+    let plantRefreshResult = null;
 
-    if (requestedRefresh) {
+    // if (requestedRefresh) {
       refreshMode = 'awaited';
       try {
+        // 1. reqFriendList (SyncAll) 拉取基本好友列表
         await ctx.manager.reqFriendList();
         refreshed = true;
       } catch (e) {
         refreshError = e && e.message ? e.message : String(e);
       }
-    }
 
-    return buildFriendEntriesResult(ctx.runtime, ctx.manager, opts, {
+      // 2. reqGameFriendsFromServer (GetGameFriends) 刷新真实植物状态
+      if (opts.refreshPlantStatus !== false) {
+        try {
+          plantRefreshResult = await refreshFriendPlantStatus(ctx.manager, opts.plantRefreshTimeoutMs);
+        } catch (e) {
+          plantRefreshResult = { refreshed: false, error: e && e.message ? e.message : String(e) };
+        }
+      }
+    // }
+
+    const result = buildFriendEntriesResult(ctx.runtime, ctx.manager, opts, {
       requestedRefresh,
       refreshed,
       refreshError,
       refreshMode
     });
+    result.plantRefresh = plantRefreshResult;
+    return result;
   }
 
   function resolveFriendEntry(entries, target, opts) {
