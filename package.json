@@ -1,0 +1,22 @@
+{
+  "name": "qq-farm-cdp-auto",
+  "version": "1.0.0",
+  "private": true,
+  "license": "GPL-3.0",
+  "description": "qq经典农场自动化控制：wmpf(Frida+CDP) + src/gateway + button.js",
+  "dependencies": {
+    "frida": "^16.6.6",
+    "protobufjs": "^7.5.4",
+    "ws": "^8.18.3"
+  },
+  "scripts": {
+    "start": "node run.cjs",
+    "start:auto": "node run.cjs --auto-farm",
+    "gateway": "node src/gateway/index.js",
+    "wmpf": "node wmpf/src/index.js",
+    "wmpf:auto": "node wmpf/src/index.js --auto-farm"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

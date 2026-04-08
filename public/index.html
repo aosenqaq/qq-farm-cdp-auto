@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>农场 CDP 控制台</title>
+  <style>
+    :root {
+      --bg: #111827;
+      --elev: #1f2937;
+      --border: rgba(55, 65, 81, 0.6);
+      --text: #f3f4f6;
+      --muted: #9ca3af;
+      --accent: #22c55e;
+      --accent-dim: rgba(34, 197, 94, 0.12);
+      --btn: #3b82f6;
+      --warn: #eab308;
+      --err: #ef4444;
+      --panel: #0f172a;
+    }
+    [data-theme="light"] {
+      --bg: #f9fafb;
+      --elev: #ffffff;
+      --border: #e5e7eb;
+      --text: #111827;
+      --muted: #6b7280;
+      --accent: #16a34a;
+      --accent-dim: rgba(22, 163, 74, 0.1);
+      --btn: #2563eb;
+      --warn: #ca8a04;
+      --err: #dc2626;
+      --panel: #f3f4f6;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: ui-sans-serif, system-ui, "Segoe UI", "PingFang SC", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100dvh;
+      padding: 1rem 1.25rem 2rem;
+      max-width: 52rem;
+      margin-inline: auto;
+    }
+    h1 { font-size: 1.35rem; font-weight: 600; margin: 0 0 0.25rem; }
+    .sub { color: var(--muted); font-size: 0.875rem; margin: 0 0 1.25rem; line-height: 1.5; }
+
+    .tabs {
+      display: flex;
+      gap: 0.25rem;
+      margin-bottom: 1rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.5rem;
+    }
+    .tabs button {
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      padding: 0.45rem 0.85rem;
+      border-radius: 0.5rem;
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-family: inherit;
+    }
+    .tabs button:hover { background: var(--panel); color: var(--text); }
+    .tabs button.on { background: var(--accent-dim); color: var(--accent); font-weight: 600; }
+
+    .panel { display: none; }
+    .panel.on { display: block; }
+
+    .grid {
+      display: grid;
+      gap: 0.75rem;
+      grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+      margin-bottom: 1rem;
+    }
+    .stat {
+      background: var(--elev);
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      padding: 0.75rem 0.9rem;
+    }
+    .stat .k { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 0.35rem; }
+    .stat .v { font-size: 0.9rem; font-weight: 500; word-break: break-word; }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 0.35rem; vertical-align: middle; }
+    .dot.ok { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+    .dot.warn { background: var(--warn); }
+    .dot.bad { background: var(--err); }
+
+    .card {
+      background: var(--elev);
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+    .card h2 { margin: 0 0 0.65rem; font-size: 0.95rem; font-weight: 600; }
+    .row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem; }
+    .row:last-child { margin-bottom: 0; }
+
+    button.action {
+      background: var(--btn);
+      color: #fff;
+      border: none;
+      padding: 0.45rem 0.85rem;
+      border-radius: 0.5rem;
+      font-size: 0.85rem;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    button.action:hover { filter: brightness(1.08); }
+    button.action.secondary { background: var(--panel); color: var(--text); border: 1px solid var(--border); }
+    button.action.warn { background: var(--warn); color: #111827; }
+    button.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); padding: 0.35rem 0.65rem; border-radius: 0.45rem; font-size: 0.75rem; cursor: pointer; font-family: inherit; }
+    .field {
+      min-height: 2.25rem;
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      padding: 0.45rem 0.65rem;
+      font-size: 0.85rem;
+      font-family: inherit;
+    }
+    .field.grow { flex: 1 1 16rem; min-width: 16rem; }
+    .field.num { width: 9rem; }
+    .inline-check {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.85rem;
+      color: var(--text);
+      padding: 0.2rem 0;
+    }
+    .inline-check input { width: 1rem; height: 1rem; cursor: pointer; }
+
+    pre.log {
+      background: var(--panel);
+      padding: 0.85rem;
+      border-radius: 0.5rem;
+      overflow: auto;
+      font-size: 0.78rem;
+      line-height: 1.45;
+      max-height: min(360px, 42vh);
+      min-height: 100px;
+      border: 1px solid var(--border);
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .hint { font-size: 0.8rem; color: var(--muted); margin-top: 0.65rem; line-height: 1.45; }
+    code { font-size: 0.85em; background: var(--panel); padding: 0.1rem 0.35rem; border-radius: 0.25rem; }
+
+    .sw {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.65rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .sw:last-child { border-bottom: none; }
+    .sw span { font-size: 0.9rem; }
+    .sw small { display: block; color: var(--muted); font-size: 0.75rem; margin-top: 0.2rem; }
+    .sw input[type="checkbox"] { width: 1.1rem; height: 1.1rem; cursor: pointer; }
+
+    .top-actions { display: flex; justify-content: flex-end; margin-bottom: 0.75rem; }
+  </style>
+</head>
+<body>
+  <div class="top-actions">
+    <button type="button" class="ghost" id="btnTheme" title="浅色/深色">主题</button>
+  </div>
+
+  <h1>农场 CDP 控制台</h1>
+  <p class="sub">本机 <code>npm start</code> 后，用微信打开目标小游戏并保持前台；下方通过 WebSocket <code>/ws</code> 控制注入与脚本。</p>
+
+  <div class="tabs" role="tablist">
+    <button type="button" class="on" data-tab="overview" role="tab">总览</button>
+    <button type="button" data-tab="settings" role="tab">农场功能配置</button>
+  </div>
+
+  <section class="panel on" id="panel-overview" data-tab="overview">
+    <div class="grid" id="statusGrid">
+      <div class="stat">
+        <div class="k">网关服务</div>
+        <div class="v" id="stHttp"><span class="dot" id="dotHttp"></span><span id="txtHttp">检测中…</span></div>
+      </div>
+      <div class="stat">
+        <div class="k">WebSocket</div>
+        <div class="v" id="stWs"><span class="dot" id="dotWs"></span><span id="txtWs">未连接</span></div>
+      </div>
+      <div class="stat">
+        <div class="k">CDP 会话</div>
+        <div class="v" id="stCdp">—</div>
+      </div>
+      <div class="stat">
+        <div class="k">游戏内 gameCtl</div>
+        <div class="v" id="stGameCtl">未检测</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>本机启动</h2>
+      <p class="hint" style="margin-top:0">浏览器无法替你启动 Node，请在项目目录执行：</p>
+      <pre class="log" style="max-height:none;min-height:auto">npm start</pre>
+      <p class="hint">若端口被占用，请先结束旧的 Node 进程。DevTools 需连接 CDP 代理（见终端提示的 <code>ws://127.0.0.1:62000</code>）。</p>
+    </div>
+
+    <div class="card">
+      <h2>快捷操作</h2>
+      <div class="row">
+        <button type="button" class="action" id="btnPing">Ping</button>
+        <button type="button" class="action warn" id="btnInject">注入 button.js</button>
+        <button type="button" class="action" id="btnCheck">检测 gameCtl</button>
+        <button type="button" class="action" id="btnLand">获取土地信息</button>
+        <button type="button" class="action secondary" id="btnRefreshGame">刷新游戏内状态</button>
+        <button type="button" class="action secondary" id="btnClear">清空日志</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>好友农场</h2>
+      <p class="hint" style="margin-top:0">先注入 <code>button.js</code>，再获取好友列表。进入时优先使用手动输入，其次使用下拉框。</p>
+      <div class="row">
+        <button type="button" class="action" id="btnFriends">获取好友列表</button>
+        <select class="field grow" id="selFriend" disabled>
+          <option value="">请先获取好友列表</option>
+        </select>
+      </div>
+      <div class="row">
+        <input type="text" class="field grow" id="iptFriendTarget" placeholder="输入 gid / 好友名 / 备注（留空则使用下拉框）" />
+        <button type="button" class="action" id="btnEnterFriend">进入好友农场</button>
+      </div>
+      <p class="hint" id="txtFriendSummary">未加载好友列表</p>
+    </div>
+
+    <div class="card">
+      <h2>自动农场</h2>
+      <p class="hint" style="margin-top:0">由网关常驻执行。开始后即使不操作页面也会继续按间隔扫描；建议先确认 <code>button.js</code> 注入成功。</p>
+      <div class="row">
+        <label class="inline-check"><input type="checkbox" id="autoOwnEnabled" />自己农场</label>
+        <label class="inline-check"><input type="checkbox" id="autoFriendEnabled" />好友偷菜</label>
+        <label class="inline-check"><input type="checkbox" id="autoRefreshFriendList" />每轮刷新好友列表</label>
+        <label class="inline-check"><input type="checkbox" id="autoReturnHome" />好友轮次后回家</label>
+      </div>
+      <div class="row">
+        <input type="number" min="5" class="field num" id="autoOwnIntervalSec" placeholder="自己间隔(秒)" />
+        <input type="number" min="10" class="field num" id="autoFriendIntervalSec" placeholder="好友间隔(秒)" />
+        <input type="number" min="1" class="field num" id="autoMaxFriends" placeholder="每轮好友数" />
+        <input type="number" min="0" class="field num" id="autoEnterWaitMs" placeholder="进场等待ms" />
+        <input type="number" min="0" class="field num" id="autoActionWaitMs" placeholder="动作等待ms" />
+      </div>
+      <div class="row">
+        <label class="inline-check"><input type="checkbox" id="autoStopOnError" />出错后结束当前轮次</label>
+      </div>
+      <div class="row">
+        <button type="button" class="action secondary" id="btnAutoSave">保存自动化配置</button>
+        <button type="button" class="action" id="btnAutoRunOnce">立即执行一轮</button>
+        <button type="button" class="action" id="btnAutoStart">开始自动化</button>
+        <button type="button" class="action secondary" id="btnAutoStop">停止自动化</button>
+        <button type="button" class="action secondary" id="btnAutoRefresh">刷新状态</button>
+      </div>
+      <p class="hint" id="txtAutoFarmState">未加载自动化状态</p>
+      <pre class="log" id="logAutoFarm" style="max-height:220px"></pre>
+    </div>
+
+    <div class="card">
+      <h2>消息日志</h2>
+      <pre class="log" id="log"></pre>
+      <p class="hint">CDP 状态来自 <code>/api/health</code>；<code>gameCtl</code> 需注入成功且小游戏在前台。</p>
+    </div>
+  </section>
+
+  <section class="panel" id="panel-settings" data-tab="settings">
+    <div class="card">
+      <h2>开关（保存到服务端 <code>data/farm-config.json</code>）</h2>
+      <p class="hint" style="margin-top:0">脚本侧读取方式可后续在 <code>button.js</code> 中对接；此处先持久化配置。</p>
+      <div id="farmSwitches"></div>
+      <div class="row" style="margin-top:0.75rem">
+        <button type="button" class="action secondary" id="btnReloadConfig">从服务器重新加载</button>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    (function () {
+      const WS_PATH = "/ws";
+      const LS_THEME = "farm-cdp-theme";
+      const LS_CFG_CACHE = "farm-cdp-farm-config-cache";
+
+      const FARM_KEYS = [
+        { key: "autoInjectButton", label: "连接后自动注入 button.js", help: "需脚本与网关配合实现，当前仅占位" },
+        { key: "showLandOverlay", label: "显示土地信息浮层", help: "游戏内 UI，占位" },
+        { key: "enableOneClickHarvest", label: "启用一键收菜相关逻辑", help: "占位" },
+        { key: "enableFriendSteal", label: "启用好友互动（偷菜等）", help: "占位，默认关闭" },
+        { key: "verboseLog", label: "详细日志", help: "占位" },
+      ];
+
+      const logEl = document.getElementById("log");
+      const dotWs = document.getElementById("dotWs");
+      const txtWs = document.getElementById("txtWs");
+      const dotHttp = document.getElementById("dotHttp");
+      const txtHttp = document.getElementById("txtHttp");
+      const stCdp = document.getElementById("stCdp");
+      const stGameCtl = document.getElementById("stGameCtl");
+      const selFriend = document.getElementById("selFriend");
+      const iptFriendTarget = document.getElementById("iptFriendTarget");
+      const txtFriendSummary = document.getElementById("txtFriendSummary");
+      const txtAutoFarmState = document.getElementById("txtAutoFarmState");
+      const logAutoFarm = document.getElementById("logAutoFarm");
+      const autoOwnEnabled = document.getElementById("autoOwnEnabled");
+      const autoFriendEnabled = document.getElementById("autoFriendEnabled");
+      const autoRefreshFriendList = document.getElementById("autoRefreshFriendList");
+      const autoReturnHome = document.getElementById("autoReturnHome");
+      const autoOwnIntervalSec = document.getElementById("autoOwnIntervalSec");
+      const autoFriendIntervalSec = document.getElementById("autoFriendIntervalSec");
+      const autoMaxFriends = document.getElementById("autoMaxFriends");
+      const autoEnterWaitMs = document.getElementById("autoEnterWaitMs");
+      const autoActionWaitMs = document.getElementById("autoActionWaitMs");
+      const autoStopOnError = document.getElementById("autoStopOnError");
+
+      let ws = null;
+      let reqId = 0;
+      let farmConfig = {};
+      let friendListCache = [];
+      let autoFarmState = null;
+      const pendingTags = new Map();
+
+      function appendLine(msg, obj) {
+        const t = new Date().toISOString().slice(11, 23);
+        let line = "[" + t + "] " + msg;
+        if (obj !== undefined) {
+          line += "\n" + (typeof obj === "string" ? obj : JSON.stringify(obj, null, 2));
+        }
+        logEl.textContent += (logEl.textContent ? "\n\n" : "") + line;
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      function buildFriendLabel(item) {
+        if (!item) return "未知好友";
+        var parts = [];
+        parts.push(item.displayName || item.name || item.remark || ("gid=" + item.gid));
+        if (item.gid != null) parts.push("gid=" + item.gid);
+        if (item.level != null && !Number.isNaN(Number(item.level))) parts.push("Lv." + item.level);
+        var work = item.workCounts || {};
+        if ((work.collect || 0) > 0) parts.push("可摘" + work.collect);
+        if ((work.water || 0) > 0) parts.push("浇水" + work.water);
+        if ((work.eraseGrass || 0) > 0) parts.push("除草" + work.eraseGrass);
+        if ((work.killBug || 0) > 0) parts.push("杀虫" + work.killBug);
+        return parts.join(" | ");
+      }
+
+      function renderFriendList(payload) {
+        friendListCache = payload && Array.isArray(payload.list) ? payload.list : [];
+        selFriend.innerHTML = "";
+
+        var placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = friendListCache.length ? "选择好友" : "没有可用好友";
+        selFriend.appendChild(placeholder);
+
+        friendListCache.forEach(function (item) {
+          var opt = document.createElement("option");
+          opt.value = String(item.gid);
+          opt.textContent = buildFriendLabel(item);
+          selFriend.appendChild(opt);
+        });
+
+        selFriend.disabled = friendListCache.length === 0;
+
+        var counts = payload && payload.counts ? payload.counts : {};
+        var work = payload && payload.workCounts ? payload.workCounts : {};
+        var msg = friendListCache.length
+          ? "好友 " + friendListCache.length + " 人；可摘好友 " + (counts.collectableFriends || 0) +
+            "，浇水 " + (counts.waterableFriends || 0) +
+            "，除草 " + (counts.eraseGrassFriends || 0) +
+            "，杀虫 " + (counts.killBugFriends || 0) +
+            "；总地块：摘 " + (work.collect || 0) +
+            " / 水 " + (work.water || 0) +
+            " / 草 " + (work.eraseGrass || 0) +
+            " / 虫 " + (work.killBug || 0)
+          : "好友列表为空";
+        if (payload && payload.refreshError) {
+          msg += "；刷新错误: " + payload.refreshError;
+        }
+        txtFriendSummary.textContent = msg;
+      }
+
+      function applyAutoFarmConfigToForm(cfg) {
+        cfg = cfg || {};
+        autoOwnEnabled.checked = !!cfg.autoFarmOwnEnabled;
+        autoFriendEnabled.checked = !!cfg.autoFarmFriendEnabled;
+        autoRefreshFriendList.checked = cfg.autoFarmRefreshFriendList !== false;
+        autoReturnHome.checked = cfg.autoFarmReturnHome !== false;
+        autoOwnIntervalSec.value = cfg.autoFarmOwnIntervalSec != null ? cfg.autoFarmOwnIntervalSec : 30;
+        autoFriendIntervalSec.value = cfg.autoFarmFriendIntervalSec != null ? cfg.autoFarmFriendIntervalSec : 90;
+        autoMaxFriends.value = cfg.autoFarmMaxFriends != null ? cfg.autoFarmMaxFriends : 5;
+        autoEnterWaitMs.value = cfg.autoFarmEnterWaitMs != null ? cfg.autoFarmEnterWaitMs : 1800;
+        autoActionWaitMs.value = cfg.autoFarmActionWaitMs != null ? cfg.autoFarmActionWaitMs : 1200;
+        autoStopOnError.checked = !!cfg.autoFarmStopOnError;
+      }
+
+      function gatherAutoFarmConfig() {
+        return {
+          autoFarmOwnEnabled: !!autoOwnEnabled.checked,
+          autoFarmFriendEnabled: !!autoFriendEnabled.checked,
+          autoFarmRefreshFriendList: !!autoRefreshFriendList.checked,
+          autoFarmReturnHome: !!autoReturnHome.checked,
+          autoFarmOwnIntervalSec: Number(autoOwnIntervalSec.value || 30),
+          autoFarmFriendIntervalSec: Number(autoFriendIntervalSec.value || 90),
+          autoFarmMaxFriends: Number(autoMaxFriends.value || 5),
+          autoFarmEnterWaitMs: Number(autoEnterWaitMs.value || 1800),
+          autoFarmActionWaitMs: Number(autoActionWaitMs.value || 1200),
+          autoFarmStopOnError: !!autoStopOnError.checked,
+        };
+      }
+
+      function renderAutoFarmState(state, syncForm) {
+        autoFarmState = state || null;
+        if (syncForm && state && state.config) {
+          applyAutoFarmConfigToForm(state.config);
+        }
+
+        if (!state) {
+          txtAutoFarmState.textContent = "未加载自动化状态";
+          logAutoFarm.textContent = "";
+          return;
+        }
+
+        var parts = [];
+        parts.push(state.running ? "运行中" : "已停止");
+        if (state.busy) parts.push("执行中");
+        if (state.nextRunAt) parts.push("下次: " + state.nextRunAt.replace("T", " ").replace("Z", ""));
+        if (state.lastFinishedAt) parts.push("上次完成: " + state.lastFinishedAt.replace("T", " ").replace("Z", ""));
+        if (state.lastError) parts.push("最近错误: " + state.lastError);
+        txtAutoFarmState.textContent = parts.join(" · ");
+
+        var lines = [];
+        var events = Array.isArray(state.recentEvents) ? state.recentEvents : [];
+        events.forEach(function (item) {
+          var line = "[" + (item.time || "") + "] " + String(item.level || "info").toUpperCase() + " " + (item.message || "");
+          if (item.extra !== undefined) line += "\n" + JSON.stringify(item.extra, null, 2);
+          lines.push(line);
+        });
+        if (state.lastResult) {
+          lines.push("[LAST RESULT]\n" + JSON.stringify(state.lastResult, null, 2));
+        }
+        logAutoFarm.textContent = lines.join("\n\n");
+      }
+
+      function loadAutoFarmState(syncForm) {
+        return fetch("/api/auto-farm")
+          .then(function (r) { return r.json(); })
+          .then(function (j) {
+            if (j.ok && j.data) {
+              renderAutoFarmState(j.data, !!syncForm);
+            } else {
+              appendLine("自动化状态加载失败", j);
+            }
+            return j;
+          })
+          .catch(function (e) {
+            appendLine("自动化状态加载失败", String(e));
+          });
+      }
+
+      function sendAutoFarmAction(action) {
+        var cfg = gatherAutoFarmConfig();
+        Object.assign(farmConfig, cfg);
+        return fetch("/api/auto-farm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: action, config: cfg }),
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (j) {
+            if (j.ok && j.data) {
+              if (j.savedConfig) {
+                farmConfig = Object.assign({}, farmConfig, j.savedConfig);
+              }
+              renderAutoFarmState(j.data, true);
+              appendLine("自动化操作完成: " + action, j.data);
+            } else {
+              appendLine("自动化操作失败: " + action, j);
+            }
+            return j;
+          })
+          .catch(function (e) {
+            appendLine("自动化操作失败: " + action, String(e));
+          });
+      }
+
+      function setWs(ok) {
+        dotWs.className = "dot " + (ok ? "ok" : "bad");
+        txtWs.textContent = ok ? "已连接 " + wsUrl() : "未连接";
+      }
+
+      function wsUrl() {
+        const proto = location.protocol === "https:" ? "wss:" : "ws:";
+        return proto + "//" + location.host + WS_PATH;
+      }
+
+      function connect() {
+        if (ws && ws.readyState === WebSocket.OPEN) return;
+        ws = new WebSocket(wsUrl());
+        ws.onopen = function () {
+          setWs(true);
+          appendLine("WebSocket 已连接（将自动 ping 以建立 CDP 会话并开始探测上下文）");
+          send({ op: "ping" });
+        };
+        ws.onclose = function () {
+          setWs(false);
+          appendLine("WebSocket 断开，5s 后重试");
+          setTimeout(connect, 5000);
+        };
+        ws.onerror = function () {
+          appendLine("WebSocket 错误");
+        };
+        ws.onmessage = function (ev) {
+          try {
+            const data = JSON.parse(ev.data);
+            appendLine("← 收到", data);
+            var tag = data && data.id != null ? pendingTags.get(String(data.id)) : null;
+            if (data && data.id != null) pendingTags.delete(String(data.id));
+            if (tag != null) {
+              try {
+                handleWsResult(data, tag);
+              } catch (_) {}
+            }
+          } catch (e) {
+            appendLine("← 原始", ev.data);
+          }
+        };
+      }
+
+      function handleWsResult(msg, code) {
+        if (!code) return;
+        if (!msg.ok) {
+          if (code === "friends") {
+            txtFriendSummary.textContent = "获取好友列表失败: " + (msg.error || "?");
+          }
+          stGameCtl.textContent = "错误: " + (msg.error || "?");
+          return;
+        }
+        var r = msg.result;
+        if (code === "typeof") {
+          stGameCtl.textContent = typeof r === "string" ? "typeof gameCtl = " + r : JSON.stringify(r);
+        } else if (code === "land") {
+          stGameCtl.textContent = "已拉取土地摘要（见日志）";
+        } else if (code === "friends") {
+          renderFriendList(r);
+          stGameCtl.textContent = "已拉取好友列表（见日志）";
+        } else if (code === "enterFriend") {
+          var friend = r && r.friend ? r.friend : null;
+          stGameCtl.textContent = friend
+            ? "已发起进入好友农场: " + (friend.displayName || friend.name || friend.gid)
+            : "已发起进入好友农场";
+        }
+      }
+
+      function send(payload, tag) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          appendLine("未连接", payload);
+          return;
+        }
+        const id = ++reqId;
+        if (tag !== undefined && tag !== null) pendingTags.set(String(id), tag);
+        const body = Object.assign({ id: String(id) }, payload);
+        appendLine("→ 发送", body);
+        ws.send(JSON.stringify(body));
+      }
+
+      function fetchHealth() {
+        fetch("/api/health")
+          .then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            return r.json();
+          })
+          .then(function (j) {
+            dotHttp.className = "dot ok";
+            txtHttp.textContent = "运行中 · " + j.uptimeSec + "s";
+            var c = j.cdp;
+            var parts = [];
+            if (!j.cdpSessionInitialized) {
+              parts.push("尚未建立 CDP 会话（未发过 WS 指令）");
+            } else if (c) {
+              if (c.mode) parts.push(c.mode);
+              if (c.prepareState) parts.push("状态=" + c.prepareState);
+              if (c.transportConnected === false) parts.push("小游戏未连调试桥");
+              else if (c.transportConnected === true) parts.push("小游戏已连调试桥");
+              if (c.contextReady) parts.push("上下文就绪");
+              else parts.push("上下文未就绪");
+              if (c.executionContextId != null) parts.push("ctxId=" + c.executionContextId);
+              if (c.currentJsContextId) parts.push("jsctx=" + c.currentJsContextId);
+              if (c.prepareError) parts.push("错误: " + c.prepareError);
+            }
+            stCdp.textContent = parts.length ? parts.join(" · ") : "—";
+          })
+          .catch(function () {
+            dotHttp.className = "dot bad";
+            txtHttp.textContent = "无法访问 /api/health";
+            stCdp.textContent = "—";
+          });
+      }
+
+      function refreshGameCtl() {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          stGameCtl.textContent = "请先连接 WebSocket";
+          return;
+        }
+        send({ op: "eval", code: "return typeof gameCtl" }, "typeof");
+      }
+
+      document.getElementById("btnPing").onclick = function () {
+        send({ op: "ping" });
+      };
+      document.getElementById("btnInject").onclick = function () {
+        send({ op: "injectFile", path: "button.js" });
+      };
+      document.getElementById("btnCheck").onclick = function () {
+        refreshGameCtl();
+      };
+      document.getElementById("btnLand").onclick = function () {
+        send({
+          op: "eval",
+          code: "return await gameCtl.getFarmStatus({ includeGrids: true });",
+        }, "land");
+      };
+      document.getElementById("btnFriends").onclick = function () {
+        send({
+          op: "call",
+          path: "gameCtl.getFriendList",
+          args: [{ refresh: true }],
+        }, "friends");
+      };
+      document.getElementById("btnEnterFriend").onclick = function () {
+        var manual = String(iptFriendTarget.value || "").trim();
+        var target = manual || String(selFriend.value || "").trim();
+        if (!target) {
+          appendLine("请输入 gid / 名字 / 备注，或先从下拉框选择好友");
+          return;
+        }
+        send({
+          op: "call",
+          path: "gameCtl.enterFriendFarm",
+          args: [/^\d+$/.test(target) ? Number(target) : target],
+        }, "enterFriend");
+      };
+      document.getElementById("btnRefreshGame").onclick = refreshGameCtl;
+      document.getElementById("btnClear").onclick = function () {
+        logEl.textContent = "";
+      };
+
+      document.querySelector(".tabs").addEventListener("click", function (e) {
+        var btn = e.target.closest("button[data-tab]");
+        if (!btn) return;
+        var tab = btn.getAttribute("data-tab");
+        document.querySelectorAll(".tabs button").forEach(function (b) {
+          b.classList.toggle("on", b === btn);
+        });
+        document.querySelectorAll(".panel").forEach(function (p) {
+          p.classList.toggle("on", p.getAttribute("data-tab") === tab);
+        });
+      });
+
+      function renderSwitches() {
+        var box = document.getElementById("farmSwitches");
+        box.innerHTML = "";
+        FARM_KEYS.forEach(function (def) {
+          var row = document.createElement("div");
+          row.className = "sw";
+          var on = !!farmConfig[def.key];
+          row.innerHTML =
+            "<label><span>" +
+            def.label +
+            "</span><small>" +
+            def.help +
+            "</small></label><input type=\"checkbox\" data-key=\"" +
+            def.key +
+            "\" " +
+            (on ? "checked" : "") +
+            " />";
+          box.appendChild(row);
+        });
+        box.querySelectorAll('input[type="checkbox"]').forEach(function (inp) {
+          inp.addEventListener("change", function () {
+            var key = inp.getAttribute("data-key");
+            farmConfig[key] = inp.checked;
+            saveFarmConfigRemote();
+          });
+        });
+      }
+
+      function saveFarmConfigRemote() {
+        fetch("/api/farm-config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(farmConfig),
+        })
+          .then(function (r) {
+            return r.json();
+          })
+          .then(function (j) {
+            if (j.ok && j.data) {
+              farmConfig = j.data;
+              applyAutoFarmConfigToForm(farmConfig);
+              try {
+                localStorage.setItem(LS_CFG_CACHE, JSON.stringify(farmConfig));
+              } catch (e) {}
+              appendLine("配置已保存", farmConfig);
+            } else {
+              appendLine("保存失败", j);
+            }
+          })
+          .catch(function (e) {
+            appendLine("保存失败", String(e));
+          });
+      }
+
+      function loadFarmConfig() {
+        fetch("/api/farm-config")
+          .then(function (r) {
+            return r.json();
+          })
+          .then(function (j) {
+            if (j.ok && j.data) {
+              farmConfig = j.data;
+              renderSwitches();
+              applyAutoFarmConfigToForm(farmConfig);
+              try {
+                localStorage.setItem(LS_CFG_CACHE, JSON.stringify(farmConfig));
+              } catch (e) {}
+            }
+          })
+          .catch(function () {
+            try {
+              var c = localStorage.getItem(LS_CFG_CACHE);
+              if (c) {
+                farmConfig = JSON.parse(c);
+                renderSwitches();
+                applyAutoFarmConfigToForm(farmConfig);
+              }
+            } catch (e) {}
+          });
+      }
+
+      document.getElementById("btnReloadConfig").onclick = loadFarmConfig;
+      document.getElementById("btnAutoSave").onclick = function () {
+        Object.assign(farmConfig, gatherAutoFarmConfig());
+        saveFarmConfigRemote();
+      };
+      document.getElementById("btnAutoRunOnce").onclick = function () {
+        sendAutoFarmAction("runOnce");
+      };
+      document.getElementById("btnAutoStart").onclick = function () {
+        sendAutoFarmAction("start");
+      };
+      document.getElementById("btnAutoStop").onclick = function () {
+        fetch("/api/auto-farm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "stop" }),
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (j) {
+            if (j.ok && j.data) {
+              renderAutoFarmState(j.data, false);
+              appendLine("自动化已停止", j.data);
+            } else {
+              appendLine("停止自动化失败", j);
+            }
+          })
+          .catch(function (e) {
+            appendLine("停止自动化失败", String(e));
+          });
+      };
+      document.getElementById("btnAutoRefresh").onclick = function () {
+        loadAutoFarmState(false);
+      };
+
+      document.getElementById("btnTheme").onclick = function () {
+        var cur = document.documentElement.getAttribute("data-theme") || "dark";
+        var next = cur === "dark" ? "light" : "dark";
+        document.documentElement.setAttribute("data-theme", next);
+        try {
+          localStorage.setItem(LS_THEME, next);
+        } catch (e) {}
+      };
+      try {
+        var t = localStorage.getItem(LS_THEME);
+        if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+
+      connect();
+      fetchHealth();
+      setInterval(fetchHealth, 5000);
+      loadFarmConfig();
+      loadAutoFarmState(true);
+      setInterval(function () { loadAutoFarmState(false); }, 5000);
+    })();
+  </script>
+</body>
+</html>
