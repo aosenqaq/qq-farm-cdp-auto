@@ -103,6 +103,7 @@ class AutoFarmManager {
     this.lastError = null;
     this.lastResult = null;
     this.recentEvents = [];
+    // 仅保存在当前 Node 进程内存里；不做账号隔离，但会按本地日期自动清空。
     this.careExpLimitState = null;
     this.config = normalizeAutoFarmConfig({});
   }
@@ -218,6 +219,12 @@ class AutoFarmManager {
     return Math.max(250, Math.min(...delays));
   }
 
+  _markRunCompletedAt(due, completedAtMs) {
+    const ts = Number.isFinite(Number(completedAtMs)) ? Number(completedAtMs) : Date.now();
+    if (due && due.ownDue) this.lastOwnRunAt = ts;
+    if (due && due.friendDue) this.lastFriendRunAt = ts;
+  }
+
   _getDueFlags(now, force) {
     const ownDue = !!this.config.autoFarmOwnEnabled && (
       force || this.lastOwnRunAt <= 0 || now - this.lastOwnRunAt >= this.config.autoFarmOwnIntervalSec * 1000
@@ -266,7 +273,11 @@ class AutoFarmManager {
       expDelta: info.result && info.result.expDelta != null ? info.result.expDelta : null,
       expBefore: info.result && info.result.expBefore != null ? info.result.expBefore : null,
       expAfter: info.result && info.result.expAfter != null ? info.result.expAfter : null,
-      reason: info.result && info.result.reason ? info.result.reason : "no_exp_gain",
+      reason: info.result && info.result.noExpGainReason
+        ? info.result.noExpGainReason
+        : info.result && info.result.reason
+          ? info.result.reason
+          : "no_exp_gain",
     };
     const prev = this.careExpLimitState;
     const changed = !prev
@@ -353,8 +364,6 @@ class AutoFarmManager {
     this.busy = true;
     this.lastStartedAt = new Date().toISOString();
     this.lastError = null;
-    if (due.ownDue) this.lastOwnRunAt = now;
-    if (due.friendDue) this.lastFriendRunAt = now;
 
     try {
       const session = await this.ensureSession();
@@ -387,7 +396,9 @@ class AutoFarmManager {
         options: cycleOpts,
       });
       this._updateCareExpLimitFromResult(result, now);
-      this.lastFinishedAt = new Date().toISOString();
+      const completedAtMs = Date.now();
+      this._markRunCompletedAt(due, completedAtMs);
+      this.lastFinishedAt = new Date(completedAtMs).toISOString();
       this.lastResult = {
         injected: injectState.injected,
         due,
@@ -406,7 +417,9 @@ class AutoFarmManager {
       return this.getState();
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      this.lastFinishedAt = new Date().toISOString();
+      const completedAtMs = Date.now();
+      this._markRunCompletedAt(due, completedAtMs);
+      this.lastFinishedAt = new Date(completedAtMs).toISOString();
       this.lastError = err.message;
       this._pushEvent("error", `执行失败: ${err.message}`);
       throw err;

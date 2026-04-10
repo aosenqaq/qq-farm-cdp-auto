@@ -985,7 +985,7 @@ import {
         var actions = Array.isArray(own.tasks.actions) ? own.tasks.actions : [];
         if (actions.length === 0) {
           if (state.careExpLimitState && own.tasks.careMode === "batch_land_exp_check") {
-            lines.push(ts + "自己农场：共享经验已满，今日打理跳过");
+            lines.push(ts + "自己农场：共享经验已满，今日打理跳过（运行时标记）");
           } else {
             lines.push(ts + "自己农场：无待处理项");
           }
@@ -1154,7 +1154,7 @@ import {
     if (state.lastError) parts.push("最近错误: " + state.lastError);
     if (state.careExpLimitState && state.careExpLimitState.dateKey) {
       parts.push(
-        (state.careExpLimitState.sourceLabel || "打理") + "经验已满: " + state.careExpLimitState.dateKey,
+        (state.careExpLimitState.sourceLabel || "打理") + "经验已满(运行时/当日): " + state.careExpLimitState.dateKey,
       );
     }
     txtAutoFarmState.textContent = parts.join(" · ");

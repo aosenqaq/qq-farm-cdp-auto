@@ -64,6 +64,14 @@ function makeSeedKey(source, item) {
   return `${source}:${toPositiveNumber(item && item.itemId) || toPositiveNumber(item && item.seedId) || toPositiveNumber(item && item.goodsId) || 0}`;
 }
 
+function isPlantableEmptyGrid(grid) {
+  return !!(
+    grid
+    && grid.stageKind === "empty"
+    && grid.interactable === true
+  );
+}
+
 function decorateSeedList(list, source, opts) {
   const availableOnly = !opts || opts.availableOnly !== false;
   return (Array.isArray(list) ? list : [])
@@ -168,7 +176,7 @@ function collectEmptyLandIds(status) {
     const grid = grids[i];
     const landId = toPositiveNumber(grid && grid.landId);
     if (landId == null || seen.has(landId)) continue;
-    if (grid && grid.stageKind === "empty") {
+    if (isPlantableEmptyGrid(grid)) {
       seen.add(landId);
       out.push(landId);
     }

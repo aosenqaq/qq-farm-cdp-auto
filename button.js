@@ -1461,6 +1461,189 @@
     return opts.silent ? exp : out(exp);
   }
 
+  function buildSelfExpWaitResult(expBefore, startedAt, state, opts) {
+    const expAfter = readSelfExpValue();
+    const expDelta = expBefore != null && expAfter != null ? expAfter - expBefore : null;
+    const expChanged = expDelta != null ? expDelta !== 0 : false;
+    const expEventCount = state && Number.isFinite(Number(state.expEventCount))
+      ? Number(state.expEventCount)
+      : 0;
+    const basicInfoEventCount = state && Number.isFinite(Number(state.basicInfoEventCount))
+      ? Number(state.basicInfoEventCount)
+      : 0;
+    const signalCount = expEventCount + basicInfoEventCount;
+    const listenerAttached = !!(state && state.listenerAttached);
+    let reason = opts && opts.reason ? String(opts.reason) : '';
+    if (!reason) {
+      if (expChanged) {
+        reason = 'exp_changed';
+      } else if (!listenerAttached) {
+        reason = 'listener_unavailable';
+      } else if (expEventCount > 0) {
+        reason = 'exp_event_without_readable_delta';
+      } else if (basicInfoEventCount > 0) {
+        reason = 'basic_info_changed_without_readable_delta';
+      } else {
+        reason = 'no_exp_signal';
+      }
+    }
+    return {
+      ok: true,
+      expBefore,
+      expAfter,
+      expDelta,
+      expChanged,
+      elapsedMs: Date.now() - startedAt,
+      expEventCount,
+      basicInfoEventCount,
+      signalCount,
+      listenerAttached,
+      noSignal: signalCount === 0,
+      reason
+    };
+  }
+
+  function createSkippedSelfExpWaitResult(expBefore, reason) {
+    const startedAt = Date.now();
+    return buildSelfExpWaitResult(expBefore, startedAt, {
+      expEventCount: 0,
+      basicInfoEventCount: 0,
+      listenerAttached: false
+    }, {
+      reason: reason || 'exp_check_skipped'
+    });
+  }
+
+  function createSelfExpWatcher(beforeExp, opts) {
+    opts = opts || {};
+    const timeoutMs = opts.timeoutMs == null ? 1200 : Math.max(0, Number(opts.timeoutMs) || 0);
+    const pollMs = opts.pollMs == null ? 60 : Math.max(10, Number(opts.pollMs) || 10);
+    const settleMs = opts.settleMs == null ? 80 : Math.max(0, Number(opts.settleMs) || 0);
+    const expBefore = Number.isFinite(Number(beforeExp)) ? Number(beforeExp) : readSelfExpValue();
+    const startedAt = Date.now();
+    const state = {
+      expEventCount: 0,
+      basicInfoEventCount: 0,
+      pendingWake: false,
+      listenerAttached: false
+    };
+    let message = null;
+    let closed = false;
+
+    const onExpChange = function () {
+      state.expEventCount += 1;
+      state.pendingWake = true;
+    };
+    const onBasicInfoChanged = function () {
+      state.basicInfoEventCount += 1;
+      state.pendingWake = true;
+    };
+
+    try {
+      message = getOopsMessage();
+    } catch (_) {
+      message = null;
+    }
+
+    if (message) {
+      const attachedExp = addMessageListener(message, 'ExpChange', onExpChange);
+      const attachedBasic = addMessageListener(message, 'BasicInfoChanged', onBasicInfoChanged);
+      state.listenerAttached = !!(attachedExp || attachedBasic);
+    }
+
+    function close() {
+      if (closed) return;
+      closed = true;
+      if (message) {
+        removeMessageListener(message, 'ExpChange', onExpChange);
+        removeMessageListener(message, 'BasicInfoChanged', onBasicInfoChanged);
+      }
+    }
+
+    function snapshot(reason) {
+      return buildSelfExpWaitResult(expBefore, startedAt, state, { reason });
+    }
+
+    async function waitForSettled() {
+      try {
+        while (true) {
+          const current = snapshot();
+          if (current.expChanged) {
+            if (settleMs > 0) {
+              await wait(settleMs);
+            }
+            return snapshot();
+          }
+
+          const elapsedMs = Date.now() - startedAt;
+          if (elapsedMs >= timeoutMs) {
+            return current;
+          }
+
+          const remainingMs = Math.max(0, timeoutMs - elapsedMs);
+          const delayMs = state.pendingWake
+            ? Math.min(20, remainingMs)
+            : Math.min(pollMs, remainingMs);
+          state.pendingWake = false;
+          await wait(delayMs);
+        }
+      } finally {
+        close();
+      }
+    }
+
+    return {
+      expBefore,
+      startedAt,
+      waitForSettled,
+      snapshot,
+      close,
+      listenerAttached: function () {
+        return state.listenerAttached;
+      }
+    };
+  }
+
+  function deriveCareExpOutcome(verify, expWait) {
+    const expBefore = expWait && expWait.expBefore != null ? expWait.expBefore : null;
+    const expAfter = expWait && expWait.expAfter != null ? expWait.expAfter : null;
+    const expDelta = expWait && expWait.expDelta != null ? expWait.expDelta : null;
+    const expReadable = expBefore != null && expAfter != null;
+    const expEventCount = expWait && Number.isFinite(Number(expWait.expEventCount))
+      ? Number(expWait.expEventCount)
+      : 0;
+    const basicInfoEventCount = expWait && Number.isFinite(Number(expWait.basicInfoEventCount))
+      ? Number(expWait.basicInfoEventCount)
+      : 0;
+    const expSignalObserved = expEventCount > 0 || basicInfoEventCount > 0;
+    const noExpGainByDelta = expReadable && expDelta === 0;
+    const noExpGainBySignal = !expReadable
+      && !!(verify && verify.ok)
+      && !!(expWait && expWait.listenerAttached)
+      && !expSignalObserved;
+    const noExpGain = !!(verify && verify.ok && (noExpGainByDelta || noExpGainBySignal));
+    const noExpGainReason = noExpGain
+      ? (expWait && expWait.reason ? expWait.reason : (noExpGainBySignal ? 'no_exp_signal' : 'exp_not_changed'))
+      : null;
+    const noExpGainMode = noExpGain
+      ? (noExpGainBySignal ? 'signal_absence' : 'exp_delta')
+      : null;
+    return {
+      expBefore,
+      expAfter,
+      expDelta,
+      expReadable,
+      expChanged: !!(expWait && expWait.expChanged),
+      expEventCount,
+      basicInfoEventCount,
+      expSignalObserved,
+      noExpGain,
+      noExpGainReason,
+      noExpGainMode,
+      expLimitReachedGuess: noExpGain
+    };
+  }
+
   function addMessageListener(message, eventName, handler) {
     if (!message || !eventName || typeof handler !== 'function') return false;
     if (typeof message.on === 'function') {
@@ -1488,80 +1671,8 @@
   }
 
   async function waitForSelfExpChange(beforeExp, opts) {
-    opts = opts || {};
-    const timeoutMs = opts.timeoutMs == null ? 1200 : Math.max(0, Number(opts.timeoutMs) || 0);
-    const pollMs = opts.pollMs == null ? 60 : Math.max(10, Number(opts.pollMs) || 10);
-    const settleMs = opts.settleMs == null ? 80 : Math.max(0, Number(opts.settleMs) || 0);
-    const expBefore = Number.isFinite(Number(beforeExp)) ? Number(beforeExp) : readSelfExpValue();
-    const startedAt = Date.now();
-    let expAfter = readSelfExpValue();
-    let expEventCount = 0;
-    let basicInfoEventCount = 0;
-    let pendingWake = false;
-    let message = null;
-
-    const onExpChange = function () {
-      expEventCount += 1;
-      pendingWake = true;
-    };
-    const onBasicInfoChanged = function () {
-      basicInfoEventCount += 1;
-      pendingWake = true;
-    };
-
-    try {
-      message = getOopsMessage();
-    } catch (_) {
-      message = null;
-    }
-
-    if (message) {
-      addMessageListener(message, 'ExpChange', onExpChange);
-      addMessageListener(message, 'BasicInfoChanged', onBasicInfoChanged);
-    }
-
-    try {
-      while (true) {
-        expAfter = readSelfExpValue();
-        const expChanged = expBefore != null && expAfter != null && expAfter !== expBefore;
-        if (expChanged) {
-          if (settleMs > 0) {
-            await wait(settleMs);
-            const settledExp = readSelfExpValue();
-            if (settledExp != null) expAfter = settledExp;
-          }
-          break;
-        }
-
-        const elapsedMs = Date.now() - startedAt;
-        if (elapsedMs >= timeoutMs) break;
-
-        const remainingMs = Math.max(0, timeoutMs - elapsedMs);
-        const delayMs = pendingWake ? Math.min(20, remainingMs) : Math.min(pollMs, remainingMs);
-        pendingWake = false;
-        await wait(delayMs);
-      }
-    } finally {
-      if (message) {
-        removeMessageListener(message, 'ExpChange', onExpChange);
-        removeMessageListener(message, 'BasicInfoChanged', onBasicInfoChanged);
-      }
-    }
-
-    expAfter = readSelfExpValue();
-    const expDelta = expBefore != null && expAfter != null ? expAfter - expBefore : null;
-    const expChanged = expDelta != null ? expDelta !== 0 : false;
-    return {
-      ok: true,
-      expBefore,
-      expAfter,
-      expDelta,
-      expChanged,
-      elapsedMs: Date.now() - startedAt,
-      expEventCount,
-      basicInfoEventCount,
-      reason: expChanged ? 'exp_changed' : 'exp_not_changed'
-    };
+    const watcher = createSelfExpWatcher(beforeExp, opts);
+    return await watcher.waitForSettled();
   }
 
   function classifyOwnershipByUiFallback(evidence) {
@@ -4139,6 +4250,14 @@
     return null;
   }
 
+  function isPlantableEmptyGrid(grid) {
+    return !!(
+      grid &&
+      grid.stageKind === 'empty' &&
+      grid.interactable === true
+    );
+  }
+
   async function waitForLandPlantResult(landId, opts) {
     opts = opts || {};
     const timeoutMs = opts.timeoutMs == null ? 2500 : Math.max(0, Number(opts.timeoutMs) || 0);
@@ -4469,9 +4588,23 @@
       };
     }
 
-    const expBefore = readSelfExpValue();
-    const verify = await dispatchSingleLandCareAction(spec.kind, targetLandId, opts);
+    const expWatcher = opts.detectExp !== false
+      ? createSelfExpWatcher(null, {
+          timeoutMs: opts.expTimeoutMs,
+          pollMs: opts.expPollMs,
+          settleMs: opts.expSettleMs
+        })
+      : null;
+    const expBefore = expWatcher ? expWatcher.expBefore : readSelfExpValue();
+    let verify;
+    try {
+      verify = await dispatchSingleLandCareAction(spec.kind, targetLandId, opts);
+    } catch (error) {
+      if (expWatcher) expWatcher.close();
+      throw error;
+    }
     if (opts.waitForResult === false) {
+      if (expWatcher) expWatcher.close();
       return {
         ok: verify.ok,
         action: spec.action,
@@ -4490,33 +4623,16 @@
     }
 
     const after = getGridInfoByLandId(targetLandId);
-    const expWait = verify.ok && opts.detectExp !== false
-      ? await waitForSelfExpChange(expBefore, {
-          timeoutMs: opts.expTimeoutMs,
-          pollMs: opts.expPollMs,
-          settleMs: opts.expSettleMs
-        })
-      : (() => {
-          const expAfterFallback = readSelfExpValue();
-          const expDeltaFallback = expBefore != null && expAfterFallback != null
-            ? expAfterFallback - expBefore
-            : null;
-          return {
-          ok: true,
-          expBefore,
-          expAfter: expAfterFallback,
-          expDelta: expDeltaFallback,
-          expChanged: expDeltaFallback != null ? expDeltaFallback !== 0 : false,
-          elapsedMs: 0,
-          expEventCount: 0,
-          basicInfoEventCount: 0,
-          reason: 'exp_check_skipped'
-        };
-        })();
-    const expAfter = expWait.expAfter;
-    const expDelta = expWait.expDelta;
-    const expReadable = expBefore != null && expAfter != null;
-    const noExpGain = !!(verify.ok && expReadable && expDelta === 0);
+    const expWait = expWatcher
+      ? (verify.ok
+          ? await expWatcher.waitForSettled()
+          : (() => {
+              const snapshot = expWatcher.snapshot('exp_check_request_failed');
+              expWatcher.close();
+              return snapshot;
+            })())
+      : createSkippedSelfExpWaitResult(expBefore, 'exp_check_skipped');
+    const expOutcome = deriveCareExpOutcome(verify, expWait);
 
     return {
       ok: verify.ok,
@@ -4528,13 +4644,18 @@
       after,
       request: verify.request,
       verify,
-      expBefore,
-      expAfter,
-      expDelta,
-      expChanged: !!expWait.expChanged,
-      expReadable,
-      noExpGain,
-      expLimitReachedGuess: noExpGain,
+      expBefore: expOutcome.expBefore,
+      expAfter: expOutcome.expAfter,
+      expDelta: expOutcome.expDelta,
+      expChanged: expOutcome.expChanged,
+      expReadable: expOutcome.expReadable,
+      expEventCount: expOutcome.expEventCount,
+      basicInfoEventCount: expOutcome.basicInfoEventCount,
+      expSignalObserved: expOutcome.expSignalObserved,
+      noExpGain: expOutcome.noExpGain,
+      noExpGainReason: expOutcome.noExpGainReason,
+      noExpGainMode: expOutcome.noExpGainMode,
+      expLimitReachedGuess: expOutcome.expLimitReachedGuess,
       expWait
     };
   }
@@ -4545,9 +4666,23 @@
     const normalizedLandIds = normalizeLandIds(landIds);
     if (normalizedLandIds.length === 0) throw new Error('landIds required');
 
-    const expBefore = readSelfExpValue();
-    const verify = await dispatchBatchLandCareAction(spec.kind, normalizedLandIds, opts);
+    const expWatcher = opts.detectExp !== false
+      ? createSelfExpWatcher(null, {
+          timeoutMs: opts.expTimeoutMs,
+          pollMs: opts.expPollMs,
+          settleMs: opts.expSettleMs
+        })
+      : null;
+    const expBefore = expWatcher ? expWatcher.expBefore : readSelfExpValue();
+    let verify;
+    try {
+      verify = await dispatchBatchLandCareAction(spec.kind, normalizedLandIds, opts);
+    } catch (error) {
+      if (expWatcher) expWatcher.close();
+      throw error;
+    }
     if (opts.waitForResult === false) {
+      if (expWatcher) expWatcher.close();
       return {
         ok: verify.ok,
         action: spec.batchAction,
@@ -4575,34 +4710,16 @@
       afterStatus = null;
     }
 
-    const expWait = verify.ok && opts.detectExp !== false
-      ? await waitForSelfExpChange(expBefore, {
-          timeoutMs: opts.expTimeoutMs,
-          pollMs: opts.expPollMs,
-          settleMs: opts.expSettleMs
-        })
-      : (() => {
-          const expAfterFallback = readSelfExpValue();
-          const expDeltaFallback = expBefore != null && expAfterFallback != null
-            ? expAfterFallback - expBefore
-            : null;
-          return {
-            ok: true,
-            expBefore,
-            expAfter: expAfterFallback,
-            expDelta: expDeltaFallback,
-            expChanged: expDeltaFallback != null ? expDeltaFallback !== 0 : false,
-            elapsedMs: 0,
-            expEventCount: 0,
-            basicInfoEventCount: 0,
-            reason: 'exp_check_skipped'
-          };
-        })();
-
-    const expAfter = expWait.expAfter;
-    const expDelta = expWait.expDelta;
-    const expReadable = expBefore != null && expAfter != null;
-    const noExpGain = !!(verify.ok && expReadable && expDelta === 0);
+    const expWait = expWatcher
+      ? (verify.ok
+          ? await expWatcher.waitForSettled()
+          : (() => {
+              const snapshot = expWatcher.snapshot('exp_check_request_failed');
+              expWatcher.close();
+              return snapshot;
+            })())
+      : createSkippedSelfExpWaitResult(expBefore, 'exp_check_skipped');
+    const expOutcome = deriveCareExpOutcome(verify, expWait);
 
     return {
       ok: verify.ok,
@@ -4613,13 +4730,18 @@
       request: verify.request,
       verify,
       afterStatus,
-      expBefore,
-      expAfter,
-      expDelta,
-      expChanged: !!expWait.expChanged,
-      expReadable,
-      noExpGain,
-      expLimitReachedGuess: noExpGain,
+      expBefore: expOutcome.expBefore,
+      expAfter: expOutcome.expAfter,
+      expDelta: expOutcome.expDelta,
+      expChanged: expOutcome.expChanged,
+      expReadable: expOutcome.expReadable,
+      expEventCount: expOutcome.expEventCount,
+      basicInfoEventCount: expOutcome.basicInfoEventCount,
+      expSignalObserved: expOutcome.expSignalObserved,
+      noExpGain: expOutcome.noExpGain,
+      noExpGainReason: expOutcome.noExpGainReason,
+      noExpGainMode: expOutcome.noExpGainMode,
+      expLimitReachedGuess: expOutcome.expLimitReachedGuess,
       expWait
     };
   }
@@ -4681,6 +4803,16 @@
       return {
         ok: false,
         reason: 'land_not_empty',
+        landId: targetLandId,
+        seed: seedInfo,
+        before
+      };
+    }
+
+    if (!before.interactable) {
+      return {
+        ok: false,
+        reason: 'land_not_interactable',
         landId: targetLandId,
         seed: seedInfo,
         before
@@ -4875,10 +5007,10 @@
           requiredCount: seedInfo.plantSize
         };
       }
-      if (before.some(function (grid) { return !grid || grid.stageKind !== 'empty'; })) {
+      if (before.some(function (grid) { return !isPlantableEmptyGrid(grid); })) {
         return {
           ok: false,
-          reason: 'multi_land_target_not_empty',
+          reason: 'multi_land_target_not_plantable',
           seed: seedInfo,
           landIds: targetLandIds,
           before
@@ -4985,7 +5117,7 @@
       const grids = Array.isArray(status.grids) ? status.grids : [];
       for (let i = 0; i < grids.length; i++) {
         const g = grids[i];
-        if (g && g.stageKind === 'empty' && g.landId != null) {
+        if (isPlantableEmptyGrid(g) && g.landId != null) {
           emptyLandIds.push(g.landId);
         }
       }
