@@ -238,12 +238,27 @@ class AutoFarmManager {
 
   _updateCareExpLimitFromResult(result, now) {
     this._pruneCareExpLimit(now);
-    const tasks = result && result.ownFarm && result.ownFarm.tasks ? result.ownFarm.tasks : null;
-    if (!tasks || !tasks.careExpLimitReached) return;
-    const info = tasks.careExpLimitInfo && typeof tasks.careExpLimitInfo === "object"
-      ? tasks.careExpLimitInfo
-      : {};
+    const ownTasks = result && result.ownFarm && result.ownFarm.tasks ? result.ownFarm.tasks : null;
+    const friendSteal = result && result.friendSteal && typeof result.friendSteal === "object"
+      ? result.friendSteal
+      : null;
+    const source = ownTasks && ownTasks.careExpLimitReached
+      ? "own"
+      : friendSteal && friendSteal.careExpLimitReached
+        ? "friend"
+        : null;
+    if (!source) return;
+    const info = source === "own"
+      ? ownTasks && ownTasks.careExpLimitInfo && typeof ownTasks.careExpLimitInfo === "object"
+        ? ownTasks.careExpLimitInfo
+        : {}
+      : friendSteal && friendSteal.careExpLimitInfo && typeof friendSteal.careExpLimitInfo === "object"
+        ? friendSteal.careExpLimitInfo
+        : {};
+    const sourceLabel = source === "friend" ? "好友" : "自己";
     const nextState = {
+      source,
+      sourceLabel,
       dateKey: getLocalDateKey(now),
       detectedAt: new Date(now).toISOString(),
       key: info.key || null,
@@ -257,12 +272,13 @@ class AutoFarmManager {
     const changed = !prev
       || prev.dateKey !== nextState.dateKey
       || prev.key !== nextState.key
-      || prev.landId !== nextState.landId;
+      || prev.landId !== nextState.landId
+      || prev.source !== nextState.source;
     this.careExpLimitState = nextState;
     if (changed) {
       this._pushEvent(
         "info",
-        `共享经验疑似到上限，暂停打理: ${formatCareActionLabel(nextState.key)}${nextState.landId != null ? ` 地块${nextState.landId}` : ""}`,
+        `共享经验疑似到上限，暂停打理: ${sourceLabel}${formatCareActionLabel(nextState.key)}${nextState.landId != null ? ` 地块${nextState.landId}` : ""}`,
         nextState,
       );
     }

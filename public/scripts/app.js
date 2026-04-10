@@ -508,6 +508,11 @@ import {
     const work = payload && payload.workCounts ? payload.workCounts : {};
     let msg = friendListCache.length
       ? "好友 " + friendListCache.length + " 人；可偷好友 " + (counts.collectableFriends || 0) +
+        "，可帮好友 " + (
+          (Number(counts.waterableFriends) || 0)
+          + (Number(counts.eraseGrassFriends) || 0)
+          + (Number(counts.killBugFriends) || 0)
+        ) +
         "，可浇水 " + (counts.waterableFriends || 0) +
         "，可除草 " + (counts.eraseGrassFriends || 0) +
         "，可杀虫 " + (counts.killBugFriends || 0) +
@@ -1074,20 +1079,33 @@ import {
       var fs = result.friendSteal;
       if (fs) {
         var visits = Array.isArray(fs.visits) ? fs.visits : [];
-        if (visits.length === 0 && fs.stealableCandidates === 0) {
-          lines.push(ts + "好友偷菜：无可偷好友");
+        if (visits.length === 0 && (fs.actionableCandidates || 0) === 0) {
+          lines.push(ts + "好友农场：无可偷/可帮好友");
         }
         visits.forEach(function (v) {
           if (!v) return;
           var name = v.friend ? (v.friend.displayName || v.friend.name || v.friend.gid) : "?";
           if (!v.ok) {
             lines.push(ts + "好友 " + name + "：" + (v.error || v.reason || "失败"));
-          } else if (v.reason === "no_collectable_after_enter") {
-            lines.push(ts + "好友 " + name + "：无可摘，跳过");
-          } else if (v.collectBefore != null) {
-            lines.push(ts + "好友 " + name + "：摘取 " + v.collectBefore + " → " + (v.collectAfter || 0));
+          } else if (v.reason === "no_actionable_after_enter") {
+            lines.push(ts + "好友 " + name + "：进场后无可偷/可帮，跳过");
+          } else if (v.reason === "special_collect_only") {
+            lines.push(ts + "好友 " + name + "：仅补收特效成熟地块");
           } else {
-            lines.push(ts + "好友 " + name + "：已访问");
+            var actionTexts = [];
+            var friendActions = Array.isArray(v.tasks && v.tasks.actions) ? v.tasks.actions : [];
+            friendActions.forEach(function (a) {
+              if (!a || !a.ok) return;
+              if (a.key === "collect") {
+                actionTexts.push("摘取 " + (a.beforeCount || 0) + " → " + (a.afterCount || 0));
+                return;
+              }
+              actionTexts.push(formatCareActionLabel(a.key) + " " + (a.beforeCount || 0) + " → " + (a.afterCount || 0));
+            });
+            lines.push(ts + "好友 " + name + "：" + (actionTexts.length ? actionTexts.join("，") : "已访问"));
+            if (v.tasks && v.tasks.careExpLimitReached) {
+              lines.push(ts + "好友帮助经验上限：已触发，暂停后续打理");
+            }
           }
         });
       }
@@ -1135,7 +1153,9 @@ import {
     if (state.lastFinishedAt) parts.push("上次完成: " + formatDateTime(state.lastFinishedAt));
     if (state.lastError) parts.push("最近错误: " + state.lastError);
     if (state.careExpLimitState && state.careExpLimitState.dateKey) {
-      parts.push("打理经验已满: " + state.careExpLimitState.dateKey);
+      parts.push(
+        (state.careExpLimitState.sourceLabel || "打理") + "经验已满: " + state.careExpLimitState.dateKey,
+      );
     }
     txtAutoFarmState.textContent = parts.join(" · ");
     logAutoFarm.textContent = buildAutoFarmLogLines(state).join("\n");
