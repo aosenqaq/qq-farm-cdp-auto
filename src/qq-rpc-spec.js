@@ -32,6 +32,7 @@ const QQ_RPC_GAME_CTL_METHODS = Object.freeze([
   "inspectShopModelRuntime",
   "inspectShopUi",
   "autoPlant",
+  "autoReconnectIfNeeded",
 ]);
 
 const QQ_RPC_ALLOWED_PATHS = Object.freeze([

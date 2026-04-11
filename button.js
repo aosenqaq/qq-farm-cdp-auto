@@ -4261,7 +4261,299 @@
     throw new Error('oops.netWebSocket not found');
   }
 
-  const runtimeSpyState = {
+  // ── 掉线重连 ──────────────────────────────────────────────────────────────
+
+  const reconnectWatcherState = {
+    timer: null,
+    running: false,
+    intervalMs: 1200,
+    waitAfter: 120,
+    channelId: 0,
+    lastCheckAt: 0,
+    lastHandledAt: 0,
+    lastResult: null
+  };
+
+  function getNetNode(channelId) {
+    const netWebSocket = getNetWebSocket();
+    const resolvedChannelId = channelId == null
+      ? ((netWebSocket && netWebSocket.GAME_CHANNELID) == null ? 0 : Number(netWebSocket.GAME_CHANNELID) || 0)
+      : Number(channelId) || 0;
+    const channels = netWebSocket && netWebSocket._channels;
+    if (channels && typeof channels.get === 'function') {
+      const node = channels.get(resolvedChannelId);
+      if (node) return node;
+    }
+    if (Array.isArray(channels)) return channels[resolvedChannelId] || null;
+    if (channels && typeof channels === 'object') {
+      return channels[resolvedChannelId] || channels[String(resolvedChannelId)] || null;
+    }
+    return null;
+  }
+
+  function getNetNodeStateName(value) {
+    const state = value == null ? null : Number(value);
+    if (!Number.isFinite(state)) return value == null ? null : String(value);
+    if (state === 0) return 'None';
+    if (state === 1) return 'Init';
+    if (state === 2) return 'Closed';
+    if (state === 3) return 'Connecting';
+    if (state === 4) return 'Checking';
+    if (state === 5) return 'Working';
+    return String(state);
+  }
+
+  function summarizeWaitMessageMap(waitMap) {
+    let pendingKeys = 0, pendingCount = 0, oldestSendTime = 0, oldestMethod = null;
+    const visit = function (list, key) {
+      const items = Array.isArray(list) ? list : [];
+      if (items.length <= 0) return;
+      pendingKeys += 1;
+      pendingCount += items.length;
+      const first = items[0];
+      const sendTime = first && typeof first.sendtime === 'number' ? first.sendtime : 0;
+      if (sendTime > 0 && (oldestSendTime === 0 || sendTime < oldestSendTime)) {
+        oldestSendTime = sendTime;
+        oldestMethod = first && first.methName ? String(first.methName) : (key == null ? null : String(key));
+      }
+    };
+    if (waitMap && typeof waitMap.forEach === 'function') {
+      waitMap.forEach(function (list, key) { visit(list, key); });
+    } else if (waitMap && typeof waitMap === 'object') {
+      Object.keys(waitMap).forEach(function (key) { visit(waitMap[key], key); });
+    }
+    return { pendingKeys, pendingCount, oldestMethod, oldestPendingMs: oldestSendTime > 0 ? Math.max(0, Date.now() - oldestSendTime) : 0 };
+  }
+
+  function summarizeNetNode(node) {
+    if (!node) return null;
+    const rawState = typeof node.getState === 'function' ? node.getState() : node._state;
+    const waitSummary = summarizeWaitMessageMap(node._waitMessageMap);
+    return {
+      state: rawState == null ? null : rawState,
+      stateName: getNetNodeStateName(rawState),
+      url: node._url || null,
+      retryCount: node._retryCount == null ? null : Number(node._retryCount) || 0,
+      maxRetryCount: node._maxRetryCount == null ? null : Number(node._maxRetryCount) || 0,
+      isPromptShowing: !!node._isPromptShowing,
+      isWaitShowing: !!node._isWaitShowing,
+      hasSocket: !!node._socket,
+      socketReadyState: node._socket && node._socket.readyState != null ? node._socket.readyState : null,
+      clientSeq: node.clientSeq == null ? null : Number(node.clientSeq) || 0,
+      serverSeq: node.serverSeq == null ? null : Number(node.serverSeq) || 0,
+      pendingKeys: waitSummary.pendingKeys,
+      pendingCount: waitSummary.pendingCount,
+      oldestPendingMs: waitSummary.oldestPendingMs,
+      oldestMethod: waitSummary.oldestMethod
+    };
+  }
+
+  function findServerKickOutUiComp(opts) {
+    opts = opts || {};
+    const nodes = walk(scene());
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      if (opts.activeOnly !== false && !node.activeInHierarchy) continue;
+      const comp = findComponentByName(node, 'ServerKickOutUICom');
+      if (comp) return comp;
+    }
+    return null;
+  }
+
+  function summarizeServerKickOutUiComp(comp) {
+    if (!comp || !comp.node) return null;
+    const mode = comp.mode == null ? 0 : Number(comp.mode) || 0;
+    const normalContent = normalizeText(comp.normalcontent && comp.normalcontent.string);
+    const specialContent = normalizeText(comp.content && comp.content.string);
+    const operateContent = normalizeText(comp.operate && comp.operate.content);
+    return {
+      path: fullPath(comp.node),
+      mode,
+      active: !!comp.node.active,
+      activeInHierarchy: !!comp.node.activeInHierarchy,
+      title: normalizeText(comp.normaltitle && comp.normaltitle.string),
+      content: mode === 0 ? (normalContent || operateContent) : (specialContent || operateContent),
+      operateContent,
+      okWord: normalizeText(comp.normalokLabel && comp.normalokLabel.string) || normalizeText(comp.btnlabel && comp.btnlabel.string),
+      cancelWord: normalizeText(comp.normalcancelLabel && comp.normalcancelLabel.string),
+      okNodePath: comp.normalbtnOk && comp.normalbtnOk.node ? fullPath(comp.normalbtnOk.node) : null,
+      cancelNodePath: comp.normalbtnCancel && comp.normalbtnCancel.node ? fullPath(comp.normalbtnCancel.node) : null
+    };
+  }
+
+  function isReconnectPromptText(value) {
+    const text = normalizeMatchText(value);
+    if (!text) return false;
+    const reconnect = text.indexOf('重新连接') >= 0 || text.indexOf('重新链接') >= 0;
+    if (!reconnect) return false;
+    return text.indexOf('网络连接超时') >= 0 || text.indexOf('网络异常') >= 0 || text.indexOf('网络已断开') >= 0;
+  }
+
+  function getGameStateRuntime() {
+    const oops = resolveOops();
+    const candidates = [oops && oops.gameState, G.gameState, G.GameGlobal && G.GameGlobal.gameState];
+    for (let i = 0; i < candidates.length; i++) {
+      const value = candidates[i];
+      if (value && typeof value === 'object' && 'state' in value) return value;
+    }
+    return null;
+  }
+
+  function getReconnectPromptState(opts) {
+    opts = opts || {};
+    let netNode = null, serverKickOutComp = null, netError = null, uiError = null;
+    try { netNode = getNetNode(opts.channelId); } catch (error) { netError = error instanceof Error ? error.message : String(error); }
+    try { serverKickOutComp = findServerKickOutUiComp({ activeOnly: opts.activeOnly !== false }); } catch (error) { uiError = error instanceof Error ? error.message : String(error); }
+    const net = summarizeNetNode(netNode);
+    const ui = summarizeServerKickOutUiComp(serverKickOutComp);
+    const gameStateRuntime = getGameStateRuntime();
+    const promptByUi = !!(ui && isReconnectPromptText(ui.content || ui.operateContent));
+    const promptByNet = !!(net && net.isPromptShowing);
+    const payload = {
+      ok: true,
+      visible: promptByUi || promptByNet,
+      promptByUi, promptByNet, ui, net,
+      gameState: gameStateRuntime ? { state: gameStateRuntime.state || null, stateName: gameStateRuntime.stateName || normalizeText(gameStateRuntime.state) || null } : null
+    };
+    if (netError || uiError) {
+      payload.errors = {};
+      if (netError) payload.errors.net = netError;
+      if (uiError) payload.errors.ui = uiError;
+    }
+    return opts.silent ? payload : out(payload);
+  }
+
+  async function waitForReconnectRecovered(opts) {
+    opts = opts || {};
+    const timeoutMs = opts.timeoutMs == null ? 20000 : Math.max(0, Number(opts.timeoutMs) || 0);
+    const pollMs = opts.pollMs == null ? 250 : Math.max(50, Number(opts.pollMs) || 50);
+    const startedAt = Date.now();
+    let last = getReconnectPromptState({ silent: true, channelId: opts.channelId });
+    while (timeoutMs <= 0 || Date.now() - startedAt <= timeoutMs) {
+      last = getReconnectPromptState({ silent: true, channelId: opts.channelId });
+      const promptVisible = !!last.visible;
+      const gameState = normalizeText(last.gameState && last.gameState.state);
+      const netState = normalizeText(last.net && last.net.stateName);
+      const gameReady = !gameState || gameState === 'Game';
+      const netReady = !last.net || netState === 'Working';
+      if (!promptVisible && gameReady && netReady) {
+        const payload = { ok: true, waitedMs: Date.now() - startedAt, state: last };
+        return opts.silent ? payload : out(payload);
+      }
+      await wait(pollMs);
+    }
+    const payload = { ok: false, reason: 'recover_timeout', waitedMs: Date.now() - startedAt, state: last };
+    return opts.silent ? payload : out(payload);
+  }
+
+  async function clickReconnectPrompt(opts) {
+    opts = opts || {};
+    const before = getReconnectPromptState({ silent: true, channelId: opts.channelId });
+    const netNode = before && before.net ? getNetNode(opts.channelId) : null;
+    const serverKickOutComp = before && before.ui ? findServerKickOutUiComp({ activeOnly: opts.activeOnly !== false }) : null;
+    if (!before.visible) {
+      const miss = { ok: false, handled: false, reason: 'reconnect_prompt_not_visible', before };
+      return opts.silent ? miss : out(miss);
+    }
+    let via = null;
+    if (serverKickOutComp && isReconnectPromptText((before.ui && before.ui.content) || (before.ui && before.ui.operateContent))) {
+      if (typeof serverKickOutComp.btnClickHandler === 'function') {
+        serverKickOutComp.btnClickHandler(null, '1');
+        via = 'server_kickout_ui_handler';
+      } else if (serverKickOutComp.operate && typeof serverKickOutComp.operate.okFunc === 'function') {
+        serverKickOutComp.operate.okFunc();
+        via = 'server_kickout_okFunc';
+      }
+    }
+    if (!via && netNode && netNode._isPromptShowing && typeof netNode.reconnect === 'function') {
+      try { netNode._retryCount = 0; netNode._isPromptShowing = false; } catch (_) {}
+      netNode.reconnect();
+      via = 'netnode_reconnect';
+    }
+    if (!via) {
+      const fail = { ok: false, handled: false, reason: 'reconnect_handler_not_found', before };
+      return opts.silent ? fail : out(fail);
+    }
+    const waitAfter = opts.waitAfter == null ? 250 : Math.max(0, Number(opts.waitAfter) || 0);
+    if (waitAfter > 0) await wait(waitAfter);
+    const recovered = opts.waitForRecovered === false
+      ? null
+      : await waitForReconnectRecovered({ silent: true, channelId: opts.channelId, timeoutMs: opts.recoverTimeoutMs, pollMs: opts.recoverPollMs });
+    const after = getReconnectPromptState({ silent: true, channelId: opts.channelId });
+    const payload = { ok: recovered ? !!recovered.ok : true, handled: true, via, before, after, recovered };
+    return opts.silent ? payload : out(payload);
+  }
+
+  async function autoReconnectIfNeeded(opts) {
+    opts = opts || {};
+    const state = getReconnectPromptState({ silent: true, channelId: opts.channelId });
+    const gameState = normalizeText(state && state.gameState && state.gameState.state);
+    if (!state.visible) {
+      if (gameState === 'ReLogin' && opts.waitForRecovered !== false) {
+        const recovered = await waitForReconnectRecovered({ silent: true, channelId: opts.channelId, timeoutMs: opts.recoverTimeoutMs, pollMs: opts.recoverPollMs });
+        const waiting = { ok: !!(recovered && recovered.ok), handled: false, waiting: true, reason: 'reconnect_recovering', state, recovered };
+        return opts.silent ? waiting : out(waiting);
+      }
+      const skip = { ok: true, handled: false, reason: 'reconnect_prompt_not_visible', state };
+      return opts.silent ? skip : out(skip);
+    }
+    return await clickReconnectPrompt(opts);
+  }
+
+  function getReconnectWatcherState(opts) {
+    opts = opts || {};
+    const payload = {
+      running: !!reconnectWatcherState.timer,
+      busy: reconnectWatcherState.running,
+      intervalMs: reconnectWatcherState.intervalMs,
+      waitAfter: reconnectWatcherState.waitAfter,
+      channelId: reconnectWatcherState.channelId,
+      lastCheckAt: reconnectWatcherState.lastCheckAt || null,
+      lastHandledAt: reconnectWatcherState.lastHandledAt || null,
+      lastResult: reconnectWatcherState.lastResult || null
+    };
+    return opts.silent ? payload : out(payload);
+  }
+
+  function stopReconnectWatcher(opts) {
+    opts = opts || {};
+    if (reconnectWatcherState.timer) {
+      clearTimeout(reconnectWatcherState.timer);
+      reconnectWatcherState.timer = null;
+    }
+    reconnectWatcherState.running = false;
+    return getReconnectWatcherState(opts);
+  }
+
+  function startReconnectWatcher(opts) {
+    opts = opts || {};
+    reconnectWatcherState.intervalMs = opts.intervalMs == null ? reconnectWatcherState.intervalMs : Math.max(300, Number(opts.intervalMs) || reconnectWatcherState.intervalMs);
+    reconnectWatcherState.waitAfter = opts.waitAfter == null ? reconnectWatcherState.waitAfter : Math.max(0, Number(opts.waitAfter) || reconnectWatcherState.waitAfter);
+    reconnectWatcherState.channelId = opts.channelId == null ? reconnectWatcherState.channelId : Number(opts.channelId) || 0;
+    if (reconnectWatcherState.timer) { clearTimeout(reconnectWatcherState.timer); reconnectWatcherState.timer = null; }
+    const schedule = function (delayMs) {
+      reconnectWatcherState.timer = setTimeout(async function () {
+        reconnectWatcherState.timer = null;
+        if (reconnectWatcherState.running) { schedule(reconnectWatcherState.intervalMs); return; }
+        reconnectWatcherState.running = true;
+        reconnectWatcherState.lastCheckAt = Date.now();
+        try {
+          const result = await autoReconnectIfNeeded({ silent: true, channelId: reconnectWatcherState.channelId, waitAfter: reconnectWatcherState.waitAfter, waitForRecovered: false });
+          reconnectWatcherState.lastResult = result;
+          if (result && result.handled) reconnectWatcherState.lastHandledAt = Date.now();
+        } catch (error) {
+          reconnectWatcherState.lastResult = { ok: false, handled: false, error: error instanceof Error ? error.message : String(error) };
+        } finally {
+          reconnectWatcherState.running = false;
+          schedule(reconnectWatcherState.intervalMs);
+        }
+      }, Math.max(50, Number(delayMs) || reconnectWatcherState.intervalMs));
+    };
+    schedule(opts.delayMs == null ? reconnectWatcherState.intervalMs : opts.delayMs);
+    return getReconnectWatcherState(opts);
+  }
+
+  // ── 掉线重连 end ──────────────────────────────────────────────────────────
     installed: false,
     lastInstallAt: null,
     lastError: null,
@@ -8908,6 +9200,12 @@
     inspectShopUi,
     clickMatureEffect,
     autoPlant,
+    getReconnectPromptState,
+    clickReconnectPrompt,
+    autoReconnectIfNeeded,
+    getReconnectWatcherState,
+    startReconnectWatcher,
+    stopReconnectWatcher,
     openLandInteraction,
     inspectLandDetail,
     inspectFertilizerRuntime,
@@ -8931,6 +9229,7 @@
     installRuntimeSpies();
     installInteractionManagerSpies();
     ensureInteractionManagerSpyRetry();
+    startReconnectWatcher({ silent: true });
   }, null);
 
   out({

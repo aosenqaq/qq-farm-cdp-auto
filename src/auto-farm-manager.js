@@ -982,6 +982,7 @@ class AutoFarmManager {
       "requestShopData",
       "getShopSeedList",
       "autoPlant",
+      "autoReconnectIfNeeded",
     ]);
   }
 
