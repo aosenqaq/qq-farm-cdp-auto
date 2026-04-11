@@ -178,8 +178,15 @@ function buildQqBundle(options = {}) {
     return true;
   }
 
+  function isButtonLayerCurrent() {
+    var ctl = root.gameCtl || (root.GameGlobal && root.GameGlobal.gameCtl);
+    if (!ctl || typeof ctl !== "object") return false;
+    // scriptHash 不匹配说明是旧版，需要重装
+    return ctl.__scriptHash === meta.scriptHash;
+  }
+
   function installButtonLayer() {
-    if (attachScriptHash()) return true;
+    if (isButtonLayerCurrent()) return true;
     try {
 ${buttonSource.split("\n").map((line) => "      " + line).join("\n")}
       attachScriptHash();
