@@ -27,6 +27,7 @@ const QQ_RPC_GAME_CTL_METHODS = Object.freeze([
   "getHarvestablePlantLandIds",
   "plantSingleLand",
   "plantSeedsOnLands",
+  "autoReconnectIfNeeded",
   "autoPlant",
 ]);
 

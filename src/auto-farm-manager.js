@@ -347,6 +347,7 @@ class AutoFarmManager {
       "getHarvestablePlantLandIds",
       "plantSingleLand",
       "plantSeedsOnLands",
+      "autoReconnectIfNeeded",
     ]);
   }
 

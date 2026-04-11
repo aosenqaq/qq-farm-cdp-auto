@@ -35,6 +35,40 @@ function withSilent(opts, extra) {
   return { ...base, ...(extra && typeof extra === "object" ? extra : {}), silent: true };
 }
 
+async function autoReconnectIfNeeded(session, callGameCtl, opts) {
+  try {
+    return await callGameCtl(session, "gameCtl.autoReconnectIfNeeded", [withSilent(opts)]);
+  } catch (error) {
+    return {
+      ok: false,
+      handled: false,
+      error: toErrorMessage(error),
+    };
+  }
+}
+
+async function callGameCtlWithRecovery(session, callGameCtl, pathName, args, opts) {
+  const callOpts = opts && typeof opts === "object" ? opts : {};
+  const reconnectOpts = {
+    waitAfter: callOpts.reconnectWaitAfter,
+    waitForRecovered: callOpts.reconnectWaitForRecovered,
+    recoverTimeoutMs: callOpts.reconnectRecoverTimeoutMs,
+    recoverPollMs: callOpts.reconnectRecoverPollMs,
+  };
+
+  await autoReconnectIfNeeded(session, callGameCtl, reconnectOpts);
+
+  try {
+    return await callGameCtl(session, pathName, args);
+  } catch (error) {
+    const recover = await autoReconnectIfNeeded(session, callGameCtl, reconnectOpts);
+    if (recover && recover.handled && callOpts.retryOnReconnect !== false) {
+      return await callGameCtl(session, pathName, args);
+    }
+    throw error;
+  }
+}
+
 function normalizeText(value) {
   return value == null ? "" : String(value).trim();
 }
@@ -186,102 +220,102 @@ function collectEmptyLandIds(status) {
 }
 
 async function getFarmOwnership(session, callGameCtl, opts) {
-  return await callGameCtl(session, "gameCtl.getFarmOwnership", [withSilent(opts)]);
+  return await callGameCtlWithRecovery(session, callGameCtl, "gameCtl.getFarmOwnership", [withSilent(opts)], opts);
 }
 
 async function getFarmStatus(session, callGameCtl, opts) {
-  return await callGameCtl(session, "gameCtl.getFarmStatus", [withSilent(opts)]);
+  return await callGameCtlWithRecovery(session, callGameCtl, "gameCtl.getFarmStatus", [withSilent(opts)], opts);
 }
 
 async function getFriendList(session, callGameCtl, opts) {
-  return await callGameCtl(session, "gameCtl.getFriendList", [withSilent(opts, { waitRefresh: true })]);
+  return await callGameCtlWithRecovery(session, callGameCtl, "gameCtl.getFriendList", [withSilent(opts, { waitRefresh: true })], opts);
 }
 
 async function enterOwnFarm(session, callGameCtl, opts) {
-  return await callGameCtl(session, "gameCtl.enterOwnFarm", [withSilent(opts)]);
+  return await callGameCtlWithRecovery(session, callGameCtl, "gameCtl.enterOwnFarm", [withSilent(opts)], opts);
 }
 
 async function enterFriendFarm(session, callGameCtl, target, opts) {
-  return await callGameCtl(session, "gameCtl.enterFriendFarm", [target, withSilent(opts)]);
+  return await callGameCtlWithRecovery(session, callGameCtl, "gameCtl.enterFriendFarm", [target, withSilent(opts)], opts);
 }
 
 async function triggerOneClickOperation(session, callGameCtl, typeOrIndex, opts) {
-  return await callGameCtl(session, "gameCtl.triggerOneClickOperation", [typeOrIndex, withSilent(opts)]);
+  return await callGameCtlWithRecovery(session, callGameCtl, "gameCtl.triggerOneClickOperation", [typeOrIndex, withSilent(opts)], opts);
 }
 
 async function getSeedList(session, callGameCtl, opts) {
-  return await callGameCtl(session, "gameCtl.getSeedList", [withSilent(opts)]);
+  return await callGameCtlWithRecovery(session, callGameCtl, "gameCtl.getSeedList", [withSilent(opts)], opts);
 }
 
 async function getShopSeedList(session, callGameCtl, opts) {
-  return await callGameCtl(session, "gameCtl.getShopSeedList", [withSilent(opts)]);
+  return await callGameCtlWithRecovery(session, callGameCtl, "gameCtl.getShopSeedList", [withSilent(opts)], opts);
 }
 
 async function buyShopGoods(session, callGameCtl, goodsId, num, price) {
-  return await callGameCtl(session, "gameCtl.buyShopGoods", [goodsId, num, price]);
+  return await callGameCtlWithRecovery(session, callGameCtl, "gameCtl.buyShopGoods", [goodsId, num, price], null);
 }
 
 async function plantSeedsOnLands(session, callGameCtl, seedIdOrItemId, landIds, opts) {
-  return await callGameCtl(session, "gameCtl.plantSeedsOnLands", [
+  return await callGameCtlWithRecovery(session, callGameCtl, "gameCtl.plantSeedsOnLands", [
     seedIdOrItemId,
     Array.isArray(landIds) ? landIds : [landIds],
     withSilent(opts),
-  ]);
+  ], opts);
 }
 
 async function clickMatureEffect(session, callGameCtl, landId, opts) {
-  return await callGameCtl(session, "gameCtl.clickMatureEffect", [
+  return await callGameCtlWithRecovery(session, callGameCtl, "gameCtl.clickMatureEffect", [
     landId,
     withSilent(opts),
-  ]);
+  ], opts);
 }
 
 async function getHarvestablePlantLandIds(session, callGameCtl, opts) {
-  return await callGameCtl(session, "gameCtl.getHarvestablePlantLandIds", [
+  return await callGameCtlWithRecovery(session, callGameCtl, "gameCtl.getHarvestablePlantLandIds", [
     withSilent(opts),
-  ]);
+  ], opts);
 }
 
 async function waterSingleLand(session, callGameCtl, landId, opts) {
-  return await callGameCtl(session, "gameCtl.waterSingleLand", [
+  return await callGameCtlWithRecovery(session, callGameCtl, "gameCtl.waterSingleLand", [
     landId,
     withSilent(opts),
-  ]);
+  ], opts);
 }
 
 async function killBugSingleLand(session, callGameCtl, landId, opts) {
-  return await callGameCtl(session, "gameCtl.killBugSingleLand", [
+  return await callGameCtlWithRecovery(session, callGameCtl, "gameCtl.killBugSingleLand", [
     landId,
     withSilent(opts),
-  ]);
+  ], opts);
 }
 
 async function eraseGrassSingleLand(session, callGameCtl, landId, opts) {
-  return await callGameCtl(session, "gameCtl.eraseGrassSingleLand", [
+  return await callGameCtlWithRecovery(session, callGameCtl, "gameCtl.eraseGrassSingleLand", [
     landId,
     withSilent(opts),
-  ]);
+  ], opts);
 }
 
 async function waterLands(session, callGameCtl, landIds, opts) {
-  return await callGameCtl(session, "gameCtl.waterLands", [
+  return await callGameCtlWithRecovery(session, callGameCtl, "gameCtl.waterLands", [
     Array.isArray(landIds) ? landIds : [landIds],
     withSilent(opts),
-  ]);
+  ], opts);
 }
 
 async function killBugLands(session, callGameCtl, landIds, opts) {
-  return await callGameCtl(session, "gameCtl.killBugLands", [
+  return await callGameCtlWithRecovery(session, callGameCtl, "gameCtl.killBugLands", [
     Array.isArray(landIds) ? landIds : [landIds],
     withSilent(opts),
-  ]);
+  ], opts);
 }
 
 async function eraseGrassLands(session, callGameCtl, landIds, opts) {
-  return await callGameCtl(session, "gameCtl.eraseGrassLands", [
+  return await callGameCtlWithRecovery(session, callGameCtl, "gameCtl.eraseGrassLands", [
     Array.isArray(landIds) ? landIds : [landIds],
     withSilent(opts),
-  ]);
+  ], opts);
 }
 
 function getActionableLandIds(status, key) {
