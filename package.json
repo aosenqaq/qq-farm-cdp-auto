@@ -19,6 +19,7 @@
     "gateway": "node src/index.js",
     "qq:bundle": "node scripts/patch-qq-miniapp.cjs --bundle-only",
     "qq:patch": "node scripts/patch-qq-miniapp.cjs",
+    "qq:images": "node scripts/extract-qq-miniapp-images.cjs",
     "wmpf": "node wmpf/src/index.js",
     "wmpf:auto": "node wmpf/src/index.js --auto-farm"
   },

@@ -31,7 +31,6 @@ ehthumbs.db
 
 # 编辑器与 IDE
 .idea/
-.claude/
 *.swp
 *.swo
 *~
@@ -42,4 +41,3 @@ WMPFDebugger/
 # 反编译输出与本地笔记（不提交）
 deobfuscated/
 总结.md
-.claude/settings.local.json

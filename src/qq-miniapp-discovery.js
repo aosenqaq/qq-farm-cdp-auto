@@ -44,7 +44,17 @@ function getDefaultAppDataRoot() {
 }
 
 function getDefaultQqMiniappSrcRoot() {
-  return path.join(getDefaultAppDataRoot(), "QQEX", "miniapp", "temps", "miniapp_src");
+  const appDataRoot = getDefaultAppDataRoot();
+  const candidates = [
+    path.join(appDataRoot, "QQ", "miniapp", "temps", "miniapp_src"),
+    path.join(appDataRoot, "QQEX", "miniapp", "temps", "miniapp_src"),
+  ];
+  for (let i = 0; i < candidates.length; i += 1) {
+    if (isDirectory(candidates[i])) {
+      return candidates[i];
+    }
+  }
+  return candidates[0];
 }
 
 function getDefaultQqMiniappPkgRoot(srcRoot) {

@@ -40,7 +40,7 @@ function getConfig() {
       return Number.isFinite(n) ? n : undefined;
     })(),
     /** 单次 CDP 请求超时（毫秒）。默认收紧到 8s，避免网页端注入长时间卡死。 */
-    cdpTimeoutMs: parseIntEnv("FARM_CDP_TIMEOUT_MS", 8000),
+    cdpTimeoutMs: parseIntEnv("FARM_CDP_TIMEOUT_MS", 8_000),
     /** 与 wmpf 自动农场一致，用于 waitForMiniappJsContext / selectExecutionContext */
     gatewayContextName: process.env.FARM_GATEWAY_CONTEXT_NAME || "gameContext",
     /** 为 "0" 或 "false" 时禁用 wmpf InternalCdpClient 桥接 */
@@ -52,8 +52,8 @@ function getConfig() {
       return ["cdp", "qq_ws", "auto"].includes(raw) ? raw : "cdp";
     })(),
     qqWsPath: process.env.FARM_QQ_WS_PATH || "/miniapp",
-    qqWsReadyTimeoutMs: parseIntEnv("FARM_QQ_WS_READY_TIMEOUT_MS", 15000),
-    qqWsCallTimeoutMs: parseIntEnv("FARM_QQ_WS_CALL_TIMEOUT_MS", 15000),
+    qqWsReadyTimeoutMs: parseIntEnv("FARM_QQ_WS_READY_TIMEOUT_MS", 15_000),
+    qqWsCallTimeoutMs: parseIntEnv("FARM_QQ_WS_CALL_TIMEOUT_MS", 15_000),
     qqGameJsPath: process.env.FARM_QQ_GAME_JS || "",
     qqAppId: process.env.FARM_QQ_APPID || "",
     qqMiniappSrcRoot: process.env.FARM_QQ_MINIAPP_SRC_ROOT || "",

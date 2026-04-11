@@ -3,6 +3,8 @@
 const { EventEmitter } = require("node:events");
 const WebSocket = require("ws");
 
+const QQ_WS_HISTORY_LIMIT = 100;
+
 function toErrorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
@@ -34,7 +36,7 @@ class QqWsSession extends EventEmitter {
     this.lastEvent = null;
     this.lastError = null;
     this.history = [];
-    this.maxHistory = 40;
+    this.maxHistory = QQ_WS_HISTORY_LIMIT;
   }
 
   attach() {
@@ -104,18 +106,22 @@ class QqWsSession extends EventEmitter {
     });
   }
 
-  async ensureGameCtl() {
+  async ensureGameCtl(requiredMethods = []) {
     const describe = await this.call("host.describe", []);
+    const methods = {};
     const list = Array.isArray(describe && describe.availableMethods) ? describe.availableMethods : [];
     const gameCtlReady = !!(describe && describe.gameCtlReady);
-    if (!gameCtlReady) {
-      throw new Error("qq ws runtime gameCtl not ready");
+    for (const key of requiredMethods) {
+      methods[key] = list.includes("gameCtl." + key);
     }
-    const methods = {};
-    for (let i = 0; i < list.length; i += 1) {
-      const pathName = String(list[i] || "");
-      if (pathName.indexOf("gameCtl.") !== 0) continue;
-      methods[pathName.slice("gameCtl.".length)] = true;
+    const hasAllMethods = requiredMethods.every((key) => methods[key]);
+    if (!gameCtlReady || !hasAllMethods) {
+      const missing = requiredMethods.filter((key) => !methods[key]);
+      throw new Error(
+        !gameCtlReady
+          ? "qq ws runtime gameCtl not ready"
+          : `qq ws runtime missing methods: ${missing.join(", ")}`,
+      );
     }
     return {
       injected: false,
