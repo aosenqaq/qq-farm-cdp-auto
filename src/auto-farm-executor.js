@@ -236,6 +236,12 @@ async function clickMatureEffect(session, callGameCtl, landId, opts) {
   ]);
 }
 
+async function getHarvestablePlantLandIds(session, callGameCtl, opts) {
+  return await callGameCtl(session, "gameCtl.getHarvestablePlantLandIds", [
+    withSilent(opts),
+  ]);
+}
+
 async function waterSingleLand(session, callGameCtl, landId, opts) {
   return await callGameCtl(session, "gameCtl.waterSingleLand", [
     landId,
@@ -446,6 +452,82 @@ function collectMatureLandIds(status) {
   return out;
 }
 
+function summarizeRuntimeHarvestCandidate(item) {
+  return {
+    landId: toPositiveNumber(item && item.landId),
+    sourceLandId: toPositiveNumber(item && item.sourceLandId),
+    isMultiLand: !!(item && item.isMultiLand),
+    isSpecialLand: !!(item && item.isSpecialLand),
+    landTypeName: item && item.landTypeName ? String(item.landTypeName) : null,
+    isMasterLand: !!(item && item.isMasterLand),
+    isSlaveLand: !!(item && item.isSlaveLand),
+    plantName: item && item.plantName ? String(item.plantName) : null,
+    plantId: toPositiveNumber(item && item.plantId),
+    canHarvest: !!(item && item.canHarvest),
+    canSteal: !!(item && item.canSteal),
+    canCollect: !!(item && item.canCollect),
+  };
+}
+
+function summarizeSpecialCollectActionResult(action) {
+  const result = action && action.result ? action.result : null;
+  const verify = result && result.verify ? result.verify : null;
+  return {
+    ok: !!(action && action.ok),
+    landId: toPositiveNumber(action && action.landId),
+    action: result && result.action ? result.action : null,
+    reason: result && result.reason
+      ? result.reason
+      : verify && verify.reason
+        ? verify.reason
+        : action && action.error
+          ? action.error
+          : null,
+    fallbackReason: result && result.fallbackReason ? result.fallbackReason : null,
+    landTypeName: result && result.landTypeName ? String(result.landTypeName) : null,
+    effectType: result && result.effectType ? result.effectType : null,
+  };
+}
+
+async function collectSupplementalHarvestCandidates(session, callGameCtl, status) {
+  const seen = new Set();
+  const out = [];
+  const gridCandidates = collectMatureLandIds(status);
+  let runtimeCandidatePayload = null;
+
+  function addLandIds(list) {
+    const arr = Array.isArray(list) ? list : [];
+    for (let i = 0; i < arr.length; i += 1) {
+      const landId = toPositiveNumber(arr[i]);
+      if (landId == null || seen.has(landId)) continue;
+      seen.add(landId);
+      out.push(landId);
+    }
+  }
+
+  addLandIds(gridCandidates);
+
+  try {
+    runtimeCandidatePayload = await getHarvestablePlantLandIds(session, callGameCtl, {
+      farmType: status && status.farmType ? status.farmType : null,
+      matureOnly: true,
+      multiLandOnly: true,
+    });
+    addLandIds(runtimeCandidatePayload && runtimeCandidatePayload.landIds);
+  } catch (_) {}
+
+  return {
+    landIds: out,
+    gridCandidateLandIds: gridCandidates,
+    runtimeCandidateLandIds: Array.isArray(runtimeCandidatePayload && runtimeCandidatePayload.landIds)
+      ? runtimeCandidatePayload.landIds.map((item) => toPositiveNumber(item)).filter((item) => item != null)
+      : [],
+    runtimeCandidates: Array.isArray(runtimeCandidatePayload && runtimeCandidatePayload.list)
+      ? runtimeCandidatePayload.list.map(summarizeRuntimeHarvestCandidate)
+      : [],
+  };
+}
+
 async function runSupplementalMatureEffectHarvest(session, callGameCtl, opts) {
   const rawOpts = opts && typeof opts === "object" ? opts : {};
   const actionWaitMs = Math.max(0, Number(rawOpts.actionWaitMs) || 0);
@@ -454,7 +536,21 @@ async function runSupplementalMatureEffectHarvest(session, callGameCtl, opts) {
     includeLandIds: false,
   });
   const farmType = statusBefore && statusBefore.farmType ? statusBefore.farmType : "unknown";
-  const candidateLandIds = collectMatureLandIds(statusBefore);
+  const candidateInfoBefore = await collectSupplementalHarvestCandidates(session, callGameCtl, statusBefore);
+  const candidateLandIds = candidateInfoBefore.landIds;
+  const beforeCollectCount = getWorkCount(statusBefore, "collect");
+
+  if (beforeCollectCount > 0 || candidateLandIds.length > 0 || candidateInfoBefore.runtimeCandidates.length > 0) {
+    console.log("[auto-farm][special-collect] scan", JSON.stringify({
+      farmType,
+      beforeCollectCount,
+      stageCounts: statusBefore && statusBefore.stageCounts ? statusBefore.stageCounts : null,
+      gridCandidateLandIds: candidateInfoBefore.gridCandidateLandIds,
+      runtimeCandidateLandIds: candidateInfoBefore.runtimeCandidateLandIds,
+      runtimeCandidates: candidateInfoBefore.runtimeCandidates,
+      mergedCandidateLandIds: candidateLandIds,
+    }));
+  }
 
   if (candidateLandIds.length === 0) {
     return {
@@ -507,8 +603,20 @@ async function runSupplementalMatureEffectHarvest(session, callGameCtl, opts) {
     includeGrids: true,
     includeLandIds: false,
   });
-  const remainingLandIds = collectMatureLandIds(statusAfter);
+  const candidateInfoAfter = await collectSupplementalHarvestCandidates(session, callGameCtl, statusAfter);
+  const remainingLandIds = candidateInfoAfter.landIds;
   const completed = remainingLandIds.length === 0;
+
+  console.log("[auto-farm][special-collect] result", JSON.stringify({
+    farmType,
+    completed,
+    candidateLandIds,
+    remainingLandIds,
+    actions: actions.map(summarizeSpecialCollectActionResult),
+    afterCollectCount: getWorkCount(statusAfter, "collect"),
+    afterStageCounts: statusAfter && statusAfter.stageCounts ? statusAfter.stageCounts : null,
+    afterRuntimeCandidateLandIds: candidateInfoAfter.runtimeCandidateLandIds,
+  }));
 
   return {
     ok: completed,

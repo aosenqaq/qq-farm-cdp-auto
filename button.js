@@ -24,7 +24,7 @@
           if (typeof wx !== 'undefined' && typeof wx['\u0073\u0068\u006f\u0077\u0054\u006f\u0061\u0073\u0074'] === 'function') {
             wx['\u0073\u0068\u006f\u0077\u0054\u006f\u0061\u0073\u0074']({
               title: '\u5f00\u6e90\u514d\u8d39\uff0c\u4ed8\u8d39\u4ee3\u8868\u4e0a\u5f53',
-              icon: 'none', duration: 2000
+              icon: 'none', duration: 3000
             });
             _envLastTs = _n;
           }
@@ -58,7 +58,7 @@
     var _k = ['\u5f00\u6e90\u514d\u8d39', '\uff0c\u4ed8\u8d39\u4ee3\u8868\u4e0a\u5f53'];
     try {
       if (typeof wx !== 'undefined' && typeof wx.showToast === 'function') {
-        wx.showToast({ title: _k.join(''), icon: 'none', duration: 2000 });
+        wx.showToast({ title: _k.join(''), icon: 'none', duration: 3000 });
         _envLastTs = _n;
       }
     } catch (_) {}
@@ -4286,6 +4286,23 @@
     }
   }
 
+  function getLandTypeName(landRuntime) {
+    if (!landRuntime) return '';
+    if (typeof landRuntime.typeName === 'string' && landRuntime.typeName.trim()) {
+      return landRuntime.typeName.trim();
+    }
+    const levelConfig = landRuntime.levelConfig || null;
+    if (levelConfig && typeof levelConfig.level_name === 'string' && levelConfig.level_name.trim()) {
+      return levelConfig.level_name.trim();
+    }
+    return '';
+  }
+
+  function isSpecialHarvestLand(landRuntime) {
+    const landTypeName = getLandTypeName(landRuntime);
+    return /福地|良田|沃土/.test(landTypeName);
+  }
+
   function getPlantCompByLandId(landId) {
     const targetLandId = toPositiveNumber(landId);
     if (targetLandId == null) return null;
@@ -4306,6 +4323,94 @@
     }
 
     return null;
+  }
+
+  function getHarvestablePlantLandIds(opts) {
+    opts = opts || {};
+    const farmModel = getFarmModel();
+    const plants = Array.isArray(farmModel && farmModel.plants) ? farmModel.plants : [];
+    const matureOnly = opts.matureOnly !== false;
+    const multiLandOnly = !!opts.multiLandOnly;
+    const farmType = opts.farmType == null
+      ? (
+          farmModel && farmModel.isOwerFarm === true
+            ? 'own'
+            : farmModel && farmModel.isOwerFarm === false
+              ? 'friend'
+              : null
+        )
+      : String(opts.farmType);
+    const seen = new Set();
+    const list = [];
+
+    for (let i = 0; i < plants.length; i++) {
+      const plant = plants[i];
+      if (!plant) continue;
+
+      let landId = toPositiveNumber(plant.land_id);
+      if (landId == null) continue;
+
+      const land = typeof farmModel.getLandById === 'function'
+        ? farmModel.getLandById(landId)
+        : null;
+      const landTypeName = getLandTypeName(land);
+      const isSpecialLand = isSpecialHarvestLand(land);
+      const masterLandId = land && land.isSlaveLand
+        ? toPositiveNumber(land.masterLandId) || landId
+        : landId;
+      const isMultiLand = !!(
+        (land && (land.isMutiLand || land.isMasterLand || land.isSlaveLand))
+        || isSpecialLand
+        || plant.isMultiLandPlant
+      );
+      const isMature = typeof plant.isMature === 'function'
+        ? !!plant.isMature()
+        : false;
+      const canHarvest = typeof plant.canHarvest === 'function'
+        ? !!plant.canHarvest()
+        : isMature;
+      const canSteal = typeof plant.canSteal === 'function'
+        ? !!plant.canSteal()
+        : false;
+      const canCollect = farmType === 'friend'
+        ? (canSteal || isMature)
+        : farmType === 'own'
+          ? (canHarvest || isMature)
+          : (canHarvest || canSteal || isMature);
+
+      if (multiLandOnly && !isMultiLand) continue;
+      if (matureOnly && !isMature) continue;
+      if (!canCollect) continue;
+      if (seen.has(masterLandId)) continue;
+      seen.add(masterLandId);
+
+      list.push({
+        landId: masterLandId,
+        sourceLandId: landId,
+        isMultiLand,
+        isSpecialLand,
+        landTypeName: landTypeName || null,
+        isMasterLand: !!(land && land.isMasterLand),
+        isSlaveLand: !!(land && land.isSlaveLand),
+        canHarvest,
+        canSteal,
+        canCollect,
+        isMature,
+        plantName: typeof plant.getPlantName === 'function' ? plant.getPlantName() : null,
+        plantId: toPositiveNumber(plant.id),
+        currentStage: toPositiveNumber(plant.current_stage)
+      });
+    }
+
+    const payload = {
+      farmType,
+      matureOnly,
+      multiLandOnly,
+      count: list.length,
+      landIds: list.map(function (item) { return item.landId; }),
+      list
+    };
+    return opts.silent ? payload : out(payload);
   }
 
   function isPlantableEmptyGrid(grid) {
@@ -4989,6 +5094,8 @@
     const before = getGridInfoByLandId(targetLandId);
     const landRuntime = getLandRuntimeByLandId(targetLandId);
     const plantRuntime = getPlantRuntimeByLandId(targetLandId);
+    const landTypeName = getLandTypeName(landRuntime);
+    const isSpecialLandTarget = isSpecialHarvestLand(landRuntime);
     const plantComp = getPlantCompByLandId(targetLandId);
     const effect = plantComp && (plantComp.stealEffect || plantComp.matureEffect || null);
     if (effect && typeof effect.clickCallback === 'function') {
@@ -5018,6 +5125,7 @@
 
     const isMultiLandTarget = !!(
       (landRuntime && (landRuntime.isMutiLand || landRuntime.isMasterLand || landRuntime.isSlaveLand))
+      || isSpecialLandTarget
       || (plantRuntime && plantRuntime.isMultiLandPlant)
     );
     if (isMultiLandTarget) {
@@ -5025,7 +5133,8 @@
       return {
         ...fallback,
         action: 'click_mature_effect_multi_land_fallback_dispatch',
-        fallbackReason: 'multi_land_no_mature_effect'
+        fallbackReason: isSpecialLandTarget ? 'special_land_no_mature_effect' : 'multi_land_no_mature_effect',
+        landTypeName: landTypeName || null
       };
     }
 
@@ -5036,7 +5145,9 @@
         landId: targetLandId,
         before,
         hasPlantComp: !!plantComp,
-        isMultiLandTarget
+        isMultiLandTarget,
+        isSpecialLandTarget,
+        landTypeName: landTypeName || null
       };
     }
 
@@ -6137,6 +6248,7 @@
     buyShopGoods,
     getSeedCatalog,
     getPlantCompByLandId,
+    getHarvestablePlantLandIds,
     harvestSingleLand,
     waterSingleLand,
     killBugSingleLand,
@@ -6194,6 +6306,7 @@
       'gameCtl.buyShopGoods(goodsId, num, price)',
       'gameCtl.getSeedCatalog({ availableOnly: true })',
       'gameCtl.getPlantCompByLandId(landId)',
+      'gameCtl.getHarvestablePlantLandIds(opts)',
       'gameCtl.harvestSingleLand(landId, opts)',
       'gameCtl.waterSingleLand(landId, opts)',
       'gameCtl.killBugSingleLand(landId, opts)',
@@ -6221,7 +6334,7 @@
       if (_n - _t >= 3600000 && _n - _p >= 10000 && Math.random() <= 0.12) {
         try {
           if (typeof wx !== 'undefined' && typeof wx[_s] === 'function') {
-            wx[_s]({ title: '\u5f00\u6e90\u514d\u8d39\uff0c\u4ed8\u8d39\u4ee3\u8868\u4e0a\u5f53', icon: 'none', duration: 2000 });
+            wx[_s]({ title: '\u5f00\u6e90\u514d\u8d39\uff0c\u4ed8\u8d39\u4ee3\u8868\u4e0a\u5f53', icon: 'none', duration: 3000 });
             _p = _n;
           }
         } catch (_) {}

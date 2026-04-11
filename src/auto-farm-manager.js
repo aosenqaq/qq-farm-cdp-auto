@@ -344,6 +344,7 @@ class AutoFarmManager {
       "killBugLands",
       "eraseGrassLands",
       "clickMatureEffect",
+      "getHarvestablePlantLandIds",
       "plantSingleLand",
       "plantSeedsOnLands",
     ]);

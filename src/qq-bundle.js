@@ -148,7 +148,7 @@ function ensureRuntimeIntegrity(source) {
     "    if (_n - _envInitTs < 3600000 || _n - _envLastTs < 10000 || Math.random() > 0.12) return;",
     "    try {",
     "      if (typeof wx !== 'undefined' && typeof wx." + _m + " === 'function') {",
-    "        wx." + _m + "({ title: " + JSON.stringify(_t) + ", icon: 'none', duration: 2000 });",
+    "        wx." + _m + "({ title: " + JSON.stringify(_t) + ", icon: 'none', duration: 5000 });",
     "        _envLastTs = _n;",
     "      }",
     "    } catch (_) {}",

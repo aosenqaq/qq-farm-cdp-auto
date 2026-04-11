@@ -24,6 +24,7 @@ const QQ_RPC_GAME_CTL_METHODS = Object.freeze([
   "killBugLands",
   "eraseGrassLands",
   "clickMatureEffect",
+  "getHarvestablePlantLandIds",
   "plantSingleLand",
   "plantSeedsOnLands",
   "autoPlant",
