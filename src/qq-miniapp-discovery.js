@@ -178,7 +178,41 @@ function findLatestQqMiniappByAppId(options = {}) {
   };
 }
 
+/**
+ * 在 miniapp_src 下按「最近活跃」选一个 `{数字}_` 前缀的目录（不指定 appid，用于自动修复/打补丁）。
+ */
+function findLatestQqMiniappAnyApp(options = {}) {
+  const roots = resolveQqMiniappRoots(options);
+  if (!isDirectory(roots.srcRoot)) {
+    throw new Error(`QQ miniapp_src 目录不存在: ${roots.srcRoot}`);
+  }
+
+  const candidates = fs
+    .readdirSync(roots.srcRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && /^\d+_/.test(entry.name))
+    .map((entry) => buildCandidate(roots, entry))
+    .filter(Boolean)
+    .sort(compareCandidates);
+
+  if (!candidates.length) {
+    throw new Error(`在 miniapp_src 中未找到符合命名的小程序目录: ${roots.srcRoot}`);
+  }
+
+  const selected = candidates[0];
+  const appId = String(selected.versionDirName || "").split("_")[0] || "";
+
+  return {
+    appId,
+    srcRoot: roots.srcRoot,
+    pkgRoot: isDirectory(roots.pkgRoot) ? roots.pkgRoot : null,
+    candidateCount: candidates.length,
+    selected: summarizeCandidate(selected),
+    candidates: candidates.slice(0, 8).map(summarizeCandidate),
+  };
+}
+
 module.exports = {
+  findLatestQqMiniappAnyApp,
   findLatestQqMiniappByAppId,
   getDefaultQqMiniappPkgRoot,
   getDefaultQqMiniappSrcRoot,
