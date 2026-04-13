@@ -1,0 +1,29 @@
+{
+  "name": "qq-farm-cdp-auto",
+  "version": "1.0.0",
+  "private": true,
+  "license": "GPL-3.0",
+  "description": "qq经典农场自动化控制：wmpf(Frida+CDP) + src + button.js",
+  "dependencies": {
+    "frida": "^16.6.6",
+    "protobufjs": "^7.5.4",
+    "ws": "^8.18.3"
+  },
+  "scripts": {
+    "start": "node run.cjs",
+    "start:qq": "node run.cjs --qq",
+    "start:wx": "node run.cjs --wx",
+    "start:auto": "node run.cjs --auto-farm",
+    "start:qq:auto": "node run.cjs --qq --auto-farm",
+    "start:wx:auto": "node run.cjs --wx --auto-farm",
+    "gateway": "node src/index.js",
+    "qq:bundle": "node scripts/patch-qq-miniapp.cjs --bundle-only",
+    "qq:patch": "node scripts/patch-qq-miniapp.cjs",
+    "qq:images": "node scripts/extract-qq-miniapp-images.cjs",
+    "wmpf": "node wmpf/src/index.js",
+    "wmpf:auto": "node wmpf/src/index.js --auto-farm"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
