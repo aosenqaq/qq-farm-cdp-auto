@@ -7,8 +7,12 @@
 
 - 微信小游戏调试环境：`CDP + 自动注入 button.js`
 - QQ 小程序本地资源环境：`WebSocket 宿主 + QQ bundle`
-
+#####
 hook 代码感谢 [evi0s/WMPFDebugger](https://github.com/evi0s/WMPFDebugger)
+部分功能设计实现思路感谢https://github.com/Penty-d/qq-farm-bot-ui
+#####
+0开作者仓库 https://github.com/linguo2625469/qq-farm-cdp-auto
+#####
 
 # 农场自动化控制台
 
