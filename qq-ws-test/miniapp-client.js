@@ -279,6 +279,9 @@
     if (pathName === "gameCtl.autoPlant") {
       return ctl.autoPlant.apply(ctl, Array.isArray(args) ? args : []);
     }
+    if (pathName === "gameCtl.autoReconnectIfNeeded") {
+      return ctl.autoReconnectIfNeeded.apply(ctl, Array.isArray(args) ? args : []);
+    }
 
     throw new Error("call_path_not_allowed: " + pathName);
   }

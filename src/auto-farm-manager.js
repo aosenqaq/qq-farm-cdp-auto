@@ -318,6 +318,7 @@ function formatAutoFarmSeedSourceLabel(source) {
   if (!text) return "未知来源";
   if (text === "backpack") return "背包";
   if (text === "backpack_explicit") return "背包指定";
+  if (text === "backpack_partial") return "背包部分种植";
   if (text === "backpack_plus_shop_lookup") return "背包 + 商店补购";
   if (text === "shop") return "商店";
   if (text === "shop_lookup") return "商店查找购买";
@@ -981,6 +982,7 @@ class AutoFarmManager {
       "getSeedList",
       "requestShopData",
       "getShopSeedList",
+      "autoReconnectIfNeeded",
       "autoPlant",
     ]);
   }

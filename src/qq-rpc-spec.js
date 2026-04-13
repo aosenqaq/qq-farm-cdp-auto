@@ -31,6 +31,7 @@ const QQ_RPC_GAME_CTL_METHODS = Object.freeze([
   "getShopSeedList",
   "inspectShopModelRuntime",
   "inspectShopUi",
+  "autoReconnectIfNeeded",
   "autoPlant",
 ]);
 
