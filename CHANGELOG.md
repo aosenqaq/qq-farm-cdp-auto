@@ -2,6 +2,9 @@
 
 ## 2026-04-13
 
+- 修复微信路线一键启动时 `--wx` 透传到 `wmpf` 后触发 `ERR_PARSE_ARGS_UNKNOWN_OPTION` 的问题，微信注入链路现在会兼容并忽略上层运行时参数。
+- 修复空地自动种植会把未解锁/不可交互地块误判为空地的问题；自动种植现在只会处理可交互空地，避免卡在种植流程。
+- 从上游 `linguo2625469/qq-farm-cdp-auto` 的 `56db5f7 修复下未解锁土地种植bug` 中抽取并移植了核心过滤逻辑，但按当前本地代码结构手工合并，没有直接整体 cherry-pick。
 - 修复自动种植中“策略1 背包优先 / 策略2 经验最大(经验/小时最高)”命中背包种子后，因库存不足仍错误打开商店并卡在商店的问题。
 - 调整自动种植执行逻辑：当背包优先或排行策略已选中背包种子但库存不足时，仅按背包现有数量种植，不再强制补购打开商店。
 - 自动农场日志新增 `背包部分种植` 来源标记，便于区分“纯背包种植”和“背包 + 商店补购”。
@@ -19,8 +22,9 @@
 - `src/qq-rpc-spec.js`
 - `qq-ws-test/miniapp-client.js`
 - `dist/qq-miniapp-bootstrap.js`
+- `wmpf/src/cli.js`
 - 已完成静态校验：`node --check button.js`、`node --check src/auto-farm-executor.js`、`node --check src/auto-farm-manager.js`、`node --check qq-ws-test/miniapp-client.js` 均通过。
+- 已补充静态校验：`node --check wmpf/src/cli.js` 通过。
 - 暂未合并上游其余近期提交，原因：
 - `59c6576` 明确标注“未完成”，风险偏高。
-- `56db5f7` 与当前本地 `button.js`/自动种植逻辑重叠较多，需要单独回归后再挑。
 - `a1e1d3d` 改动较多，且涉及 UI 与自动农场行为判断，不适合在未专项验证时直接并入。

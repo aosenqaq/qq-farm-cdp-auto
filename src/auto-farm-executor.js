@@ -120,6 +120,14 @@ function summarizeFarmStatus(status) {
   };
 }
 
+function isPlantableEmptyGrid(grid) {
+  return !!(
+    grid
+    && grid.stageKind === "empty"
+    && grid.interactable === true
+  );
+}
+
 function collectEmptyLandIds(status) {
   const grids = Array.isArray(status && status.grids) ? status.grids : [];
   const emptyLandIds = [];
@@ -127,7 +135,7 @@ function collectEmptyLandIds(status) {
     const grid = grids[i];
     const landId = Number(grid && grid.landId);
     if (!Number.isFinite(landId) || landId <= 0) continue;
-    if (grid && grid.stageKind === "empty") {
+    if (isPlantableEmptyGrid(grid)) {
       emptyLandIds.push(landId);
     }
   }

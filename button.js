@@ -6637,13 +6637,21 @@
     return null;
   }
 
+  function isPlantableEmptyGrid(grid) {
+    return !!(
+      grid &&
+      grid.stageKind === 'empty' &&
+      grid.interactable === true
+    );
+  }
+
   function getEmptyLandIds() {
     const status = getFarmStatus({ includeGrids: true, includeLandIds: false, silent: true });
     const grids = Array.isArray(status && status.grids) ? status.grids : [];
     const ids = [];
     for (let i = 0; i < grids.length; i += 1) {
       const grid = grids[i];
-      if (grid && grid.stageKind === 'empty' && grid.landId != null) {
+      if (isPlantableEmptyGrid(grid) && grid.landId != null) {
         ids.push(Number(grid.landId));
       }
     }
@@ -6844,30 +6852,93 @@
 
   function plantSeedsOnLands(plantOrSeedId, landIds, opts) {
     if (!plantOrSeedId) throw new Error('plantOrSeedId required');
-    const normalizedLandIds = normalizeLandIds(landIds);
-    if (!Array.isArray(normalizedLandIds) || normalizedLandIds.length === 0) throw new Error('landIds required');
+    const requestedLandIds = normalizeLandIds(landIds);
+    if (!Array.isArray(requestedLandIds) || requestedLandIds.length === 0) throw new Error('landIds required');
+    const plantableLandSet = new Set(getEmptyLandIds());
+    const normalizedLandIds = requestedLandIds.filter(function (landId) {
+      return plantableLandSet.has(landId);
+    });
 
     if (opts && opts.useMultiLandPlant === true) {
+      if (normalizedLandIds.length !== requestedLandIds.length || normalizedLandIds.length === 0) {
+        return {
+          planted: false,
+          plantOrSeedId: plantOrSeedId,
+          landCount: normalizedLandIds.length,
+          requestedLandCount: requestedLandIds.length,
+          requestedLandIds: requestedLandIds,
+          landIds: normalizedLandIds,
+          mode: 'multi',
+          reason: 'multi_land_target_not_plantable'
+        };
+      }
       const payload = dispatchMultiLandPlant(plantOrSeedId, normalizedLandIds);
-      return { planted: true, plantOrSeedId: plantOrSeedId, landCount: normalizedLandIds.length, payload: payload, mode: 'multi' };
+      return {
+        planted: true,
+        plantOrSeedId: plantOrSeedId,
+        landCount: normalizedLandIds.length,
+        requestedLandCount: requestedLandIds.length,
+        requestedLandIds: requestedLandIds,
+        payload: payload,
+        mode: 'multi'
+      };
+    }
+
+    if (normalizedLandIds.length === 0) {
+      return {
+        planted: false,
+        plantOrSeedId: plantOrSeedId,
+        landCount: 0,
+        requestedLandCount: requestedLandIds.length,
+        requestedLandIds: requestedLandIds,
+        landIds: normalizedLandIds,
+        mode: 'single',
+        reason: 'no_plantable_empty_lands'
+      };
     }
 
     const payloads = [];
     for (let i = 0; i < normalizedLandIds.length; i += 1) {
       payloads.push(dispatchSingleLandPlant(plantOrSeedId, normalizedLandIds[i]));
     }
-    return { planted: true, plantOrSeedId: plantOrSeedId, landCount: normalizedLandIds.length, payloads: payloads, mode: 'single' };
+    return {
+      planted: true,
+      plantOrSeedId: plantOrSeedId,
+      landCount: normalizedLandIds.length,
+      requestedLandCount: requestedLandIds.length,
+      requestedLandIds: requestedLandIds,
+      payloads: payloads,
+      mode: 'single'
+    };
   }
 
   async function plantSeedsOnLandsVerified(seedCandidates, landIds, opts) {
     const candidates = Array.isArray(seedCandidates) ? seedCandidates : [seedCandidates];
-    const targetLandIds = Array.isArray(landIds) ? landIds.filter(function (id) {
+    const requestedLandIds = Array.isArray(landIds) ? landIds.filter(function (id) {
       return Number.isFinite(Number(id)) && Number(id) > 0;
     }).map(function (id) { return Number(id); }) : [];
-    if (targetLandIds.length === 0) throw new Error('landIds required');
+    if (requestedLandIds.length === 0) throw new Error('landIds required');
     const attempts = [];
     const waitAfterPlantMs = Math.max(200, Number(opts && opts.waitAfterPlantMs) || 700);
     const beforeEmptyIds = getEmptyLandIds();
+    const beforePlantableLandSet = new Set(beforeEmptyIds);
+    const targetLandIds = requestedLandIds.filter(function (landId) {
+      return beforePlantableLandSet.has(landId);
+    });
+    const skippedLandIds = requestedLandIds.filter(function (landId) {
+      return !beforePlantableLandSet.has(landId);
+    });
+    if (targetLandIds.length === 0) {
+      return {
+        ok: false,
+        reason: 'no_plantable_empty_lands',
+        attempts: attempts,
+        requestedLandIds: requestedLandIds,
+        skippedLandIds: skippedLandIds,
+        beforeEmptyIds: beforeEmptyIds,
+        afterEmptyIds: beforeEmptyIds.slice()
+      };
+    }
 
     for (let i = 0; i < candidates.length; i += 1) {
       const candidate = Number(candidates[i]) || 0;
@@ -6890,6 +6961,8 @@
         candidateSeedId: candidate,
         plantResult: plantResult,
         dispatchError: dispatchError,
+        requestedLandIds: requestedLandIds,
+        skippedLandIds: skippedLandIds,
         beforeEmptyIds: beforeEmptyIds,
         afterEmptyIds: afterEmptyIds,
         plantedCount: plantedCount,
@@ -6902,6 +6975,8 @@
           candidateSeedId: candidate,
           plantedCount: plantedCount,
           attempts: attempts,
+          requestedLandIds: requestedLandIds,
+          skippedLandIds: skippedLandIds,
           beforeEmptyIds: beforeEmptyIds,
           afterEmptyIds: afterEmptyIds,
         };
@@ -6912,6 +6987,8 @@
       ok: false,
       reason: 'plant_verify_failed',
       attempts: attempts,
+      requestedLandIds: requestedLandIds,
+      skippedLandIds: skippedLandIds,
       beforeEmptyIds: beforeEmptyIds,
       afterEmptyIds: getEmptyLandIds(),
     };
@@ -6938,10 +7015,15 @@
       const grids = Array.isArray(status.grids) ? status.grids : [];
       for (let i = 0; i < grids.length; i++) {
         const g = grids[i];
-        if (g && g.stageKind === 'empty' && g.landId != null) {
+        if (isPlantableEmptyGrid(g) && g.landId != null) {
           emptyLandIds.push(g.landId);
         }
       }
+    } else {
+      const plantableLandSet = new Set(getEmptyLandIds());
+      emptyLandIds = normalizeLandIds(emptyLandIds).filter(function (landId) {
+        return plantableLandSet.has(landId);
+      });
     }
     if (emptyLandIds.length === 0) {
       return { ok: true, mode: mode, action: 'no_empty_lands', emptyCount: 0 };
