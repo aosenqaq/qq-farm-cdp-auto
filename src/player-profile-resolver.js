@@ -47,7 +47,7 @@ function normalizeProfile(profile) {
     plantLevel: plantLevel > 0 ? plantLevel : null,
     farmMaxLandLevel: farmMaxLandLevel > 0 ? farmMaxLandLevel : null,
     exp: isFiniteNumber(raw.exp) ? Number(raw.exp) : null,
-    nextLevelExp: isFiniteNumber(raw.nextLevelExp) ? Number(raw.nextLevelExp) : null,
+    nextLevelExp: isFiniteNumber(raw.nextLevelExp) && Number(raw.nextLevelExp) > 0 ? Number(raw.nextLevelExp) : null,
     playerId: isFiniteNumber(raw.playerId) ? Number(raw.playerId) : null,
     gold: isFiniteNumber(raw.gold) ? Number(raw.gold) : null,
     coupon: isFiniteNumber(raw.coupon) ? Number(raw.coupon) : null,

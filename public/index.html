@@ -363,6 +363,109 @@
       line-height: 1.6;
     }
 
+    .auto-module-status-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 12px;
+      margin: 12px 0 16px;
+    }
+
+    .auto-module-card {
+      display: grid;
+      gap: 8px;
+      min-height: 138px;
+      padding: 14px 15px;
+      border-radius: var(--radius-md);
+      border: 1px solid rgba(109, 81, 50, 0.12);
+      background: linear-gradient(180deg, rgba(255, 253, 248, 0.96), rgba(246, 236, 220, 0.9));
+    }
+
+    .auto-module-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .auto-module-name {
+      font-size: 0.92rem;
+      font-weight: 700;
+      line-height: 1.4;
+      color: var(--text);
+    }
+
+    .auto-module-state {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 26px;
+      padding: 0 10px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+      font-size: 0.76rem;
+      font-weight: 700;
+      line-height: 1;
+      white-space: nowrap;
+      flex: 0 0 auto;
+    }
+
+    .auto-module-state.is-on {
+      color: #315f2f;
+      background: rgba(79, 138, 60, 0.12);
+      border-color: rgba(79, 138, 60, 0.2);
+    }
+
+    .auto-module-state.is-wait {
+      color: #8a6118;
+      background: rgba(193, 138, 28, 0.12);
+      border-color: rgba(193, 138, 28, 0.2);
+    }
+
+    .auto-module-state.is-off {
+      color: var(--muted);
+      background: rgba(109, 81, 50, 0.08);
+      border-color: rgba(109, 81, 50, 0.12);
+    }
+
+    .auto-module-state.is-pause {
+      color: #9a4b2b;
+      background: rgba(198, 91, 59, 0.12);
+      border-color: rgba(198, 91, 59, 0.2);
+    }
+
+    .auto-module-label {
+      font-size: 0.74rem;
+      font-weight: 700;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .auto-module-next {
+      font-size: 0.9rem;
+      font-weight: 600;
+      line-height: 1.45;
+      color: var(--text);
+      word-break: break-word;
+    }
+
+    .auto-module-detail {
+      font-size: 0.82rem;
+      line-height: 1.55;
+      color: var(--muted);
+    }
+
+    .auto-module-empty {
+      grid-column: 1 / -1;
+      padding: 14px 15px;
+      border-radius: var(--radius-md);
+      border: 1px dashed rgba(109, 81, 50, 0.16);
+      background: rgba(255, 252, 247, 0.72);
+      color: var(--muted);
+      font-size: 0.88rem;
+      line-height: 1.6;
+    }
+
     .metric-grid {
       display: grid;
       grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -769,6 +872,134 @@
       line-height: 1.55;
     }
 
+    .github-float-btn {
+      position: fixed;
+      left: 16px;
+      top: 50%;
+      transform: translateY(-50%);
+      z-index: 58;
+      width: 52px;
+      height: 52px;
+      border: 1px solid rgba(109, 81, 50, 0.18);
+      border-radius: 999px;
+      background: rgba(255, 252, 247, 0.94);
+      box-shadow: 0 16px 32px rgba(101, 74, 40, 0.16);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #1f2328;
+      cursor: pointer;
+      backdrop-filter: blur(10px);
+      transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+    }
+
+    .github-float-btn:hover {
+      transform: translateY(-50%) scale(1.04);
+      border-color: rgba(79, 138, 60, 0.32);
+      box-shadow: 0 18px 36px rgba(101, 74, 40, 0.2);
+    }
+
+    .github-float-btn svg {
+      width: 26px;
+      height: 26px;
+      display: block;
+      fill: currentColor;
+    }
+
+    .project-info-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 90;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(31, 24, 18, 0.42);
+      backdrop-filter: blur(4px);
+    }
+
+    .project-info-overlay[hidden] {
+      display: none;
+    }
+
+    .project-info-modal {
+      width: min(520px, calc(100vw - 24px));
+      max-height: min(82vh, 720px);
+      overflow: auto;
+      padding: 22px 22px 18px;
+      border: 1px solid rgba(109, 81, 50, 0.16);
+      border-radius: 20px;
+      background: linear-gradient(180deg, rgba(255, 252, 247, 0.98), rgba(247, 240, 229, 0.98));
+      box-shadow: 0 28px 64px rgba(50, 38, 23, 0.28);
+      color: var(--text);
+    }
+
+    .project-info-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .project-info-head h3 {
+      margin: 0;
+      font-size: 1.05rem;
+    }
+
+    .project-info-close {
+      width: 34px;
+      height: 34px;
+      border: 1px solid rgba(109, 81, 50, 0.18);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.78);
+      color: var(--text);
+      font-size: 1.1rem;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .project-info-body {
+      display: grid;
+      gap: 12px;
+      font-size: 0.92rem;
+      line-height: 1.7;
+    }
+
+    .project-info-body p {
+      margin: 0;
+    }
+
+    .project-info-body a {
+      color: var(--accent-strong);
+      word-break: break-all;
+    }
+
+    @media (max-width: 720px) {
+      .github-float-btn {
+        left: 10px;
+        width: 46px;
+        height: 46px;
+      }
+
+      .github-float-btn svg {
+        width: 23px;
+        height: 23px;
+      }
+
+      .project-info-overlay {
+        padding: 14px;
+        align-items: flex-end;
+      }
+
+      .project-info-modal {
+        width: min(100%, 100%);
+        max-height: 88vh;
+        padding: 18px 18px 16px;
+        border-radius: 18px 18px 12px 12px;
+      }
+    }
+
     .friend-toolbar {
       display: flex;
       flex-wrap: wrap;
@@ -1063,6 +1294,47 @@
       gap: 8px;
       justify-content: center;
       margin-top: 12px;
+    }
+
+    .land-card-actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .land-action-btn {
+      min-height: 34px;
+      padding: 0.5rem 0.65rem;
+      border-radius: 12px;
+      border: 1px solid rgba(109, 81, 50, 0.12);
+      cursor: pointer;
+      font-size: 0.78rem;
+      font-weight: 700;
+      transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
+    }
+
+    .land-action-btn:hover {
+      transform: translateY(-1px);
+    }
+
+    .land-action-btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .land-action-btn.normal {
+      color: #fefcf7;
+      background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+      box-shadow: 0 10px 18px rgba(79, 138, 60, 0.16);
+    }
+
+    .land-action-btn.organic {
+      color: #225765;
+      background: rgba(63, 140, 158, 0.1);
+      border-color: rgba(63, 140, 158, 0.18);
     }
 
     .land-mini-tag {
@@ -1443,6 +1715,7 @@
       <button type="button" class="tab-btn" data-tab="preview" role="tab">画面预览</button>
       <button type="button" class="tab-btn" data-tab="friends" role="tab">好友农场</button>
       <button type="button" class="tab-btn" data-tab="account" role="tab">账户状态</button>
+      <button type="button" class="tab-btn" data-tab="logs" role="tab">日志中心</button>
     </nav>
 
     <section class="panel" id="panel-runtime" data-tab="runtime">
@@ -1626,18 +1899,22 @@
     <section class="panel on" id="panel-automation" data-tab="automation">
       <div class="panel-grid auto-grid">
         <article class="card span-full">
-          <div class="card-head">
+          <div class="card-head" hidden>
             <div>
               <h2>自动农场</h2>
-              <p class="summary-note" id="txtAutoFarmState">未加载自动化状态</p>
+              <p class="summary-note" id="txtAutoFarmState" hidden>未加载自动化状态</p>
             </div>
+          </div>
+
+          <div class="auto-module-status-grid" id="autoFarmModuleStatusGrid">
+            <div class="auto-module-empty">自动化状态加载后，这里会按模块显示当前开关状态和下次预计运行时间。</div>
           </div>
 
           <div class="check-grid">
             <label class="check-card">
               <input type="checkbox" id="autoOwnEnabled" />
               <div>
-                <strong>自己农场</strong>
+                <strong>基础任务</strong>
                 <small>定时执行一键收获、浇水、除草、杀虫。</small>
               </div>
             </label>
@@ -1646,6 +1923,20 @@
               <div>
                 <strong>好友偷菜</strong>
                 <small>定时扫描好友列表，进入可偷好友农场执行一键摘取。</small>
+              </div>
+            </label>
+            <label class="check-card">
+              <input type="checkbox" id="autoFriendHelpEnabled" />
+              <div>
+                <strong>好友帮忙</strong>
+                <small>定时扫描好友列表，对可浇水、除草、杀虫的好友执行一键帮忙。</small>
+              </div>
+            </label>
+            <label class="check-card">
+              <input type="checkbox" id="autoFriendHelpStopOnExpLimit" />
+              <div>
+                <strong>经验满额停帮忙</strong>
+                <small>当天帮忙经验达到 1500 后自动暂停帮忙，不影响其他自动化模块。</small>
               </div>
             </label>
             <label class="check-card">
@@ -1740,12 +2031,12 @@
           <p class="summary-note" id="txtPlantStrategyPreview">等待策略分析，稍后会显示当前会自动种植的作物。</p>
 
           <div class="card" style="padding:16px;margin:16px 0">
-            <div class="card-head" style="margin-bottom:12px">
-              <div>
-                <h2>自动施肥策略</h2>
-                <p class="hint">先补齐策略配置，后续再接入实际施肥执行。</p>
+              <div class="card-head" style="margin-bottom:12px">
+                <div>
+                  <h2>自动施肥策略</h2>
+                  <p class="hint">自动施肥会在自动种植之后执行；无机+有机会在临近成熟时补一轮有机催熟。</p>
+                </div>
               </div>
-            </div>
 
             <div class="check-grid" style="margin-bottom:12px">
               <label class="check-card">
@@ -1789,7 +2080,13 @@
                     <option value="organic">仅有机化肥</option>
                   </select>
                 </label>
-                <label class="field-block">
+                <label class="field-block" id="autoFertilizerRushThresholdField">
+                  <span>催熟阈值(秒)</span>
+                  <input type="number" min="0" id="autoFertilizerRushThresholdSec" placeholder="300" />
+                </label>
+              </div>
+
+              <label class="field-block" style="margin-top:12px">
                   <span>施肥范围</span>
                   <div class="tag-row" id="autoFertilizerLandTypes">
                     <label class="tag-check"><input type="checkbox" value="gold" /> 金土地</label>
@@ -1797,8 +2094,7 @@
                     <label class="tag-check"><input type="checkbox" value="red" /> 红土地</label>
                     <label class="tag-check"><input type="checkbox" value="normal" /> 普通土地</label>
                   </div>
-                </label>
-              </div>
+              </label>
 
               <div class="input-grid compact" id="fertilizerBuyFields" style="margin-top:12px">
                 <label class="field-block">
@@ -2067,11 +2363,17 @@
             <div class="today-stat-item"><span class="today-stat-label">出售</span><span class="today-stat-value">0</span></div>
           </div>
         </article>
+      </div>
+    </section>
 
-        <div class="panel-grid" style="grid-template-columns:minmax(0, 1.1fr) minmax(0, 0.9fr);gap:16px">
+    <section class="panel" id="panel-logs" data-tab="logs">
+      <div class="panel-grid" style="grid-template-columns:minmax(0, 1.1fr) minmax(0, 0.9fr);gap:16px">
         <article class="card">
           <div class="card-head">
-            <h2>自动农场日志</h2>
+            <div>
+              <h2>自动农场日志</h2>
+              <p class="hint">只保留自动任务的巡检、执行和跳过结果，方便回溯每轮动作。</p>
+            </div>
             <button type="button" class="ghost" id="btnAutoRefresh">刷新状态</button>
           </div>
           <pre class="log side" id="logAutoFarm"></pre>
@@ -2089,7 +2391,6 @@
           </div>
           <pre class="log side" id="log"></pre>
         </article>
-        </div>
       </div>
     </section>
 
@@ -2124,6 +2425,39 @@
     </footer>
   </div>
 
+  <button
+    type="button"
+    id="btnProjectInfo"
+    class="github-float-btn"
+    aria-label="打开项目说明"
+    title="项目说明"
+  >
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M8 0C3.58 0 0 3.58 0 8a8.01 8.01 0 0 0 5.47 7.59c.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82A7.57 7.57 0 0 1 8 4.84c.68 0 1.37.09 2.01.27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"></path>
+    </svg>
+  </button>
+
+  <div id="projectInfoOverlay" class="project-info-overlay" hidden>
+    <div class="project-info-modal" role="dialog" aria-modal="true" aria-labelledby="projectInfoTitle">
+      <div class="project-info-head">
+        <h3 id="projectInfoTitle">项目说明</h3>
+        <button type="button" id="btnProjectInfoClose" class="project-info-close" aria-label="关闭项目说明">×</button>
+      </div>
+      <div class="project-info-body">
+        <p>本项目为免费开源项目，如果你是付费购买的，请帮我问候贩子的全家。</p>
+        <p>
+          项目地址：
+          <a href="https://github.com/aosenqaq/qq-farm-cdp-auto" target="_blank" rel="noopener noreferrer">https://github.com/aosenqaq/qq-farm-cdp-auto</a>
+        </p>
+        <p>
+          推荐移动云电脑挂机购买地址（微信打开）：
+          <a href="http://mx.qrurl.net/h5/wxa/link?sid=26411gZG7YW" target="_blank" rel="noopener noreferrer">http://mx.qrurl.net/h5/wxa/link?sid=26411gZG7YW</a>
+        </p>
+        <p>QQ群聊：922286747</p>
+      </div>
+    </div>
+  </div>
+
   <div id="toastStack" class="toast-stack" aria-live="polite" aria-atomic="true"></div>
 
   <script>
@@ -2155,6 +2489,7 @@
       const friendListActive = document.getElementById("friendListActive");
       const friendListBlocked = document.getElementById("friendListBlocked");
       const txtAutoFarmState = document.getElementById("txtAutoFarmState");
+      const autoFarmModuleStatusGrid = document.getElementById("autoFarmModuleStatusGrid");
       const txtPlantStrategyPreview = document.getElementById("txtPlantStrategyPreview");
       const logAutoFarm = document.getElementById("logAutoFarm");
       const btnAccountRefresh = document.getElementById("btnAccountRefresh");
@@ -2164,6 +2499,9 @@
       const landSummaryRow = document.getElementById("landSummaryRow");
       const landDetailGrid = document.getElementById("landDetailGrid");
       const maturityEventList = document.getElementById("maturityEventList");
+      const btnProjectInfo = document.getElementById("btnProjectInfo");
+      const projectInfoOverlay = document.getElementById("projectInfoOverlay");
+      const btnProjectInfoClose = document.getElementById("btnProjectInfoClose");
       const accountMetricName = document.getElementById("accountMetricName");
       const accountMetricLevel = document.getElementById("accountMetricLevel");
       const accountMetricGold = document.getElementById("accountMetricGold");
@@ -2190,6 +2528,8 @@
       const previewStage = imgPreview ? imgPreview.closest(".preview-stage") : null;
       const autoOwnEnabled = document.getElementById("autoOwnEnabled");
       const autoFriendEnabled = document.getElementById("autoFriendEnabled");
+      const autoFriendHelpEnabled = document.getElementById("autoFriendHelpEnabled");
+      const autoFriendHelpStopOnExpLimit = document.getElementById("autoFriendHelpStopOnExpLimit");
       const autoRefreshFriendList = document.getElementById("autoRefreshFriendList");
       const autoReturnHome = document.getElementById("autoReturnHome");
       const autoOwnIntervalSec = document.getElementById("autoOwnIntervalSec");
@@ -2212,9 +2552,11 @@
       const autoFertilizerBuyMode = document.getElementById("autoFertilizerBuyMode");
       const autoFertilizerBuyMax = document.getElementById("autoFertilizerBuyMax");
       const autoFertilizerBuyThreshold = document.getElementById("autoFertilizerBuyThreshold");
+      const autoFertilizerRushThresholdSec = document.getElementById("autoFertilizerRushThresholdSec");
       const autoFertilizerLandTypes = document.getElementById("autoFertilizerLandTypes");
       const fertilizerStrategyFields = document.getElementById("fertilizerStrategyFields");
       const fertilizerBuyFields = document.getElementById("fertilizerBuyFields");
+      const autoFertilizerRushThresholdField = document.getElementById("autoFertilizerRushThresholdField");
       const txtFertilizerStrategyPreview = document.getElementById("txtFertilizerStrategyPreview");
       const autoFriendQuietHoursEnabled = document.getElementById("autoFriendQuietHoursEnabled");
       const autoFriendQuietHoursStart = document.getElementById("autoFriendQuietHoursStart");
@@ -2260,6 +2602,7 @@
       let landState = null;
       let landSnapshotMap = {};
       let landMaturityEvents = [];
+      const landFertilizePending = new Set();
       let stealCropOptionList = [];
       let stealCropBlacklistSelection = [];
       let stealBlacklistCollapsed = true;
@@ -3064,10 +3407,9 @@
             const actions = document.createElement("div");
             actions.className = "friend-actions";
             [
-              { action: "enter", label: "进入农场", cls: "action secondary" },
               { action: "steal", label: "偷菜", cls: "action" },
               { action: "help", label: "帮忙", cls: "ghost" },
-              { action: "toggle-blacklist", label: blocked ? "取消拉黑" : "拉黑", cls: blocked ? "ghost" : "action secondary" },
+              { action: "blacklist_toggle", label: blocked ? "取消拉黑" : "拉黑", cls: blocked ? "ghost" : "action secondary" },
             ].forEach(function (spec) {
               const btn = document.createElement("button");
               btn.type = "button";
@@ -3193,10 +3535,35 @@
           });
       }
 
+      function handleFriendActionCardClick(event) {
+        const target = event && event.target && typeof event.target.closest === "function"
+          ? event.target.closest("button[data-friend-action]")
+          : null;
+        if (!target) return;
+        const action = String(target.getAttribute("data-friend-action") || "").trim();
+        const friendTarget = String(target.getAttribute("data-target") || "").trim();
+        const rule = String(target.getAttribute("data-rule") || "").trim();
+        if (!action) return;
+        if (action === "blacklist_toggle") {
+          sendFriendAction(action, {
+            target: friendTarget,
+            rule: rule || friendTarget,
+          });
+          return;
+        }
+        if (!friendTarget) {
+          txtFriendSummary.textContent = "缺少好友目标，无法执行操作";
+          return;
+        }
+        sendFriendAction(action, { target: friendTarget });
+      }
+
       function applyAutoFarmConfigToForm(cfg) {
         cfg = cfg || {};
         autoOwnEnabled.checked = !!cfg.autoFarmOwnEnabled;
         autoFriendEnabled.checked = !!cfg.autoFarmFriendEnabled;
+        autoFriendHelpEnabled.checked = !!cfg.autoFarmFriendHelpEnabled;
+        autoFriendHelpStopOnExpLimit.checked = cfg.autoFarmFriendHelpStopOnExpLimit !== false;
         autoRefreshFriendList.checked = cfg.autoFarmRefreshFriendList !== false;
         autoReturnHome.checked = cfg.autoFarmReturnHome !== false;
         autoOwnIntervalSec.value = cfg.autoFarmOwnIntervalSec != null ? cfg.autoFarmOwnIntervalSec : 30;
@@ -3218,6 +3585,7 @@
         autoFertilizerBuyMode.value = cfg.autoFarmFertilizerBuyMode || "threshold";
         autoFertilizerBuyMax.value = cfg.autoFarmFertilizerBuyMax != null ? cfg.autoFarmFertilizerBuyMax : 10;
         autoFertilizerBuyThreshold.value = cfg.autoFarmFertilizerBuyThreshold != null ? cfg.autoFarmFertilizerBuyThreshold : 100;
+        autoFertilizerRushThresholdSec.value = cfg.autoFarmFertilizerRushThresholdSec != null ? cfg.autoFarmFertilizerRushThresholdSec : 300;
         setCheckedFertilizerLandTypes(cfg.autoFarmFertilizerLandTypes);
         autoFriendQuietHoursEnabled.checked = !!cfg.autoFarmFriendQuietHoursEnabled;
         autoFriendQuietHoursStart.value = cfg.autoFarmFriendQuietHoursStart || "23:00";
@@ -3310,11 +3678,15 @@
 
       function syncFertilizerStrategyFields() {
         var enabled = !!(autoFertilizerEnabled && autoFertilizerEnabled.checked);
+        var mode = String(autoFertilizerMode && autoFertilizerMode.value || "none");
         var buying = !!(autoFertilizerBuy && autoFertilizerBuy.checked);
         var unlimited = String(autoFertilizerBuyMode && autoFertilizerBuyMode.value || "threshold") === "unlimited";
         if (fertilizerStrategyFields) {
           fertilizerStrategyFields.style.opacity = enabled ? "1" : "0.55";
           fertilizerStrategyFields.style.pointerEvents = enabled ? "" : "none";
+        }
+        if (autoFertilizerRushThresholdField) {
+          autoFertilizerRushThresholdField.style.display = enabled && mode === "both" ? "" : "none";
         }
         if (fertilizerBuyFields) {
           fertilizerBuyFields.style.display = buying ? "" : "none";
@@ -3559,6 +3931,8 @@
         return {
           autoFarmOwnEnabled: !!autoOwnEnabled.checked,
           autoFarmFriendEnabled: !!autoFriendEnabled.checked,
+          autoFarmFriendHelpEnabled: !!(autoFriendHelpEnabled && autoFriendHelpEnabled.checked),
+          autoFarmFriendHelpStopOnExpLimit: !!(autoFriendHelpStopOnExpLimit && autoFriendHelpStopOnExpLimit.checked),
           autoFarmRefreshFriendList: !!autoRefreshFriendList.checked,
           autoFarmReturnHome: !!autoReturnHome.checked,
           autoFarmOwnIntervalSec: Number(autoOwnIntervalSec.value || 30),
@@ -3582,6 +3956,7 @@
           autoFarmFertilizerBuyMax: Number(autoFertilizerBuyMax.value || 10),
           autoFarmFertilizerBuyMode: autoFertilizerBuyMode.value || "threshold",
           autoFarmFertilizerBuyThreshold: Number(autoFertilizerBuyThreshold.value || 100),
+          autoFarmFertilizerRushThresholdSec: Number(autoFertilizerRushThresholdSec.value || 300),
           autoFarmFriendQuietHoursEnabled: !!autoFriendQuietHoursEnabled.checked,
           autoFarmFriendQuietHoursStart: String(autoFriendQuietHoursStart.value || "23:00").trim() || "23:00",
           autoFarmFriendQuietHoursEnd: String(autoFriendQuietHoursEnd.value || "07:00").trim() || "07:00",
@@ -3614,6 +3989,7 @@
         var mode = String(autoFertilizerMode && autoFertilizerMode.value || "none");
         var lands = getCheckedFertilizerLandTypes().map(getFertilizerLandTypeLabel);
         var buying = !!(autoFertilizerBuy && autoFertilizerBuy.checked);
+        var rushThresholdSec = Number(autoFertilizerRushThresholdSec && autoFertilizerRushThresholdSec.value || 300);
         var summary = [];
         if (!enabled) {
           txtFertilizerStrategyPreview.textContent = "当前未启用自动施肥。配置会保留，但自动化流程暂不使用施肥策略。";
@@ -3621,6 +3997,9 @@
         }
         summary.push("当前策略: " + getFertilizerModeLabel(mode));
         summary.push("范围: " + (lands.length ? lands.join("、") : "未选择"));
+        if (mode === "both") {
+          summary.push("成熟前 " + (Number.isFinite(rushThresholdSec) && rushThresholdSec >= 0 ? Math.floor(rushThresholdSec) : 300) + " 秒补有机催熟");
+        }
         if (autoFertilizerMultiSeason && autoFertilizerMultiSeason.checked) {
           summary.push("已开启多季补肥");
         }
@@ -3634,7 +4013,6 @@
           var modeMap = { threshold: "容器不足时购买", unlimited: "无限购买" };
           summary.push("购买: " + (buyMap[buyType] || buyType) + " / " + (modeMap[buyMode] || buyMode));
         }
-        summary.push("当前仅保存策略，执行逻辑后续再接入。");
         txtFertilizerStrategyPreview.textContent = summary.join("，");
       }
 
@@ -3742,6 +4120,14 @@
       }
 
       function renderAccountStatus(profile, errorText) {
+        var progress = profile && profile.levelProgress ? profile.levelProgress : null;
+        var effectiveTotalExp = Number(profile && profile.totalExp);
+        if (!Number.isFinite(effectiveTotalExp)) {
+          effectiveTotalExp = Number(progress && progress.totalExp);
+        }
+        if (!Number.isFinite(effectiveTotalExp)) {
+          effectiveTotalExp = Number(profile && profile.exp);
+        }
         if (
           profile && accountProfile &&
           profile.gid != null && accountProfile.gid != null &&
@@ -3751,10 +4137,10 @@
         }
         accountProfile = profile || null;
         accountProfileUpdatedAt = Date.now();
-        if (profile && profile.exp != null) {
+        if (profile && Number.isFinite(effectiveTotalExp) && effectiveTotalExp >= 0) {
           accountProfileHistory.push({
             at: accountProfileUpdatedAt,
-            exp: Number(profile.exp) || 0,
+            exp: effectiveTotalExp,
             level: Number(profile.level) || 0,
           });
           accountProfileHistory = accountProfileHistory
@@ -3767,7 +4153,6 @@
         if (accountMetricLevel) accountMetricLevel.textContent = profile && profile.level != null ? ("Lv." + profile.level) : "--";
         if (accountMetricGold) accountMetricGold.textContent = formatAccountMetric(profile && profile.gold);
 
-        var progress = profile && profile.levelProgress ? profile.levelProgress : null;
         var progressCurrent = Number(progress && progress.current);
         var progressNeeded = Number(progress && progress.needed);
         var progressPercent = Number(progress && progress.percent);
@@ -3823,7 +4208,11 @@
             if (profile.gid != null) parts.push("gid=" + profile.gid);
             if (profile.level != null) parts.push("Lv." + profile.level);
             if (profile.gold != null) parts.push("金币 " + formatAccountMetric(profile.gold));
-            if (profile.exp != null) parts.push("经验 " + profile.exp + (profile.nextLevelExp != null ? ("/" + profile.nextLevelExp) : ""));
+            if (Number.isFinite(progressCurrent) && Number.isFinite(progressNeeded) && progressNeeded > 0) {
+              parts.push("经验 " + formatAccountMetric(progressCurrent) + "/" + formatAccountMetric(progressNeeded));
+            } else if (profile.exp != null) {
+              parts.push("经验 " + profile.exp + (profile.nextLevelExp != null ? ("/" + profile.nextLevelExp) : ""));
+            }
             if (progress && progress.percent != null) parts.push("升级进度 " + progress.percent + "%");
             if (expRatePerHour > 0) parts.push("经验/小时 " + Math.floor(expRatePerHour));
             if (profile._source) parts.push("来源 " + profile._source);
@@ -4056,6 +4445,128 @@
         }).join("");
       }
 
+      function getLandFertilizeActionKey(landId, mode) {
+        return String(Number(landId) || 0) + ":" + String(mode || "normal").trim().toLowerCase();
+      }
+
+      function isLandFertilizeBusyForLand(landId) {
+        return landFertilizePending.has(getLandFertilizeActionKey(landId, "normal")) ||
+          landFertilizePending.has(getLandFertilizeActionKey(landId, "organic"));
+      }
+
+      function getLandFertilizeDisabledReason(item) {
+        if (!landState || landState.farmType !== "own") return "仅支持自己农场手动单地块施肥";
+        if (!item || !Number(item.landId)) return "地块信息不完整";
+        if (String(item.status || "") !== "growing") return "仅生长中的作物可施肥";
+        return "";
+      }
+
+      function buildLandFertilizeButton(item, mode) {
+        var resolvedMode = String(mode || "normal").trim().toLowerCase() === "organic" ? "organic" : "normal";
+        var disabledReason = getLandFertilizeDisabledReason(item);
+        var busy = isLandFertilizeBusyForLand(item && item.landId);
+        var busyThisMode = landFertilizePending.has(getLandFertilizeActionKey(item && item.landId, resolvedMode));
+        var label = busyThisMode ? "施肥中..." : (resolvedMode === "organic" ? "有机" : "无机");
+        var disabled = !!disabledReason || busy;
+        return [
+          '<button type="button" class="land-action-btn ' + resolvedMode + '"',
+          ' data-land-fertilize="' + resolvedMode + '"',
+          ' data-land-id="' + escapeHtml(item && item.landId) + '"',
+          disabledReason ? (' title="' + escapeHtml(disabledReason) + '"') : "",
+          disabled ? " disabled" : "",
+          ">" + escapeHtml(label) + "</button>"
+        ].join("");
+      }
+
+      function renderLandCardActions(item) {
+        return [
+          '<div class="land-card-actions">',
+          buildLandFertilizeButton(item, "normal"),
+          buildLandFertilizeButton(item, "organic"),
+          "</div>"
+        ].join("");
+      }
+
+      function findLandDetailById(landId) {
+        if (!landState || !Array.isArray(landState.lands)) return null;
+        var targetLandId = Number(landId) || 0;
+        if (!targetLandId) return null;
+        for (var i = 0; i < landState.lands.length; i += 1) {
+          var item = landState.lands[i];
+          if (Number(item && item.landId) === targetLandId) return item;
+        }
+        return null;
+      }
+
+      function runLandFertilizeAction(landId, mode) {
+        var targetLandId = Number(landId) || 0;
+        var resolvedMode = String(mode || "normal").trim().toLowerCase() === "organic" ? "organic" : "normal";
+        if (!targetLandId) return Promise.resolve(null);
+        if (isLandFertilizeBusyForLand(targetLandId)) return Promise.resolve(null);
+        var item = findLandDetailById(targetLandId);
+        var disabledReason = getLandFertilizeDisabledReason(item);
+        if (disabledReason) {
+          appendLine("地块施肥已跳过", {
+            landId: targetLandId,
+            mode: resolvedMode,
+            reason: disabledReason,
+          });
+          return Promise.resolve(null);
+        }
+        var actionKey = getLandFertilizeActionKey(targetLandId, resolvedMode);
+        landFertilizePending.add(actionKey);
+        if (landState) renderLandDetails(landState, "");
+        appendLine("开始单地块施肥", { landId: targetLandId, mode: resolvedMode });
+        return fetch("/api/fertilize-land", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            landId: targetLandId,
+            type: resolvedMode,
+            dryRun: false,
+            internalFallback: true,
+            waitAfterOpen: 450,
+            waitAfterAction: 700,
+          }),
+        })
+          .then(readJsonResponse)
+          .then(function (j) {
+            if (!(j && j.ok && j.data && j.data.ok !== false)) {
+              throw new Error(
+                j && j.error
+                  ? j.error
+                  : (j && j.data && j.data.reason ? j.data.reason : "fertilize failed")
+              );
+            }
+            var result = j.data || {};
+            appendLine("单地块施肥完成", {
+              landId: targetLandId,
+              mode: resolvedMode,
+              executionSource: result.executionSource || null,
+              deltaMatureInSec: result.deltaMatureInSec,
+              bucketDeltaCount: result.selectedBucketDeltaCount != null ? result.selectedBucketDeltaCount : null,
+              beforeMatureInSec: result.before && result.before.matureInSec != null ? result.before.matureInSec : null,
+              afterMatureInSec: result.after && result.after.matureInSec != null ? result.after.matureInSec : null,
+            });
+            return loadLandDetails().then(function () {
+              return result;
+            });
+          })
+          .catch(function (e) {
+            var err = explainQqSyncError(e);
+            appendLine("单地块施肥失败", {
+              landId: targetLandId,
+              mode: resolvedMode,
+              error: err,
+            });
+            throw e;
+          })
+          .finally(function () {
+            landFertilizePending.delete(actionKey);
+            if (landState) renderLandDetails(landState, "");
+          });
+      }
+
       function renderLandDetails(data, errorText) {
         landState = data || null;
         if (errorText) {
@@ -4121,7 +4632,7 @@
                   escapeHtml(item.matureEtaText || item.statusLabel || "--") +
                 "</p>",
                 '<div class="land-card-meta">',
-                '<span>' + escapeHtml(item.landTypeLabel || "待识别土地") + (item.landLevel != null ? (" · Lv." + item.landLevel) : "") + "</span>",
+                (item.landLevel != null ? ('<span>Lv.' + escapeHtml(item.landLevel) + '</span>') : ""),
                 '<span>' + escapeHtml(item.phaseName || "阶段未知") + (item.totalStages ? (" · " + item.currentStage + "/" + item.totalStages) : "") + "</span>",
                 '<span>' + escapeHtml(item.growTimeText ? ("完整生长 " + item.growTimeText) : "完整生长时间未知") + "</span>",
                 '<span>' + escapeHtml(
@@ -4130,6 +4641,7 @@
                     : ("季数 " + (item.totalSeason || 1) + "/" + (item.totalSeason || 1))
                 ) + "</span>",
                 "</div>",
+                renderLandCardActions(item),
                 '<div class="land-card-tags">' + tags.join("") + "</div>",
                 "</article>"
               ].join("");
@@ -4330,6 +4842,176 @@
         return friend.gid != null ? name + " (gid=" + friend.gid + ")" : name;
       }
 
+      function formatFriendHelpExpStateText(state) {
+        var src = state && typeof state === "object" ? state : {};
+        var earnedExp = Math.max(0, Number(src.earnedExp) || 0);
+        var dailyLimit = Math.max(0, Number(src.dailyLimit) || 0);
+        if (dailyLimit > 0) {
+          return "帮忙经验 " + earnedExp + "/" + dailyLimit;
+        }
+        return "帮忙经验 " + earnedExp;
+      }
+
+      function parseDateMs(dateLike) {
+        if (!dateLike) return 0;
+        var date = dateLike instanceof Date ? dateLike : new Date(dateLike);
+        var ms = date instanceof Date ? date.getTime() : Number.NaN;
+        return Number.isFinite(ms) ? ms : 0;
+      }
+
+      function isFriendHelpExpLimitReachedForUi(state) {
+        var config = state && state.config && typeof state.config === "object" ? state.config : {};
+        if (!config.autoFarmFriendHelpEnabled || config.autoFarmFriendHelpStopOnExpLimit === false) return false;
+        var expState = state && state.friendHelpExpState && typeof state.friendHelpExpState === "object" ? state.friendHelpExpState : {};
+        var dailyLimit = Math.max(0, Number(expState.dailyLimit) || 0);
+        if (!(dailyLimit > 0)) return false;
+        var earnedExp = Math.max(0, Number(expState.earnedExp) || 0);
+        return earnedExp >= dailyLimit;
+      }
+
+      function formatAutoFarmModuleNextRunText(state, opts) {
+        var options = opts && typeof opts === "object" ? opts : {};
+        if (!state || !options.enabled) return "--";
+        if (options.paused) return "今日已暂停";
+        if (!state.running) return "待启动";
+        var baseMs = parseDateMs(options.lastRunAt);
+        var intervalSec = Math.max(0, Number(options.intervalSec) || 0);
+        var now = Date.now();
+        if (baseMs > 0 && intervalSec > 0) {
+          var nextMs = baseMs + intervalSec * 1000;
+          if (nextMs <= now + 1000) return "即将执行";
+          return formatDateTime(new Date(nextMs).toISOString());
+        }
+        var fallbackNextMs = parseDateMs(state.nextRunAt);
+        if (fallbackNextMs > 0) {
+          if (fallbackNextMs <= now + 1000) return "即将执行";
+          return formatDateTime(new Date(fallbackNextMs).toISOString());
+        }
+        return state.busy ? "本轮执行中" : "即将执行";
+      }
+
+      function getAutoFarmModuleStatusMeta(state, enabled, paused) {
+        if (paused) {
+          return { text: "已暂停", tone: "pause" };
+        }
+        if (!enabled) {
+          return { text: "未启用", tone: "off" };
+        }
+        if (!state || !state.running) {
+          return { text: "已启用", tone: "wait" };
+        }
+        return { text: "已启用", tone: "on" };
+      }
+
+      function buildAutoFarmModuleStatusItems(state) {
+        var config = state && state.config && typeof state.config === "object" ? state.config : {};
+        var ownEnabled = !!config.autoFarmOwnEnabled;
+        var ownIntervalSec = Math.max(0, Number(config.autoFarmOwnIntervalSec) || 0);
+        var friendIntervalSec = Math.max(0, Number(config.autoFarmFriendIntervalSec) || 0);
+        var plantMode = String(config.autoFarmPlantPrimaryMode || config.autoFarmPlantMode || "none");
+        var plantConfigured = plantMode !== "none";
+        var plantEnabled = ownEnabled && plantConfigured;
+        var fertilizerMode = String(config.autoFarmFertilizerMode || "none");
+        var fertilizerConfigured = !!config.autoFarmFertilizerEnabled && fertilizerMode !== "none";
+        var fertilizerEnabled = ownEnabled && fertilizerConfigured;
+        var friendEnabled = !!config.autoFarmFriendEnabled;
+        var friendHelpEnabled = !!config.autoFarmFriendHelpEnabled;
+        var friendHelpPaused = friendHelpEnabled && isFriendHelpExpLimitReachedForUi(state);
+        var friendHelpDetail = friendHelpEnabled
+          ? formatFriendHelpExpStateText(state && state.friendHelpExpState)
+          : "未启用好友帮忙";
+        if (friendHelpEnabled && config.autoFarmFriendHelpStopOnExpLimit !== false) {
+          friendHelpDetail += " · 满额自动暂停";
+        }
+        var plantDetail = plantConfigured ? getPlantModeLabel(plantMode) : "未配置种植策略";
+        if (plantConfigured && !ownEnabled) {
+          plantDetail += " · 需启用自己农场";
+        }
+        var fertilizerDetail = fertilizerConfigured ? getFertilizerModeLabel(fertilizerMode) : "未配置施肥策略";
+        if (fertilizerConfigured && !ownEnabled) {
+          fertilizerDetail += " · 需启用自己农场";
+        }
+
+        return [
+          {
+            name: "基础任务",
+            status: getAutoFarmModuleStatusMeta(state, ownEnabled, false),
+            nextRunText: formatAutoFarmModuleNextRunText(state, {
+              enabled: ownEnabled,
+              lastRunAt: state && state.lastOwnRunAt,
+              intervalSec: ownIntervalSec,
+            }),
+            detail: "收获 / 浇水 / 除草 / 除虫",
+          },
+          {
+            name: "自动种植",
+            status: getAutoFarmModuleStatusMeta(state, plantEnabled, false),
+            nextRunText: formatAutoFarmModuleNextRunText(state, {
+              enabled: plantEnabled,
+              lastRunAt: state && state.lastOwnRunAt,
+              intervalSec: ownIntervalSec,
+            }),
+            detail: plantDetail,
+          },
+          {
+            name: "自动施肥",
+            status: getAutoFarmModuleStatusMeta(state, fertilizerEnabled, false),
+            nextRunText: formatAutoFarmModuleNextRunText(state, {
+              enabled: fertilizerEnabled,
+              lastRunAt: state && state.lastOwnRunAt,
+              intervalSec: ownIntervalSec,
+            }),
+            detail: fertilizerDetail,
+          },
+          {
+            name: "好友偷菜",
+            status: getAutoFarmModuleStatusMeta(state, friendEnabled, false),
+            nextRunText: formatAutoFarmModuleNextRunText(state, {
+              enabled: friendEnabled,
+              lastRunAt: state && state.lastFriendRunAt,
+              intervalSec: friendIntervalSec,
+            }),
+            detail: friendEnabled ? "按好友轮次执行偷菜扫描" : "未启用好友偷菜",
+          },
+          {
+            name: "好友帮忙",
+            status: getAutoFarmModuleStatusMeta(state, friendHelpEnabled, friendHelpPaused),
+            nextRunText: formatAutoFarmModuleNextRunText(state, {
+              enabled: friendHelpEnabled,
+              paused: friendHelpPaused,
+              lastRunAt: state && state.lastFriendRunAt,
+              intervalSec: friendIntervalSec,
+            }),
+            detail: friendHelpDetail,
+          },
+        ];
+      }
+
+      function renderAutoFarmModuleStatus(state) {
+        if (!autoFarmModuleStatusGrid) return;
+        if (!state) {
+          autoFarmModuleStatusGrid.innerHTML = '<div class="auto-module-empty">自动化状态加载后，这里会按模块显示当前开关状态和下次预计运行时间。</div>';
+          return;
+        }
+        var items = buildAutoFarmModuleStatusItems(state);
+        autoFarmModuleStatusGrid.innerHTML = items.map(function (item) {
+          var toneClass = "is-off";
+          if (item.status && item.status.tone === "on") toneClass = "is-on";
+          else if (item.status && item.status.tone === "wait") toneClass = "is-wait";
+          else if (item.status && item.status.tone === "pause") toneClass = "is-pause";
+          return '' +
+            '<div class="auto-module-card">' +
+              '<div class="auto-module-top">' +
+                '<div class="auto-module-name">' + escapeHtml(item.name || "") + '</div>' +
+                '<span class="auto-module-state ' + toneClass + '">' + escapeHtml(item.status && item.status.text ? item.status.text : "未启用") + '</span>' +
+              '</div>' +
+              '<div class="auto-module-label">下次预计运行</div>' +
+              '<div class="auto-module-next">' + escapeHtml(item.nextRunText || "--") + '</div>' +
+              '<div class="auto-module-detail">' + escapeHtml(item.detail || "") + '</div>' +
+            '</div>';
+        }).join("");
+      }
+
       function buildAutoFarmLogLines(state) {
         if (!state) return ["暂无日志"];
         var events = Array.isArray(state.recentEvents) ? state.recentEvents.slice(-UI_LOG_LIMIT) : [];
@@ -4400,6 +5082,9 @@
           summary.push("运行 " + (Number(src.runs) || 0) + " 轮");
           summary.push("自己 " + (Number(src.ownRuns) || 0) + " 轮");
           summary.push("好友 " + (Number(src.friendRuns) || 0) + " 轮");
+          if (autoFarmState && autoFarmState.friendHelpExpState) {
+            summary.push(formatFriendHelpExpStateText(autoFarmState.friendHelpExpState));
+          }
           txtTodayStatsSummary.textContent = summary.join(" · ");
         }
       }
@@ -4412,13 +5097,15 @@
 
         if (!state) {
           txtAutoFarmState.textContent = "未加载自动化状态";
+          renderAutoFarmModuleStatus(null);
           updateScrollableLogText(logAutoFarm, [], "暂无日志");
           renderTodayStats(null);
           return;
         }
 
         const parts = [];
-        parts.push(state.running ? "运行中" : "已停止");
+        parts.push(state.running ? "自动农场运行中" : "自动农场已停止");
+        if (state.busy) parts.push("当前轮次执行中");
         if (state.config) {
           const friendStrategy = normalizeStealBlacklistStrategy(state.config.autoFarmFriendStealPlantBlacklistStrategy);
           const blacklistCount = Array.isArray(state.config.autoFarmFriendStealPlantBlacklist) ? state.config.autoFarmFriendStealPlantBlacklist.length : 0;
@@ -4426,13 +5113,16 @@
           parts.push(getStealBlacklistStrategyShortLabel(friendStrategy));
         }
         if (state.runtime && state.runtime.resolvedTarget) {
-          parts.push("路线: " + formatRuntimeTargetLabel(state.runtime.resolvedTarget));
+          parts.push("路线 " + formatRuntimeTargetLabel(state.runtime.resolvedTarget));
         }
-        if (state.busy) parts.push("执行中");
-        if (state.nextRunAt) parts.push("下次: " + formatDateTime(state.nextRunAt));
-        if (state.lastFinishedAt) parts.push("上次完成: " + formatDateTime(state.lastFinishedAt));
+        if (state.nextRunAt && state.running) parts.push("总调度 " + formatDateTime(state.nextRunAt));
+        if (state.lastFinishedAt) parts.push("上次完成 " + formatDateTime(state.lastFinishedAt));
+        if (state.friendHelpExpState && state.config && state.config.autoFarmFriendHelpEnabled) {
+          parts.push(formatFriendHelpExpStateText(state.friendHelpExpState));
+        }
         if (state.lastError) parts.push("最近错误: " + state.lastError);
         txtAutoFarmState.textContent = parts.join(" · ");
+        renderAutoFarmModuleStatus(state);
         updateScrollableLogText(logAutoFarm, buildAutoFarmLogLines(state), "暂无日志");
         renderTodayStats(state.todayStats || null);
       }
@@ -5354,6 +6044,14 @@
         loadFriendsRemote(false);
       };
 
+      if (friendListActive) {
+        friendListActive.addEventListener("click", handleFriendActionCardClick);
+      }
+
+      if (friendListBlocked) {
+        friendListBlocked.addEventListener("click", handleFriendActionCardClick);
+      }
+
       document.getElementById("btnEnterFriend").onclick = function () {
         const manual = String(iptFriendTarget.value || "").trim();
         const target = manual || String(selFriend.value || "").trim();
@@ -5440,6 +6138,7 @@
         autoFertilizerBuyMode,
         autoFertilizerBuyMax,
         autoFertilizerBuyThreshold,
+        autoFertilizerRushThresholdSec,
       ].forEach(function (node) {
         if (!node) return;
         node.addEventListener("change", function () {
@@ -5517,6 +6216,18 @@
         btnLandRefresh.onclick = function () {
           loadLandDetails();
         };
+      }
+
+      if (landDetailGrid) {
+        landDetailGrid.addEventListener("click", function (event) {
+          var target = event && event.target && typeof event.target.closest === "function"
+            ? event.target.closest("button[data-land-fertilize]")
+            : null;
+          if (!target || !landDetailGrid.contains(target)) return;
+          var landId = Number(target.getAttribute("data-land-id") || "0");
+          var mode = String(target.getAttribute("data-land-fertilize") || "normal");
+          runLandFertilizeAction(landId, mode).catch(function () {});
+        });
       }
 
       if (btnAccountRefresh) {
@@ -5707,7 +6418,7 @@
           const h2 = cards[3].querySelector("h2");
           const hint = cards[3].querySelector(".hint");
           if (h2) h2.textContent = "好友操作列表";
-          if (hint) hint.textContent = "先做成可直接操作的列表：单个进入、偷菜、帮忙、拉黑/取消拉黑。";
+          if (hint) hint.textContent = "先做成可直接操作的列表：偷菜、帮忙、拉黑/取消拉黑。";
         }
         if (iptFriendSearch) iptFriendSearch.placeholder = "搜索好友名 / gid / 备注";
         const refreshBtn = document.getElementById("btnFriendRefreshCached");
@@ -5729,13 +6440,14 @@
         setTextIf(".status-strip .status-chip:nth-child(4) .chip-label", "游戏侧");
 
         var tabs = document.querySelectorAll(".tabbar .tab-btn");
-        if (tabs[0]) tabs[0].textContent = "自动农场";
-        if (tabs[1]) tabs[1].textContent = "作物分析";
-        if (tabs[2]) tabs[2].textContent = "土地详情";
-        if (tabs[3]) tabs[3].textContent = "运行时";
-        if (tabs[4]) tabs[4].textContent = "画面预览";
-        if (tabs[5]) tabs[5].textContent = "好友农场";
-        if (tabs[6]) tabs[6].textContent = "账户状态";
+        setTextIf('.tabbar .tab-btn[data-tab="automation"]', "自动农场");
+        setTextIf('.tabbar .tab-btn[data-tab="analytics"]', "作物分析");
+        setTextIf('.tabbar .tab-btn[data-tab="lands"]', "土地详情");
+        setTextIf('.tabbar .tab-btn[data-tab="runtime"]', "运行时");
+        setTextIf('.tabbar .tab-btn[data-tab="preview"]', "画面预览");
+        setTextIf('.tabbar .tab-btn[data-tab="friends"]', "好友农场");
+        setTextIf('.tabbar .tab-btn[data-tab="account"]', "账户状态");
+        setTextIf('.tabbar .tab-btn[data-tab="logs"]', "日志中心");
 
         setTextIf("#panel-analytics .card:nth-of-type(1) h2", "作物收益分析");
         setTextIf("#panel-analytics .card:nth-of-type(1) .hint", "把经验、普肥经验、净利润和普肥净利润四类指标统一放到这里做横向比较。");
@@ -5765,11 +6477,22 @@
         setTextIf("#panel-account .card:nth-of-type(1) h2", "账户状态");
         setTextIf("#panel-account .card:nth-of-type(1) .hint", "显示当前账号名称、等级和资产信息；缺失字段会显示为空，不影响其他功能。");
         setTextIf("#btnAccountRefresh", "刷新账户");
-        setTextIf("#panel-account .card:nth-of-type(2) h2", "自动农场日志");
+        setTextIf("#panel-logs .card:nth-of-type(1) h2", "自动农场日志");
+        setTextIf("#panel-logs .card:nth-of-type(1) .hint", "只保留自动任务的巡检、执行和跳过结果，方便回溯每轮动作。");
         setTextIf("#btnAutoRefresh", "刷新状态");
-        setTextIf("#panel-account .card:nth-of-type(3) h2", "消息日志");
-        setTextIf("#panel-account .card:nth-of-type(3) .hint", "默认仅显示关键消息。开启调试模式后显示所有 WebSocket 收发数据。");
+        setTextIf("#panel-logs .card:nth-of-type(2) h2", "消息日志");
+        setTextIf("#panel-logs .card:nth-of-type(2) .hint", "默认仅显示关键消息。开启调试模式后显示所有 WebSocket 收发数据。");
         setTextIf("#btnClearLog", "清空日志");
+      }
+
+      function openProjectInfoModal() {
+        if (!projectInfoOverlay) return;
+        projectInfoOverlay.hidden = false;
+      }
+
+      function closeProjectInfoModal() {
+        if (!projectInfoOverlay) return;
+        projectInfoOverlay.hidden = true;
       }
 
       document.getElementById("btnEnterFriend").onclick = function () {
@@ -5786,6 +6509,25 @@
         debugMode = !debugMode;
         this.textContent = "调试模式：" + (debugMode ? "开" : "关");
       };
+
+      if (btnProjectInfo) {
+        btnProjectInfo.onclick = openProjectInfoModal;
+      }
+      if (btnProjectInfoClose) {
+        btnProjectInfoClose.onclick = closeProjectInfoModal;
+      }
+      if (projectInfoOverlay) {
+        projectInfoOverlay.onclick = function (event) {
+          if (event.target === projectInfoOverlay) {
+            closeProjectInfoModal();
+          }
+        };
+      }
+      document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape" && projectInfoOverlay && !projectInfoOverlay.hidden) {
+          closeProjectInfoModal();
+        }
+      });
 
       normalizeStaticUiText();
       normalizeFriendPanelText();

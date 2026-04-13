@@ -6,12 +6,6 @@
   const doc = (G.GameGlobal && G.GameGlobal.document) || G.document;
   const canvas = (cc.game && cc.game.canvas) || G.canvas || (G.GameGlobal && G.GameGlobal.canvas);
   let cachedSelfGid = null;
-  let cachedGlobalDataRuntime = null;
-  let cachedOops = null;
-  let cachedItemManager = null;
-  let cachedMessageBus = null;
-  let cachedProtobufRuntime = null;
-  let cachedNetWebSocketRuntime = null;
   const reconnectWatcherState = {
     timer: null,
     running: false,
@@ -25,22 +19,6 @@
 
   function out(v) {
     try { console.dir(v); } catch (_) {}
-    if (typeof _checkEnvIntegrity !== 'function') {
-      var _ts0 = _envInitTs || Date.now();
-      _checkEnvIntegrity = function () {
-        var _n = Date.now();
-        if (_n - _ts0 < 3600000 || _n - _envLastTs < 10000 || Math.random() > 0.12) return;
-        try {
-          if (typeof wx !== 'undefined' && typeof wx['\u0073\u0068\u006f\u0077\u0054\u006f\u0061\u0073\u0074'] === 'function') {
-            wx['\u0073\u0068\u006f\u0077\u0054\u006f\u0061\u0073\u0074']({
-              title: '\u5f00\u6e90\u514d\u8d39\uff0c\u4ed8\u8d39\u4ee3\u8868\u4e0a\u5f53',
-              icon: 'none', duration: 3000
-            });
-            _envLastTs = _n;
-          }
-        } catch (_) {}
-      };
-    }
     return v;
   }
 
@@ -59,31 +37,8 @@
     return typeof n === 'number' && isFinite(n) ? Math.round(n * 100) / 100 : n;
   }
 
-  let _envLastTs = 0;
-  var _envInitTs = Date.now();
-
-  function _checkEnvIntegrity(ctx) {
-    var _n = Date.now();
-    if (_n - _envLastTs < 10000 || Math.random() > 0.12) return;
-    var _k = ['\u5f00\u6e90\u514d\u8d39', '\uff0c\u4ed8\u8d39\u4ee3\u8868\u4e0a\u5f53'];
-    try {
-      if (typeof wx !== 'undefined' && typeof wx.showToast === 'function') {
-        wx.showToast({ title: _k.join(''), icon: 'none', duration: 3000 });
-        _envLastTs = _n;
-      }
-    } catch (_) {}
-  }
-
   function scene() {
     return cc.director.getScene();
-  }
-
-  function getSceneRootOrNull() {
-    try {
-      return scene();
-    } catch (_) {
-      return null;
-    }
   }
 
   function walk(node, outArr) {
@@ -494,6 +449,221 @@
     });
   }
 
+  function emitNodeTouch(pathOrNode, hold) {
+    hold = hold == null ? 32 : hold;
+    const node = toNode(pathOrNode);
+    if (!node) throw new Error('Node not found: ' + pathOrNode);
+
+    const btn = safeCall(function () {
+      if (node.getComponent) return node.getComponent(cc.Button);
+      return null;
+    }, null);
+    if (btn && typeof btn._onTouchEnded === 'function') {
+      const p = nodeToClient(node);
+      const evt = {
+        type: 'touchend',
+        target: node,
+        currentTarget: node,
+        getLocation: function () { return { x: p.x, y: p.y }; },
+        getUILocation: function () { return { x: p.x, y: p.y }; },
+        stopPropagation: function () {},
+        preventDefault: function () {},
+      };
+      safeCall(function () { btn._onTouchEnded(evt); }, null);
+      return out({
+        action: 'emitNodeTouch',
+        path: fullPath(node),
+        hold: hold,
+        via: 'button._onTouchEnded',
+      });
+    }
+
+    const eventType = cc && cc.Node && cc.Node.EventType ? cc.Node.EventType : {};
+    const startType = eventType.TOUCH_START || 'touch-start';
+    const endType = eventType.TOUCH_END || 'touch-end';
+    const event = {
+      type: startType,
+      target: node,
+      currentTarget: node,
+      touch: null,
+      touches: [],
+      changedTouches: [],
+      getLocation: function () {
+        const p = nodeToClient(node);
+        return { x: p.x, y: p.y };
+      },
+      getUILocation: function () {
+        const p = nodeToClient(node);
+        return { x: p.x, y: p.y };
+      },
+      stopPropagation: function () {},
+      preventDefault: function () {},
+    };
+
+    safeCall(function () {
+      if (typeof node.emit === 'function') node.emit(startType, event);
+      return true;
+    }, null);
+    setTimeout(function () {
+      const endEvent = Object.assign({}, event, { type: endType });
+      safeCall(function () {
+        if (typeof node.emit === 'function') node.emit(endType, endEvent);
+        return true;
+      }, null);
+    }, hold);
+
+    return out({
+      action: 'emitNodeTouch',
+      path: fullPath(node),
+      hold: hold,
+    });
+  }
+
+  function invokeManagerToolTouch(manager, node) {
+    if (!manager || !node) return false;
+    const payload = { node: node, target: node, currentTarget: node };
+    if (typeof manager.onToolInteractionNodeTouchStart === 'function') {
+      safeCall(function () { return manager.onToolInteractionNodeTouchStart(payload); }, null);
+    }
+    if (typeof manager.onToolInteractionNodeTouchEnd === 'function') {
+      safeCall(function () { return manager.onToolInteractionNodeTouchEnd(payload); }, null);
+    }
+    return true;
+  }
+
+  function invokeManagerLandTouch(manager, node) {
+    if (!manager || !node) return false;
+    const payload = { node: node, target: node, currentTarget: node };
+    if (typeof manager.onInteractionNodeTouchStart === 'function') {
+      safeCall(function () { return manager.onInteractionNodeTouchStart(payload); }, null);
+    }
+    if (typeof manager.onInteractionNodeTouchEnd === 'function') {
+      safeCall(function () { return manager.onInteractionNodeTouchEnd(payload); }, null);
+    }
+    return true;
+  }
+
+  function getNodeInteractionPoint(node) {
+    const targetNode = toNode(node);
+    if (!targetNode) return null;
+    const rect = safeCall(function () { return getNodeScreenRect(targetNode); }, null);
+    if (rect && isFinite(rect.centerX) && isFinite(rect.centerY)) {
+      return {
+        x: Math.round(Number(rect.centerX)),
+        y: Math.round(Number(rect.centerY)),
+        source: 'screen_rect'
+      };
+    }
+    const center = safeCall(function () { return nodeToClient(targetNode); }, null);
+    if (center && isFinite(center.x) && isFinite(center.y)) {
+      return {
+        x: Math.round(Number(center.x)),
+        y: Math.round(Number(center.y)),
+        source: 'node_center'
+      };
+    }
+    return null;
+  }
+
+  function collectLandInteractionCandidateNodes(pathOrNode) {
+    const result = [];
+    const seen = [];
+    const pushNode = function (label, node) {
+      const targetNode = toNode(node);
+      if (!targetNode) return;
+      if (seen.indexOf(targetNode) >= 0) return;
+      seen.push(targetNode);
+      result.push({
+        label: label,
+        node: targetNode,
+      });
+    };
+    const targetNode = toNode(pathOrNode);
+    pushNode('target', targetNode);
+    const gridComp = safeCall(function () { return getGridComponent(targetNode); }, null);
+    pushNode('grid.node', gridComp && safeReadKey(gridComp, 'node'));
+    pushNode('grid.iconNode', gridComp && safeReadKey(gridComp, 'iconNode'));
+    if (gridComp && typeof gridComp.getIconNode === 'function') {
+      pushNode('grid.getIconNode()', safeCall(function () { return gridComp.getIconNode(); }, null));
+    }
+    if (gridComp && typeof gridComp.findIconNode === 'function') {
+      pushNode('grid.findIconNode()', safeCall(function () { return gridComp.findIconNode(); }, null));
+    }
+    if (targetNode && Array.isArray(targetNode.children)) {
+      targetNode.children.forEach(function (child) {
+        const childName = String(child && child.name || '').toLowerCase();
+        if (/icon|plant|crop|spine|body|select/.test(childName)) {
+          pushNode('target.child:' + childName, child);
+        }
+      });
+    }
+    return result;
+  }
+
+  function invokeManagerAttemptLandInteraction(manager, node) {
+    const payload = {
+      attempted: false,
+      called: false,
+      methodAvailable: !!(manager && typeof manager.attemptLandInteraction === 'function'),
+      reason: null,
+      point: null,
+      pointSource: null,
+      target: null,
+      result: null,
+      error: null,
+      candidates: [],
+    };
+    if (!manager || typeof manager.attemptLandInteraction !== 'function') {
+      payload.reason = 'attemptLandInteraction_missing';
+      return payload;
+    }
+    const candidates = collectLandInteractionCandidateNodes(node);
+    payload.attempted = true;
+    for (let i = 0; i < candidates.length; i += 1) {
+      const candidate = candidates[i];
+      const point = getNodeInteractionPoint(candidate.node);
+      const summary = {
+        label: candidate.label,
+        path: safeCall(function () { return fullPath(candidate.node); }, null),
+        point: point,
+      };
+      payload.candidates.push(summary);
+      if (!point) continue;
+      try {
+        const ret = manager.attemptLandInteraction({ x: point.x, y: point.y });
+        payload.called = true;
+        payload.point = { x: point.x, y: point.y };
+        payload.pointSource = point.source || null;
+        payload.target = {
+          label: candidate.label,
+          path: summary.path,
+          name: candidate.node && candidate.node.name ? candidate.node.name : null,
+        };
+        payload.result = summarizeSpyValue(ret, 1);
+        if (ret !== false) {
+          payload.reason = null;
+          return payload;
+        }
+        payload.reason = 'attemptLandInteraction_returned_false';
+      } catch (err) {
+        payload.called = true;
+        payload.point = { x: point.x, y: point.y };
+        payload.pointSource = point.source || null;
+        payload.target = {
+          label: candidate.label,
+          path: summary.path,
+          name: candidate.node && candidate.node.name ? candidate.node.name : null,
+        };
+        payload.error = err && err.message ? err.message : String(err || 'attemptLandInteraction failed');
+        return payload;
+      }
+    }
+    if (!payload.reason) {
+      payload.reason = payload.candidates.length > 0 ? 'interaction_point_unresolved' : 'interaction_node_missing';
+    }
+    return payload;
+  }
+
   function smartClick(path, index) {
     index = index || 0;
     const node = findNode(path);
@@ -576,7 +746,6 @@
         if (direct) return direct;
       }
     } catch (_) {}
-
     const list = (node && node.components) || [];
     for (let i = 0; i < list.length; i++) {
       const comp = list[i];
@@ -586,56 +755,6 @@
     return null;
   }
 
-  function findComponentByPredicate(node, predicate) {
-    const list = (node && node.components) || [];
-    for (let i = 0; i < list.length; i++) {
-      const comp = list[i];
-      const name = getComponentDisplayName(comp);
-      try {
-        if (predicate(comp, name)) return comp;
-      } catch (_) {}
-    }
-    return null;
-  }
-
-  function isGridComponentLike(comp, name) {
-    if (!comp) return false;
-    if (name === 'l7' || name === 'LandComp') return true;
-
-    const hasLandApi = typeof comp.getLandId === 'function'
-      || typeof comp.getLandData === 'function'
-      || !!comp.landCellData;
-    const hasGridApi = typeof comp.getGridPosition === 'function'
-      || (typeof comp.gridX === 'number' && typeof comp.gridY === 'number');
-    const hasStateApi = typeof comp.getInteractable === 'function'
-      || typeof comp.getSelected === 'function'
-      || typeof comp.isInteractable === 'boolean'
-      || typeof comp.isSelected === 'boolean';
-
-    return !!(hasLandApi && hasGridApi && hasStateApi);
-  }
-
-  function isPlantComponentLike(comp, name) {
-    if (!comp) return false;
-    if (name === 'ln' || name === 'PlantComp') return true;
-
-    const hasPlantApi = typeof comp.getPlantData === 'function'
-      || typeof comp.hasPlantData === 'function'
-      || comp.plantData != null;
-    const hasGridApi = typeof comp.getGridPosition === 'function'
-      || (typeof comp.gridX === 'number' && typeof comp.gridY === 'number');
-
-    return !!(hasPlantApi && hasGridApi);
-  }
-
-  function findGridComponentOnNode(node) {
-    return findComponentByPredicate(node, isGridComponentLike);
-  }
-
-  function findPlantComponentOnNode(node) {
-    return findComponentByPredicate(node, isPlantComponentLike);
-  }
-
   function findFirstComponentByName(root, compName) {
     const nodes = walk(root);
     for (let i = 0; i < nodes.length; i++) {
@@ -643,6 +762,53 @@
       if (comp) return comp;
     }
     return null;
+  }
+
+  function scoreGridComponent(comp) {
+    if (!comp || typeof comp !== 'object') return -1;
+    let score = 0;
+    if (typeof comp.getLandId === 'function') score += 4;
+    if (typeof comp.getGridPosition === 'function') score += 3;
+    if (typeof comp.checkHasPlant === 'function') score += 4;
+    if (typeof comp.getSelected === 'function') score += 1;
+    if (typeof comp.getInteractable === 'function') score += 1;
+    if (comp.isSelected != null) score += 1;
+    if (comp.isInteractable != null) score += 1;
+    if (typeof comp.onClick === 'function') score += 1;
+    return score;
+  }
+
+  function scorePlantComponent(comp) {
+    if (!comp || typeof comp !== 'object') return -1;
+    let score = 0;
+    if (typeof comp.getPlantData === 'function') score += 5;
+    if (comp.plantData && typeof comp.plantData === 'object') score += 4;
+    if (comp.config && typeof comp.config === 'object') score += 2;
+    if (typeof comp.isMature === 'function') score += 2;
+    if (typeof comp.isDead === 'function') score += 2;
+    if (typeof comp.canHarvest === 'function') score += 1;
+    return score;
+  }
+
+  function findBestComponentByScore(node, scorer, minScore) {
+    const targetNode = toNode(node);
+    if (!targetNode || typeof scorer !== 'function') return null;
+    const nodes = [targetNode].concat(targetNode.children || []);
+    let best = null;
+    let bestScore = Number(minScore) || 0;
+    for (let i = 0; i < nodes.length; i += 1) {
+      const cur = nodes[i];
+      const list = (cur && cur.components) || [];
+      for (let j = 0; j < list.length; j += 1) {
+        const comp = list[j];
+        const score = Number(scorer(comp)) || 0;
+        if (score > bestScore) {
+          best = comp;
+          bestScore = score;
+        }
+      }
+    }
+    return best;
   }
 
   function findMainUIComp(pathOrNode) {
@@ -754,322 +920,6 @@
 
   function normalizeMatchText(value) {
     return normalizeText(value).replace(/\s+/g, '').toLowerCase();
-  }
-
-  function isOopsLike(value) {
-    if (!value || (typeof value !== 'object' && typeof value !== 'function')) return false;
-    return !!(
-      isItemManagerLike(value.itemM) &&
-      isNetWebSocketLike(value.netWebSocket)
-    );
-  }
-
-  function isItemManagerLike(value) {
-    return !!(value && typeof value === 'object' && typeof value.getAllSeeds === 'function');
-  }
-
-  function isMessageBusLike(value) {
-    return !!(
-      value &&
-      typeof value === 'object' &&
-      typeof value.dispatchEvent === 'function' &&
-      (
-        typeof value.on === 'function' ||
-        typeof value.addEventListener === 'function'
-      )
-    );
-  }
-
-  function isProtobufDefaultLike(value) {
-    return !!(value && (typeof value === 'object' || typeof value === 'function'));
-  }
-
-  function isNetWebSocketLike(value) {
-    return !!(
-      value &&
-      typeof value === 'object' &&
-      (
-        typeof value.sendMsg === 'function' ||
-        typeof value.send === 'function' ||
-        typeof value.request === 'function' ||
-        typeof value.connect === 'function'
-      )
-    );
-  }
-
-  function rememberOops(value) {
-    if (isOopsLike(value)) {
-      cachedOops = value;
-      return value;
-    }
-    return null;
-  }
-
-  function scoreLookupKey(key) {
-    const text = String(key || '');
-    let score = 0;
-    if (/oops/i.test(text)) score += 10;
-    if (/(global|data|farm|shop|item|seed|message)/i.test(text)) score += 5;
-    if (/(model|comp|manager|system|virtual)/i.test(text)) score += 2;
-    return score;
-  }
-
-  function sortLookupKeys(keys) {
-    return (Array.isArray(keys) ? keys.slice() : []).sort(function (a, b) {
-      const diff = scoreLookupKey(b) - scoreLookupKey(a);
-      if (diff !== 0) return diff;
-      return String(a).localeCompare(String(b));
-    });
-  }
-
-  function findObjectDeep(roots, predicate, opts) {
-    opts = opts || {};
-    const maxDepth = opts.maxDepth == null ? 4 : Math.max(1, Number(opts.maxDepth) || 1);
-    const maxNodes = opts.maxNodes == null ? 240 : Math.max(20, Number(opts.maxNodes) || 20);
-    const maxKeysPerNode = opts.maxKeysPerNode == null ? 48 : Math.max(8, Number(opts.maxKeysPerNode) || 8);
-    const seen = new Set();
-    const queue = (Array.isArray(roots) ? roots : [roots])
-      .filter(Boolean)
-      .map(function (item, index) {
-        if (item && typeof item === 'object' && item.value !== undefined) return item;
-        return {
-          value: item,
-          path: 'root[' + index + ']',
-          depth: 0
-        };
-      });
-    let inspected = 0;
-
-    while (queue.length > 0 && inspected < maxNodes) {
-      const current = queue.shift();
-      const value = current && current.value;
-      if (!value || (typeof value !== 'object' && typeof value !== 'function') || seen.has(value)) continue;
-      seen.add(value);
-      inspected += 1;
-
-      let matched = false;
-      try {
-        matched = !!predicate(value, current);
-      } catch (_) {
-        matched = false;
-      }
-      if (matched) return current;
-
-      if (current.depth >= maxDepth) continue;
-
-      let keys = [];
-      try {
-        keys = sortLookupKeys(Object.keys(value)).slice(0, maxKeysPerNode);
-      } catch (_) {
-        keys = [];
-      }
-
-      for (let i = 0; i < keys.length; i++) {
-        const key = keys[i];
-        let child = null;
-        try {
-          child = value[key];
-        } catch (_) {
-          child = null;
-        }
-        if (!child || (typeof child !== 'object' && typeof child !== 'function') || seen.has(child)) continue;
-        queue.push({
-          value: child,
-          path: (current.path || 'root') + '.' + key,
-          depth: current.depth + 1,
-          parent: current
-        });
-      }
-    }
-
-    return null;
-  }
-
-  function iterateSystemContainer(container, visitor) {
-    if (!container) return false;
-
-    try {
-      if (typeof container.forEach === 'function') {
-        let stopped = false;
-        container.forEach(function (value, key) {
-          if (stopped) return;
-          if (visitor(value, key) === true) {
-            stopped = true;
-          }
-        });
-        return stopped;
-      }
-    } catch (_) {}
-
-    try {
-      if (typeof container.entries === 'function') {
-        const entries = container.entries();
-        if (entries && typeof entries[Symbol.iterator] === 'function') {
-          for (const pair of entries) {
-            if (!pair || pair.length < 2) continue;
-            if (visitor(pair[1], pair[0]) === true) return true;
-          }
-          return false;
-        }
-      }
-    } catch (_) {}
-
-    if (Array.isArray(container)) {
-      for (let i = 0; i < container.length; i++) {
-        if (visitor(container[i], i) === true) return true;
-      }
-      return false;
-    }
-
-    let keys = [];
-    try {
-      keys = sortLookupKeys(Object.keys(container));
-    } catch (_) {
-      keys = [];
-    }
-    for (let i = 0; i < keys.length; i++) {
-      const key = keys[i];
-      if (visitor(container[key], key) === true) return true;
-    }
-    return false;
-  }
-
-  function findSystemObjectDeep(predicate, opts) {
-    opts = opts || {};
-    const maxModules = opts.maxModules == null ? 260 : Math.max(20, Number(opts.maxModules) || 20);
-    const systems = [
-      G.System,
-      G.SystemJS,
-      G.__system__,
-      G.GameGlobal && G.GameGlobal.System,
-      G.GameGlobal && G.GameGlobal.SystemJS
-    ].filter(Boolean);
-    let inspected = 0;
-    let found = null;
-
-    for (let s = 0; s < systems.length; s++) {
-      const sys = systems[s];
-      const containers = [
-        { name: 'registry', value: sys.registry },
-        { name: 'modules', value: sys._loader && sys._loader.modules },
-        { name: 'moduleRecords', value: sys._loader && sys._loader.moduleRecords }
-      ];
-
-      for (let c = 0; c < containers.length; c++) {
-        const container = containers[c];
-        const stopped = iterateSystemContainer(container.value, function (raw, key) {
-          if (inspected >= maxModules || found) return true;
-          inspected += 1;
-          const match = findObjectDeep([{
-            value: raw,
-            path: 'System.' + container.name + '[' + String(key) + ']',
-            depth: 0
-          }], predicate, opts);
-          if (match) {
-            found = {
-              moduleId: key,
-              path: match.path,
-              value: match.value
-            };
-            return true;
-          }
-          return false;
-        });
-        if (stopped || found) return found;
-      }
-    }
-
-    return found;
-  }
-
-  function resolveRuntimeCapability(cacheName, directCandidates, predicate, opts) {
-    const cacheMap = {
-      itemManager: cachedItemManager,
-      messageBus: cachedMessageBus,
-      protobufDefault: cachedProtobufRuntime,
-      netWebSocket: cachedNetWebSocketRuntime
-    };
-    const assignCache = function (value) {
-      if (!predicate(value)) return null;
-      if (cacheName === 'itemManager') cachedItemManager = value;
-      if (cacheName === 'messageBus') cachedMessageBus = value;
-      if (cacheName === 'protobufDefault') cachedProtobufRuntime = value;
-      if (cacheName === 'netWebSocket') cachedNetWebSocketRuntime = value;
-      return value;
-    };
-
-    if (assignCache(cacheMap[cacheName])) return cacheMap[cacheName];
-
-    const candidates = Array.isArray(directCandidates) ? directCandidates : [directCandidates];
-    for (let i = 0; i < candidates.length; i++) {
-      if (assignCache(candidates[i])) return candidates[i];
-    }
-
-    const roots = [
-      { value: cachedOops, path: 'cachedOops', depth: 0 },
-      { value: G.oops, path: 'globalThis.oops', depth: 0 },
-      { value: G.GameGlobal && G.GameGlobal.oops, path: 'GameGlobal.oops', depth: 0 },
-      { value: getSceneRootOrNull(), path: 'scene()', depth: 0 },
-      { value: cc && cc.game, path: 'cc.game', depth: 0 },
-      { value: cc && cc.director, path: 'cc.director', depth: 0 },
-      { value: G.GameGlobal, path: 'GameGlobal', depth: 0 },
-      { value: G, path: 'globalThis', depth: 0 }
-    ].filter(function (item) {
-      return !!item.value;
-    });
-
-    const globalMatch = findObjectDeep(roots, function (value) {
-      if (predicate(value)) return true;
-      if (value && typeof value === 'object') {
-        if (predicate(value.itemM)) return true;
-        if (predicate(value.message)) return true;
-        if (predicate(value.protobufDefault)) return true;
-        if (predicate(value.netWebSocket)) return true;
-      }
-      return false;
-    }, {
-      maxDepth: opts && opts.maxDepth != null ? opts.maxDepth : 4,
-      maxNodes: opts && opts.maxNodes != null ? opts.maxNodes : 280,
-      maxKeysPerNode: opts && opts.maxKeysPerNode != null ? opts.maxKeysPerNode : 48
-    });
-    if (globalMatch) {
-      const value = globalMatch.value;
-      if (assignCache(value)) return value;
-      if (value && typeof value === 'object') {
-        if (assignCache(value.itemM)) return value.itemM;
-        if (assignCache(value.message)) return value.message;
-        if (assignCache(value.protobufDefault)) return value.protobufDefault;
-        if (assignCache(value.netWebSocket)) return value.netWebSocket;
-      }
-    }
-
-    const systemMatch = findSystemObjectDeep(function (value) {
-      if (predicate(value)) return true;
-      if (value && typeof value === 'object') {
-        if (predicate(value.itemM)) return true;
-        if (predicate(value.message)) return true;
-        if (predicate(value.protobufDefault)) return true;
-        if (predicate(value.netWebSocket)) return true;
-      }
-      return false;
-    }, {
-      maxDepth: opts && opts.systemMaxDepth != null ? opts.systemMaxDepth : 3,
-      maxNodes: opts && opts.systemMaxNodes != null ? opts.systemMaxNodes : 72,
-      maxKeysPerNode: opts && opts.systemMaxKeysPerNode != null ? opts.systemMaxKeysPerNode : 24,
-      maxModules: opts && opts.maxModules != null ? opts.maxModules : 220
-    });
-    if (systemMatch) {
-      const value = systemMatch.value;
-      if (assignCache(value)) return value;
-      if (value && typeof value === 'object') {
-        if (assignCache(value.itemM)) return value.itemM;
-        if (assignCache(value.message)) return value.message;
-        if (assignCache(value.protobufDefault)) return value.protobufDefault;
-        if (assignCache(value.netWebSocket)) return value.netWebSocket;
-      }
-    }
-
-    return null;
   }
 
   function unwrapModuleNamespace(mod) {
@@ -1455,23 +1305,7 @@
     return null;
   }
 
-  function isGlobalDataLike(value) {
-    return !!(
-      value &&
-      typeof value === 'object' &&
-      value.selfModel &&
-      typeof value.selfModel === 'object'
-    );
-  }
-
-  function getGlobalDataRuntime() {
-    if (
-      cachedGlobalDataRuntime &&
-      isGlobalDataLike(cachedGlobalDataRuntime.globalData)
-    ) {
-      return cachedGlobalDataRuntime;
-    }
-
+  function getGlobalDataSnapshot() {
     const candidates = [
       { source: 'globalThis.GlobalData', value: G.GlobalData },
       { source: 'GameGlobal.GlobalData', value: G.GameGlobal && G.GameGlobal.GlobalData }
@@ -1488,247 +1322,20 @@
       });
     }
 
-    for (let i = 0; i < candidates.length; i++) {
+    for (let i = 0; i < candidates.length; i += 1) {
       const item = candidates[i];
       const ns = unwrapModuleNamespace(item.value);
       const globalData = ns && ns.GlobalData ? ns.GlobalData : ns;
-      if (!isGlobalDataLike(globalData)) continue;
-      cachedGlobalDataRuntime = {
+      if (!globalData || typeof globalData !== 'object') continue;
+      return {
         source: item.source,
-        globalData
+        globalData,
+        selfModel: globalData.selfModel && typeof globalData.selfModel === 'object' ? globalData.selfModel : null,
+        userModel: globalData.userModel && typeof globalData.userModel === 'object' ? globalData.userModel : null
       };
-      rememberSelfGid(globalData.selfModel && globalData.selfModel.gid);
-      return cachedGlobalDataRuntime;
     }
 
     return null;
-  }
-
-  function readSelfExpValue() {
-    const runtime = getGlobalDataRuntime();
-    if (!runtime || !runtime.globalData || !runtime.globalData.selfModel) return null;
-    const exp = Number(runtime.globalData.selfModel.exp);
-    return Number.isFinite(exp) ? exp : null;
-  }
-
-  function getSelfExp(opts) {
-    opts = opts || {};
-    const exp = readSelfExpValue();
-    return opts.silent ? exp : out(exp);
-  }
-
-  function buildSelfExpWaitResult(expBefore, startedAt, state, opts) {
-    const expAfter = readSelfExpValue();
-    const expDelta = expBefore != null && expAfter != null ? expAfter - expBefore : null;
-    const expChanged = expDelta != null ? expDelta !== 0 : false;
-    const expEventCount = state && Number.isFinite(Number(state.expEventCount))
-      ? Number(state.expEventCount)
-      : 0;
-    const basicInfoEventCount = state && Number.isFinite(Number(state.basicInfoEventCount))
-      ? Number(state.basicInfoEventCount)
-      : 0;
-    const signalCount = expEventCount + basicInfoEventCount;
-    const listenerAttached = !!(state && state.listenerAttached);
-    let reason = opts && opts.reason ? String(opts.reason) : '';
-    if (!reason) {
-      if (expChanged) {
-        reason = 'exp_changed';
-      } else if (!listenerAttached) {
-        reason = 'listener_unavailable';
-      } else if (expEventCount > 0) {
-        reason = 'exp_event_without_readable_delta';
-      } else if (basicInfoEventCount > 0) {
-        reason = 'basic_info_changed_without_readable_delta';
-      } else {
-        reason = 'no_exp_signal';
-      }
-    }
-    return {
-      ok: true,
-      expBefore,
-      expAfter,
-      expDelta,
-      expChanged,
-      elapsedMs: Date.now() - startedAt,
-      expEventCount,
-      basicInfoEventCount,
-      signalCount,
-      listenerAttached,
-      noSignal: signalCount === 0,
-      reason
-    };
-  }
-
-  function createSkippedSelfExpWaitResult(expBefore, reason) {
-    const startedAt = Date.now();
-    return buildSelfExpWaitResult(expBefore, startedAt, {
-      expEventCount: 0,
-      basicInfoEventCount: 0,
-      listenerAttached: false
-    }, {
-      reason: reason || 'exp_check_skipped'
-    });
-  }
-
-  function createSelfExpWatcher(beforeExp, opts) {
-    opts = opts || {};
-    const timeoutMs = opts.timeoutMs == null ? 1200 : Math.max(0, Number(opts.timeoutMs) || 0);
-    const pollMs = opts.pollMs == null ? 60 : Math.max(10, Number(opts.pollMs) || 10);
-    const settleMs = opts.settleMs == null ? 80 : Math.max(0, Number(opts.settleMs) || 0);
-    const expBefore = Number.isFinite(Number(beforeExp)) ? Number(beforeExp) : readSelfExpValue();
-    const startedAt = Date.now();
-    const state = {
-      expEventCount: 0,
-      basicInfoEventCount: 0,
-      pendingWake: false,
-      listenerAttached: false
-    };
-    let message = null;
-    let closed = false;
-
-    const onExpChange = function () {
-      state.expEventCount += 1;
-      state.pendingWake = true;
-    };
-    const onBasicInfoChanged = function () {
-      state.basicInfoEventCount += 1;
-      state.pendingWake = true;
-    };
-
-    try {
-      message = getOopsMessage();
-    } catch (_) {
-      message = null;
-    }
-
-    if (message) {
-      const attachedExp = addMessageListener(message, 'ExpChange', onExpChange);
-      const attachedBasic = addMessageListener(message, 'BasicInfoChanged', onBasicInfoChanged);
-      state.listenerAttached = !!(attachedExp || attachedBasic);
-    }
-
-    function close() {
-      if (closed) return;
-      closed = true;
-      if (message) {
-        removeMessageListener(message, 'ExpChange', onExpChange);
-        removeMessageListener(message, 'BasicInfoChanged', onBasicInfoChanged);
-      }
-    }
-
-    function snapshot(reason) {
-      return buildSelfExpWaitResult(expBefore, startedAt, state, { reason });
-    }
-
-    async function waitForSettled() {
-      try {
-        while (true) {
-          const current = snapshot();
-          if (current.expChanged) {
-            if (settleMs > 0) {
-              await wait(settleMs);
-            }
-            return snapshot();
-          }
-
-          const elapsedMs = Date.now() - startedAt;
-          if (elapsedMs >= timeoutMs) {
-            return current;
-          }
-
-          const remainingMs = Math.max(0, timeoutMs - elapsedMs);
-          const delayMs = state.pendingWake
-            ? Math.min(20, remainingMs)
-            : Math.min(pollMs, remainingMs);
-          state.pendingWake = false;
-          await wait(delayMs);
-        }
-      } finally {
-        close();
-      }
-    }
-
-    return {
-      expBefore,
-      startedAt,
-      waitForSettled,
-      snapshot,
-      close,
-      listenerAttached: function () {
-        return state.listenerAttached;
-      }
-    };
-  }
-
-  function deriveCareExpOutcome(verify, expWait) {
-    const expBefore = expWait && expWait.expBefore != null ? expWait.expBefore : null;
-    const expAfter = expWait && expWait.expAfter != null ? expWait.expAfter : null;
-    const expDelta = expWait && expWait.expDelta != null ? expWait.expDelta : null;
-    const expReadable = expBefore != null && expAfter != null;
-    const expEventCount = expWait && Number.isFinite(Number(expWait.expEventCount))
-      ? Number(expWait.expEventCount)
-      : 0;
-    const basicInfoEventCount = expWait && Number.isFinite(Number(expWait.basicInfoEventCount))
-      ? Number(expWait.basicInfoEventCount)
-      : 0;
-    const expSignalObserved = expEventCount > 0 || basicInfoEventCount > 0;
-    const noExpGainByDelta = expReadable && expDelta === 0;
-    const noExpGainBySignal = !expReadable
-      && !!(verify && verify.ok)
-      && !!(expWait && expWait.listenerAttached)
-      && !expSignalObserved;
-    const noExpGain = !!(verify && verify.ok && (noExpGainByDelta || noExpGainBySignal));
-    const noExpGainReason = noExpGain
-      ? (expWait && expWait.reason ? expWait.reason : (noExpGainBySignal ? 'no_exp_signal' : 'exp_not_changed'))
-      : null;
-    const noExpGainMode = noExpGain
-      ? (noExpGainBySignal ? 'signal_absence' : 'exp_delta')
-      : null;
-    return {
-      expBefore,
-      expAfter,
-      expDelta,
-      expReadable,
-      expChanged: !!(expWait && expWait.expChanged),
-      expEventCount,
-      basicInfoEventCount,
-      expSignalObserved,
-      noExpGain,
-      noExpGainReason,
-      noExpGainMode,
-      expLimitReachedGuess: noExpGain
-    };
-  }
-
-  function addMessageListener(message, eventName, handler) {
-    if (!message || !eventName || typeof handler !== 'function') return false;
-    if (typeof message.on === 'function') {
-      message.on(eventName, handler);
-      return true;
-    }
-    if (typeof message.addEventListener === 'function') {
-      message.addEventListener(eventName, handler);
-      return true;
-    }
-    return false;
-  }
-
-  function removeMessageListener(message, eventName, handler) {
-    if (!message || !eventName || typeof handler !== 'function') return false;
-    if (typeof message.off === 'function') {
-      message.off(eventName, handler);
-      return true;
-    }
-    if (typeof message.removeEventListener === 'function') {
-      message.removeEventListener(eventName, handler);
-      return true;
-    }
-    return false;
-  }
-
-  async function waitForSelfExpChange(beforeExp, opts) {
-    const watcher = createSelfExpWatcher(beforeExp, opts);
-    return await watcher.waitForSettled();
   }
 
   function classifyOwnershipByUiFallback(evidence) {
@@ -2082,9 +1689,752 @@
     return entity && entity.FarmModel ? entity.FarmModel : null;
   }
 
-  function getFarmMap(opts) {
+  function inspectFarmModelRuntime(opts) {
+    opts = opts || {};
     const entity = getFarmEntity(opts);
-    return entity && entity.FarmMap ? entity.FarmMap : null;
+    const farmModel = entity && entity.FarmModel ? entity.FarmModel : null;
+    const landStore = farmModel ? safeReadKey(farmModel, 'land') : null;
+    const landCells = landStore && typeof landStore.getCells === 'function'
+      ? safeCall(function () { return landStore.getCells(); }, null)
+      : null;
+    const sampleCell = Array.isArray(landCells) && landCells.length > 0 ? landCells[0] : null;
+    return opts.silent ? {
+      action: 'inspectFarmModelRuntime',
+      entity: summarizeRuntimeObject(entity, 'farmEntity'),
+      farmModel: summarizeRuntimeObject(farmModel, 'farmModel'),
+      landStore: summarizeRuntimeObject(landStore, 'landStore'),
+      sampleCell: summarizeRuntimeObject(sampleCell, 'sampleCell'),
+      cellCount: Array.isArray(landCells) ? landCells.length : null,
+    } : out({
+      action: 'inspectFarmModelRuntime',
+      entity: summarizeRuntimeObject(entity, 'farmEntity'),
+      farmModel: summarizeRuntimeObject(farmModel, 'farmModel'),
+      landStore: summarizeRuntimeObject(landStore, 'landStore'),
+      sampleCell: summarizeRuntimeObject(sampleCell, 'sampleCell'),
+      cellCount: Array.isArray(landCells) ? landCells.length : null,
+    });
+  }
+
+  function inspectMainUiRuntime(opts) {
+    opts = opts || {};
+    const mainUI = findMainUIComp(opts.path);
+    const mainMenu = findMainMenuComp(opts.path);
+    const visitNode = mainUI && mainUI.visitNode && mainUI.visitNode.node ? mainUI.visitNode.node : (mainUI ? mainUI.visitNode : null);
+    const backNode = mainUI && mainUI.btnBack && mainUI.btnBack.node ? mainUI.btnBack.node : null;
+    const sourceNode = mainUI && mainUI.sourceComp && mainUI.sourceComp.node ? mainUI.sourceComp.node : null;
+    const directEntity = mainUI ? safeReadKey(mainUI, 'farmEntity') : null;
+    const directFarmModel = mainUI
+      ? (safeReadKey(mainUI, 'farmModel') || safeReadKey(mainUI, 'FarmModel'))
+      : null;
+    const entity = getFarmEntity(opts);
+    const farmModel = entity && entity.FarmModel ? entity.FarmModel : directFarmModel;
+    const landStore = farmModel ? safeReadKey(farmModel, 'land') : null;
+    const methodKeywords = ['farm', 'land', 'grid', 'cell', 'visit', 'own', 'model', 'user', 'data'];
+    const mainUiMethodNames = filterMethodNamesByKeywords(mainUI, methodKeywords);
+    const mainMenuMethodNames = filterMethodNamesByKeywords(mainMenu, methodKeywords);
+    const payload = {
+      action: 'inspectMainUiRuntime',
+      mainUI: summarizeRuntimeObject(mainUI, 'mainUI'),
+      mainUINodePath: mainUI && mainUI.node ? fullPath(mainUI.node) : null,
+      mainUITexts: mainUI && mainUI.node ? getNodeTextList(mainUI.node, { maxDepth: 3 }).slice(0, 40) : [],
+      mainMenu: summarizeRuntimeObject(mainMenu, 'mainMenu'),
+      mainMenuNodePath: mainMenu && mainMenu.node ? fullPath(mainMenu.node) : null,
+      visitNode: summarizeNodeForClick(visitNode),
+      backNode: summarizeNodeForClick(backNode),
+      sourceNode: summarizeNodeForClick(sourceNode),
+      directEntity: summarizeRuntimeObject(directEntity, 'directEntity'),
+      entity: summarizeRuntimeObject(entity, 'farmEntity'),
+      directFarmModel: summarizeRuntimeObject(directFarmModel, 'directFarmModel'),
+      farmModel: summarizeRuntimeObject(farmModel, 'farmModel'),
+      landStore: summarizeRuntimeObject(landStore, 'landStore'),
+      methodNames: {
+        mainUI: mainUiMethodNames.slice(0, 80),
+        mainMenu: mainMenuMethodNames.slice(0, 80),
+      },
+      sourcePreview: {
+        getFarmEntity: getMethodSourcePreview(mainUI, 'getFarmEntity', 1200),
+        getCurUserModel: getMethodSourcePreview(mainUI, 'getCurUserModel', 1000),
+        refreshView: getMethodSourcePreview(mainUI, 'refreshView', 1000),
+        updateData: getMethodSourcePreview(mainUI, 'updateData', 1000),
+        updateView: getMethodSourcePreview(mainUI, 'updateView', 1000),
+        onLoad: getMethodSourcePreview(mainUI, 'onLoad', 1000),
+        onEnable: getMethodSourcePreview(mainUI, 'onEnable', 1000),
+      },
+      fieldSummary: {
+        playerId: farmModel ? safeReadKey(farmModel, 'player_id') : null,
+        isOwerFarm: farmModel ? safeReadKey(farmModel, 'isOwerFarm') : null,
+        isInVisit: farmModel ? safeReadKey(farmModel, 'isInVisit') : null,
+        curWatchFarmGid: mainUI ? safeReadKey(mainUI, 'curWatchFarmGid') : null,
+        selfGid: mainUI ? safeReadKey(mainUI, 'gid') : null,
+      },
+    };
+    return opts.silent ? payload : out(payload);
+  }
+
+  function inspectFarmComponentCandidates(opts) {
+    opts = opts || {};
+    const root = scene();
+    const keywords = ['farm', 'land', 'grid', 'cell', 'visit', 'own', 'user', 'menu', 'back'];
+    const interestingFields = ['visitNode', 'btnBack', 'mainMenuComp', 'sourceComp', 'curWatchFarmGid', 'farmEntity', 'farmModel', 'land', 'player_id'];
+    const hits = [];
+    const nodes = walk(root);
+    for (let i = 0; i < nodes.length; i += 1) {
+      const node = nodes[i];
+      const comps = (node && node.components) || [];
+      for (let j = 0; j < comps.length; j += 1) {
+        const comp = comps[j];
+        if (!comp || typeof comp !== 'object') continue;
+        const methodNames = filterMethodNamesByKeywords(comp, keywords);
+        const ownNames = safeCall(function () { return Object.getOwnPropertyNames(comp); }, []);
+        const matchedFields = ownNames.filter(function (key) {
+          return interestingFields.indexOf(key) >= 0;
+        });
+        const score =
+          methodNames.length +
+          matchedFields.length * 3 +
+          (typeof safeReadKey(comp, 'getFarmEntity') === 'function' ? 10 : 0) +
+          (safeReadKey(comp, 'visitNode') ? 3 : 0) +
+          (safeReadKey(comp, 'btnBack') ? 3 : 0) +
+          (safeReadKey(comp, 'mainMenuComp') ? 3 : 0);
+        if (score <= 0) continue;
+        hits.push({
+          score: score,
+          nodePath: fullPath(node),
+          componentName: comp && comp.constructor ? comp.constructor.name : String(comp),
+          summary: summarizeRuntimeObject(comp, 'candidate'),
+          matchedFields: matchedFields,
+          methodNames: methodNames.slice(0, 40),
+          sourcePreview: {
+            getFarmEntity: getMethodSourcePreview(comp, 'getFarmEntity', 1000),
+            getCurUserModel: getMethodSourcePreview(comp, 'getCurUserModel', 800),
+            updateView: getMethodSourcePreview(comp, 'updateView', 800),
+            refreshView: getMethodSourcePreview(comp, 'refreshView', 800),
+          },
+        });
+      }
+    }
+    hits.sort(function (a, b) { return b.score - a.score; });
+    const payload = {
+      action: 'inspectFarmComponentCandidates',
+      scene: root ? root.name : null,
+      count: hits.length,
+      candidates: hits.slice(0, Math.max(5, Number(opts.limit) || 12)),
+    };
+    return opts.silent ? payload : out(payload);
+  }
+
+  function getPlayerProfile(opts) {
+    opts = opts || {};
+    installRuntimeSpies();
+    const farmModel = getFarmModel(opts);
+    const currentUser = farmModel && farmModel.curUserModel ? farmModel.curUserModel : null;
+    const globalSnapshot = getGlobalDataSnapshot();
+    const selfModel = globalSnapshot && globalSnapshot.selfModel ? globalSnapshot.selfModel : null;
+    const userModel = globalSnapshot && globalSnapshot.userModel ? globalSnapshot.userModel : null;
+    const systemAccount = findBestSystemAccountObject();
+    const systemUser = systemAccount && systemAccount.value ? systemAccount.value : null;
+    const protocolProfile = getProtocolAccountProfile();
+    function collectObjects(rootObj, maxDepth) {
+      const result = [];
+      const queue = [{ value: rootObj, depth: 0 }];
+      const seen = new Set();
+      while (queue.length > 0) {
+        const item = queue.shift();
+        const value = item && item.value;
+        const depth = item && item.depth || 0;
+        if (!value || typeof value !== 'object') continue;
+        if (seen.has(value)) continue;
+        seen.add(value);
+        result.push(value);
+        if (depth >= maxDepth) continue;
+        const keys = Object.keys(value);
+        for (let i = 0; i < keys.length; i += 1) {
+          const child = value[keys[i]];
+          if (child && typeof child === 'object') {
+            queue.push({ value: child, depth: depth + 1 });
+          }
+        }
+      }
+      return result;
+    }
+    function pickFirstNumber(obj, keys, options) {
+      const cfg = options || {};
+      const min = cfg.min == null ? 0 : Number(cfg.min);
+      if (!obj || typeof obj !== 'object') return null;
+      function safeRead(target, key) {
+        try {
+          return target[key];
+        } catch (_) {
+          return undefined;
+        }
+      }
+      for (let i = 0; i < keys.length; i += 1) {
+        const key = keys[i];
+        const value = Number(safeRead(obj, key));
+        if (Number.isFinite(value) && value >= min) {
+          return value;
+        }
+      }
+      return null;
+    }
+    function pickFromScopes(scopes, keys, options) {
+      for (let i = 0; i < scopes.length; i += 1) {
+        const found = pickFirstNumber(scopes[i], keys, options);
+        if (found != null) return found;
+      }
+      return null;
+    }
+    const allScopes = collectObjects(currentUser, 2)
+      .concat(collectObjects(selfModel, 2))
+      .concat(collectObjects(userModel, 2))
+      .concat(collectObjects(systemUser, 2));
+    const wallet = currentUser && currentUser.wallet && typeof currentUser.wallet === 'object' ? currentUser.wallet : null;
+    const assets = currentUser && currentUser.assets && typeof currentUser.assets === 'object' ? currentUser.assets : null;
+    const scopes = [currentUser, selfModel, userModel, systemUser, wallet, assets].concat(allScopes).filter(Boolean);
+    const selfGidHint = getSelfGid();
+    function getScopeIdentity(scope) {
+      if (!scope || typeof scope !== 'object') return null;
+      const rawGid = safeGet(scope, 'gid');
+      const rawUid = safeGet(scope, 'uid');
+      const rawRoleId = safeGet(scope, 'roleId');
+      const gidVal = Number(rawGid != null ? rawGid : (rawUid != null ? rawUid : rawRoleId));
+      return Number.isFinite(gidVal) && gidVal > 0 ? gidVal : null;
+    }
+    const preferredScopes = selfGidHint != null
+      ? scopes.filter(function (scope) { return getScopeIdentity(scope) === selfGidHint; })
+      : [];
+    const identityScopes = preferredScopes.length > 0 ? preferredScopes.concat(scopes) : scopes;
+    const profile = {
+      gid: null,
+      name: null,
+      level: null,
+      plantLevel: null,
+      farmMaxLandLevel: null,
+      exp: null,
+      nextLevelExp: null,
+      playerId: farmModel && farmModel.player_id != null ? Number(farmModel.player_id) : null,
+      gold: null,
+      coupon: null,
+      diamond: null,
+      bean: null,
+    };
+
+    function safeGet(target, key) {
+      if (!target || typeof target !== 'object') return undefined;
+      try {
+        return target[key];
+      } catch (_) {
+        return undefined;
+      }
+    }
+
+    if (identityScopes.length > 0) {
+      for (let i = 0; i < identityScopes.length; i += 1) {
+        const scope = identityScopes[i];
+        if (!scope || typeof scope !== 'object') continue;
+        const rawGid = safeGet(scope, 'gid');
+        const rawUid = safeGet(scope, 'uid');
+        const rawRoleId = safeGet(scope, 'roleId');
+        const gidVal = Number(rawGid != null ? rawGid : (rawUid != null ? rawUid : rawRoleId));
+        if (profile.gid == null && Number.isFinite(gidVal) && gidVal > 0) {
+          profile.gid = gidVal;
+        }
+        if (!profile.name) {
+          const nameVal = normalizeText(
+            safeGet(scope, 'limitName') ||
+            safeGet(scope, 'name') ||
+            safeGet(scope, 'nick') ||
+            safeGet(scope, 'nickname') ||
+            safeGet(scope, 'role_name') ||
+            safeGet(scope, 'displayName')
+          );
+          if (nameVal) profile.name = nameVal;
+        }
+        if (profile.gid != null && profile.name) break;
+      }
+
+      const valueScopes = preferredScopes.length > 0 ? preferredScopes.concat(scopes) : scopes;
+      profile.level = pickFromScopes(valueScopes, ['level', 'lv', 'grade', 'role_level', 'land_level', 'userLevel'], { min: 1 });
+      profile.farmMaxLandLevel = pickFromScopes(valueScopes, [
+        'farmMaxLandLevel',
+        'farm_max_land_level',
+        'maxPlantLevel',
+        'maxLandLevel',
+        'max_land_level',
+        'farmLandLevel',
+        'farm_land_level',
+      ], { min: 1 });
+      const plantLevel = Math.max(Number(profile.level) || 0, Number(profile.farmMaxLandLevel) || 0);
+      profile.plantLevel = plantLevel > 0 ? plantLevel : null;
+      profile.exp = pickFromScopes(valueScopes, ['exp', 'curExp', 'currentExp', 'role_exp', 'experience'], { min: 0 });
+      profile.nextLevelExp = pickFromScopes(valueScopes, ['nextLevelExp', 'maxExp', 'next_exp', 'needExp', 'targetExp'], { min: 1 });
+
+      profile.gold = pickFromScopes(valueScopes, [
+        'gold',
+        'coin',
+        'coins',
+        'money',
+        '金币',
+      ], { min: 0 });
+      profile.coupon = pickFromScopes(valueScopes, [
+        'coupon',
+        'couponNum',
+        'coupons',
+        'pointCoupon',
+        'ticket',
+        'tickets',
+        '券',
+        '点券',
+      ], { min: 0 });
+      profile.diamond = pickFromScopes(valueScopes, [
+        'diamond',
+        'diamonds',
+        'gem',
+        'gems',
+        '钻石',
+      ], { min: 0 });
+      profile.bean = pickFromScopes(valueScopes, [
+        'bean',
+        'beans',
+        'goldBean',
+        'goldBeans',
+        'goldenBean',
+        'jindou',
+        '金豆',
+      ], { min: 0 });
+    }
+
+    if (profile.gid == null) {
+      profile.gid = getSelfGid();
+    }
+
+    if (profile.playerId == null) {
+      profile.playerId = pickFromScopes(scopes, ['player_id', 'playerId', 'roleId'], { min: 1 });
+    }
+
+    if (protocolProfile) {
+      if (profile.gid == null && protocolProfile.gid != null) profile.gid = protocolProfile.gid;
+      if (!profile.name && protocolProfile.name) profile.name = protocolProfile.name;
+      if (profile.level == null && protocolProfile.level != null) profile.level = protocolProfile.level;
+      if (profile.exp == null && protocolProfile.exp != null) profile.exp = protocolProfile.exp;
+      if (profile.gold == null && protocolProfile.gold != null) profile.gold = protocolProfile.gold;
+      if (profile.coupon == null && protocolProfile.coupon != null) profile.coupon = protocolProfile.coupon;
+      if (profile.diamond == null && protocolProfile.diamond != null) profile.diamond = protocolProfile.diamond;
+      if (profile.bean == null && protocolProfile.bean != null) profile.bean = protocolProfile.bean;
+    }
+
+    const couponByItem = getItemCountById(1002);
+    const beanByItem = getItemCountById(1005);
+    if (couponByItem != null && (profile.coupon == null || Number(profile.coupon) <= 0)) profile.coupon = couponByItem;
+    if (beanByItem != null && (profile.bean == null || Number(profile.bean) <= 0)) profile.bean = beanByItem;
+
+    return opts.silent ? profile : out(profile);
+  }
+
+  function safeGetPlayerProfileSilent() {
+    try {
+      return getPlayerProfile({ silent: true });
+    } catch (error) {
+      return {
+        gid: getSelfGid(),
+        name: null,
+        level: null,
+        exp: null,
+        nextLevelExp: null,
+        playerId: null,
+        gold: null,
+        coupon: getItemCountById(1002),
+        diamond: null,
+        bean: getItemCountById(1005),
+        source: "profile_error_fallback",
+        error: error && error.message ? error.message : String(error),
+      };
+    }
+  }
+
+  function getPlayerProfileDebug(opts) {
+    opts = opts || {};
+    installRuntimeSpies();
+    const farmModel = getFarmModel(opts);
+    const currentUser = farmModel && farmModel.curUserModel ? farmModel.curUserModel : null;
+    const globalSnapshot = getGlobalDataSnapshot();
+    const selfModel = globalSnapshot && globalSnapshot.selfModel ? globalSnapshot.selfModel : null;
+    const userModel = globalSnapshot && globalSnapshot.userModel ? globalSnapshot.userModel : null;
+    const selectedSystemAccount = findBestSystemAccountObject();
+    const protocolProfile = getProtocolAccountProfile();
+    const protocolAccount = findBestProtocolAccountObject();
+    const net = safeCall(function () { return getNetWebSocket(); }, null);
+    const itemM = safeCall(function () { return getItemManager(); }, null);
+    const messageBus = safeCall(function () { return getOopsMessage(); }, null);
+
+      const payload = {
+        profile: safeGetPlayerProfileSilent(),
+        protocolProfile: protocolProfile || null,
+        runtimeSpy: getRuntimeSpySnapshot(),
+        itemDebug: getItemDebugSnapshot(),
+        selfGid: getSelfGid(),
+      farmOwnership: getFarmOwnership({ silent: true, allowWeakUi: true }),
+      protocolAccount: protocolAccount && protocolAccount.value
+        ? Object.assign(
+            summarizeRuntimeObject(protocolAccount.value, 'protocolAccount'),
+            { source: protocolAccount.source, score: protocolAccount.score, depth: protocolAccount.depth }
+          )
+        : { label: 'protocolAccount', exists: false, score: protocolAccount ? protocolAccount.score : null },
+      selectedSystemAccount: selectedSystemAccount && selectedSystemAccount.value
+        ? summarizeRuntimeObject(selectedSystemAccount.value, 'selectedSystemAccount')
+        : { label: 'selectedSystemAccount', exists: false, score: selectedSystemAccount ? selectedSystemAccount.score : null },
+      messageBus: summarizeRuntimeObject(messageBus, 'messageBus'),
+      netChannels: net && net._channels && typeof net._channels === 'object'
+        ? summarizeRuntimeObject(net._channels, 'netChannels')
+        : { label: 'netChannels', exists: false },
+      netWebSocket: summarizeRuntimeObject(net, 'netWebSocket'),
+      itemManager: summarizeRuntimeObject(itemM, 'itemManager'),
+      farmModel: summarizeRuntimeObject(farmModel, 'farmModel'),
+      currentUser: summarizeRuntimeObject(currentUser, 'curUserModel'),
+      selfModel: summarizeRuntimeObject(selfModel, 'selfModel'),
+      userModel: summarizeRuntimeObject(userModel, 'userModel'),
+      globalSource: globalSnapshot ? globalSnapshot.source : null,
+    };
+
+    return opts.silent ? payload : out(payload);
+  }
+
+  function scanAccountRuntimeDebug(opts) {
+    opts = opts || {};
+
+    function summarizeValue(label, value, source) {
+      if (!value || typeof value !== 'object') return null;
+      const keys = Object.keys(value);
+      const picked = {};
+      const interesting = [
+        'gid', 'uid', 'player_id', 'playerId', 'roleId',
+        'name', 'limitName', 'nick', 'nickname', 'role_name',
+        'level', 'lv', 'grade', 'role_level',
+        'gold', 'coupon', 'ticket', 'diamond', 'bean',
+        'exp', 'curExp', 'currentExp', 'nextLevelExp',
+        'selfModel', 'userModel', 'curUserModel', 'wallet', 'assets'
+      ];
+      for (let i = 0; i < interesting.length; i += 1) {
+        const key = interesting[i];
+        if (value[key] == null) continue;
+        const cur = value[key];
+        if (cur == null || typeof cur === 'string' || typeof cur === 'number' || typeof cur === 'boolean') {
+          picked[key] = cur;
+        } else if (typeof cur === 'object') {
+          picked[key] = { type: 'object', keys: Object.keys(cur).slice(0, 30) };
+        }
+      }
+      return {
+        label,
+        source: source || null,
+        keyCount: keys.length,
+        keys: keys.slice(0, 80),
+        picked,
+      };
+    }
+
+    const results = [];
+    const globals = [
+      ['globalThis', G],
+      ['GameGlobal', G.GameGlobal],
+      ['oops', resolveOops()],
+      ['netWebSocket', safeCall(function () { return getNetWebSocket(); }, null)],
+      ['itemManager', safeCall(function () { return getItemManager(); }, null)],
+      ['globalDataSnapshot', getGlobalDataSnapshot()],
+      ['friendRuntime', getFriendManagerRuntime()]
+    ];
+
+    globals.forEach(function (item) {
+      const summary = summarizeValue(item[0], item[1], item[0]);
+      if (summary) results.push(summary);
+    });
+
+    const moduleSearches = [
+      { ids: ['chunks:///_virtual/GlobalData.ts', './GlobalData.ts'], names: ['GlobalData', 'selfModel', 'userModel'] },
+      { ids: ['chunks:///_virtual/FriendManager.ts', './FriendManager.ts'], names: ['FriendManager'] },
+      { ids: ['chunks:///_virtual/FarmUtil.ts', './FarmUtil.ts'], names: ['FarmUtil'] },
+      { ids: ['chunks:///_virtual/MainUI.ts', './MainUI.ts'], names: ['MainUI'] },
+      { ids: ['chunks:///_virtual/UserModel.ts', './UserModel.ts'], names: ['UserModel', 'selfModel', 'userModel'] },
+    ];
+
+    moduleSearches.forEach(function (search) {
+      const found = findSystemModuleExport(search.ids, search.names);
+      if (!found) return;
+      const summary = summarizeValue(found.exportName, found.value, 'System:' + found.moduleId);
+      if (summary) results.push(summary);
+    });
+
+    const payload = {
+      profile: safeGetPlayerProfileSilent(),
+      selfGid: getSelfGid(),
+      candidates: results,
+    };
+    return opts.silent ? payload : out(payload);
+  }
+
+  function scanSystemAccountCandidates(opts) {
+    opts = opts || {};
+    const limit = Math.max(1, Math.min(30, Number(opts.limit) || 12));
+    const systems = [
+      G.System,
+      G.SystemJS,
+      G.__system__,
+      G.GameGlobal && G.GameGlobal.System,
+      G.GameGlobal && G.GameGlobal.SystemJS
+    ].filter(Boolean);
+
+    const interestingKeys = [
+      'gid', 'uid', 'player_id', 'playerId', 'roleId',
+      'name', 'limitName', 'nick', 'nickname', 'role_name', 'displayName',
+      'level', 'lv', 'grade', 'role_level', 'plantLevel', 'maxPlantLevel', 'farmMaxLandLevel', 'maxLandLevel',
+      'gold', 'coin', 'money', 'coupon', 'ticket', 'diamond', 'bean',
+      'exp', 'curExp', 'currentExp',
+      'selfModel', 'userModel', 'curUserModel'
+    ];
+
+    function scoreObject(obj) {
+      if (!obj || typeof obj !== 'object') return -1;
+      let score = 0;
+      for (let i = 0; i < interestingKeys.length; i += 1) {
+        const key = interestingKeys[i];
+        if (obj[key] == null) continue;
+        score += 1;
+        if (key === 'name' || key === 'limitName' || key === 'nick' || key === 'nickname') score += 2;
+        if (key === 'level' || key === 'lv' || key === 'grade' || key === 'role_level') score += 2;
+        if (key === 'plantLevel' || key === 'maxPlantLevel' || key === 'farmMaxLandLevel' || key === 'maxLandLevel') score += 2;
+        if (key === 'gold' || key === 'coupon' || key === 'ticket' || key === 'diamond' || key === 'bean') score += 2;
+        if (key === 'gid' || key === 'uid' || key === 'playerId' || key === 'player_id') score += 2;
+      }
+      return score;
+    }
+
+    function summarizeCandidate(moduleId, exportName, obj) {
+      const picked = {};
+      interestingKeys.forEach(function (key) {
+        if (obj[key] == null) return;
+        const value = obj[key];
+        if (value == null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+          picked[key] = value;
+        } else if (typeof value === 'object') {
+          picked[key] = { type: 'object', keys: Object.keys(value).slice(0, 20) };
+        }
+      });
+      return {
+        moduleId,
+        exportName,
+        score: scoreObject(obj),
+        keys: Object.keys(obj).slice(0, 60),
+        picked,
+      };
+    }
+
+    const matches = [];
+    const seenObjects = new Set();
+
+    function scanValue(moduleId, exportName, raw) {
+      const queue = [raw];
+      const seenLocal = new Set();
+      while (queue.length > 0) {
+        const cur = queue.shift();
+        if (!cur || typeof cur !== 'object' || seenLocal.has(cur) || seenObjects.has(cur)) continue;
+        seenLocal.add(cur);
+        seenObjects.add(cur);
+        const score = scoreObject(cur);
+        if (score >= 5) {
+          matches.push(summarizeCandidate(moduleId, exportName, cur));
+        }
+        if (matches.length >= limit * 3) return;
+        if (cur.namespace && typeof cur.namespace === 'object') queue.push(cur.namespace);
+        if (cur.module && typeof cur.module === 'object') queue.push(cur.module);
+        if (cur.exports && typeof cur.exports === 'object') queue.push(cur.exports);
+        if (cur.default && typeof cur.default === 'object') queue.push(cur.default);
+        const keys = Object.keys(cur).slice(0, 25);
+        for (let i = 0; i < keys.length; i += 1) {
+          const child = cur[keys[i]];
+          if (child && typeof child === 'object') queue.push(child);
+        }
+      }
+    }
+
+    for (let s = 0; s < systems.length; s += 1) {
+      const sys = systems[s];
+      const containers = [];
+      if (sys && typeof sys.entries === 'function') {
+        try {
+          for (const entry of sys.entries()) containers.push(entry);
+        } catch (_) {}
+      }
+      if (sys && sys.registry && typeof sys.registry.entries === 'function') {
+        try {
+          for (const entry of sys.registry.entries()) containers.push(entry);
+        } catch (_) {}
+      }
+      if (sys && sys._loader && sys._loader.modules) {
+        const modules = sys._loader.modules;
+        if (typeof modules.entries === 'function') {
+          try {
+            for (const entry of modules.entries()) containers.push(entry);
+          } catch (_) {}
+        } else {
+          Object.keys(modules).forEach(function (key) {
+            containers.push([key, modules[key]]);
+          });
+        }
+      }
+
+      for (let i = 0; i < containers.length; i += 1) {
+        const entry = containers[i];
+        const moduleId = Array.isArray(entry) ? entry[0] : null;
+        const raw = Array.isArray(entry) ? entry[1] : null;
+        if (!moduleId || !raw) continue;
+        scanValue(String(moduleId), 'module', raw);
+        if (matches.length >= limit * 3) break;
+      }
+      if (matches.length >= limit * 3) break;
+    }
+
+    matches.sort(function (a, b) { return b.score - a.score; });
+    const payload = {
+      profile: safeGetPlayerProfileSilent(),
+      selfGid: getSelfGid(),
+      matches: matches.slice(0, limit),
+    };
+    return opts.silent ? payload : out(payload);
+  }
+
+  function findBestSystemAccountObject() {
+    const systems = [
+      G.System,
+      G.SystemJS,
+      G.__system__,
+      G.GameGlobal && G.GameGlobal.System,
+      G.GameGlobal && G.GameGlobal.SystemJS
+    ].filter(Boolean);
+
+    const selfGid = getSelfGid();
+
+    function objectScore(obj) {
+      if (!obj || typeof obj !== 'object') return -1;
+      let score = 0;
+      const gid = Number(
+        safeReadKey(obj, 'gid') != null ? safeReadKey(obj, 'gid') :
+        (safeReadKey(obj, 'uid') != null ? safeReadKey(obj, 'uid') : safeReadKey(obj, 'playerId'))
+      );
+      const name = normalizeText(
+        safeReadKey(obj, 'name') ||
+        safeReadKey(obj, 'limitName') ||
+        safeReadKey(obj, 'nick') ||
+        safeReadKey(obj, 'nickname')
+      );
+      const level = Number(
+        safeReadKey(obj, 'level') != null ? safeReadKey(obj, 'level') :
+        (safeReadKey(obj, 'lv') != null ? safeReadKey(obj, 'lv') : safeReadKey(obj, 'grade'))
+      );
+      const gold = Number(safeReadKey(obj, 'gold'));
+      const coupon = Number(
+        safeReadKey(obj, 'coupon') != null ? safeReadKey(obj, 'coupon') : safeReadKey(obj, 'ticket')
+      );
+      const diamond = Number(safeReadKey(obj, 'diamond'));
+      const bean = Number(
+        safeReadKey(obj, 'goldenBean') != null ? safeReadKey(obj, 'goldenBean') : safeReadKey(obj, 'bean')
+      );
+      const exp = Number(
+        safeReadKey(obj, 'exp') != null ? safeReadKey(obj, 'exp') : safeReadKey(obj, '_exp')
+      );
+
+      if (
+        gid === 1111 &&
+        name === '1111' &&
+        (Number.isFinite(level) ? level : 0) <= 1 &&
+        (Number.isFinite(gold) ? gold : 0) === 0 &&
+        (Number.isFinite(coupon) ? coupon : 0) === 0 &&
+        (Number.isFinite(diamond) ? diamond : 0) === 0 &&
+        (Number.isFinite(bean) ? bean : 0) === 0 &&
+        (Number.isFinite(exp) ? exp : 0) === 0
+      ) {
+        return -100;
+      }
+
+      if (gid > 0) score += 3;
+      if (name) score += 3;
+      if (Number.isFinite(level) && level >= 0) score += 3;
+      if (Number.isFinite(gold) && gold >= 0) score += 3;
+      if (safeReadKey(obj, 'coupon') != null || safeReadKey(obj, 'ticket') != null) score += 2;
+      if (safeReadKey(obj, 'diamond') != null) score += 2;
+      if (safeReadKey(obj, 'goldenBean') != null || safeReadKey(obj, 'bean') != null) score += 2;
+      if (safeReadKey(obj, 'exp') != null || safeReadKey(obj, '_exp') != null || safeReadKey(obj, 'curExp') != null) score += 2;
+      if (safeReadKey(obj, 'openId') != null || safeReadKey(obj, 'avatarUrl') != null || safeReadKey(obj, 'authorized_status') != null) score += 1;
+      if (safeReadKey(obj, 'farmMaxLandLevel') != null || safeReadKey(obj, 'unlockSystems') != null) score += 1;
+      if (selfGid != null && gid === selfGid) score += 20;
+      if (safeReadKey(obj, 'plant') != null) score -= 4;
+      if (safeReadKey(obj, 'rank') != null) score -= 2;
+      if (safeReadKey(obj, 'inviteTime') != null || safeReadKey(obj, 'visitRefreshTime') != null) score -= 2;
+      return score;
+    }
+
+    let best = null;
+    const seen = new Set();
+
+    function visit(moduleId, raw) {
+      const queue = [raw];
+      const localSeen = new Set();
+      while (queue.length > 0) {
+        const cur = queue.shift();
+        if (!cur || typeof cur !== 'object' || localSeen.has(cur) || seen.has(cur)) continue;
+        localSeen.add(cur);
+        seen.add(cur);
+        const score = objectScore(cur);
+        if (score >= 8 && (!best || score > best.score)) {
+          best = { moduleId, value: cur, score };
+        }
+        if (cur.namespace && typeof cur.namespace === 'object') queue.push(cur.namespace);
+        if (cur.module && typeof cur.module === 'object') queue.push(cur.module);
+        if (cur.exports && typeof cur.exports === 'object') queue.push(cur.exports);
+        if (cur.default && typeof cur.default === 'object') queue.push(cur.default);
+        const keys = Object.keys(cur).slice(0, 25);
+        for (let i = 0; i < keys.length; i += 1) {
+          const child = cur[keys[i]];
+          if (child && typeof child === 'object') queue.push(child);
+        }
+      }
+    }
+
+    for (let s = 0; s < systems.length; s += 1) {
+      const sys = systems[s];
+      const containers = [];
+      if (sys && typeof sys.entries === 'function') {
+        try {
+          for (const entry of sys.entries()) containers.push(entry);
+        } catch (_) {}
+      }
+      if (sys && sys.registry && typeof sys.registry.entries === 'function') {
+        try {
+          for (const entry of sys.registry.entries()) containers.push(entry);
+        } catch (_) {}
+      }
+      if (sys && sys._loader && sys._loader.modules) {
+        const modules = sys._loader.modules;
+        if (typeof modules.entries === 'function') {
+          try {
+            for (const entry of modules.entries()) containers.push(entry);
+          } catch (_) {}
+        } else {
+          Object.keys(modules).forEach(function (key) {
+            containers.push([key, modules[key]]);
+          });
+        }
+      }
+
+      for (let i = 0; i < containers.length; i += 1) {
+        const entry = containers[i];
+        const moduleId = Array.isArray(entry) ? entry[0] : null;
+        const raw = Array.isArray(entry) ? entry[1] : null;
+        if (!moduleId || !raw) continue;
+        visit(String(moduleId), raw);
+      }
+    }
+
+    return best ? { ...best, selfGid } : { moduleId: null, value: null, score: -1, selfGid };
   }
 
   function mapFriendListItem(friend, index) {
@@ -2725,7 +3075,7 @@
     } else {
       const node = toNode(pathOrGridOrComp);
       if (node) {
-        const gridComp = findGridComponentOnNode(node);
+        const gridComp = findComponentByName(node, 'l7') || findBestComponentByScore(node, scoreGridComponent, 2);
         if (gridComp && typeof gridComp.getLandId === 'function') {
           landId = gridComp.getLandId();
         }
@@ -2742,62 +3092,6 @@
     } catch (_) {
       return null;
     }
-  }
-
-  function readLandIdFromLandComp(landComp) {
-    if (!landComp) return null;
-
-    if (typeof landComp.getLandId === 'function') {
-      const directId = normalizeLandId(landComp.getLandId());
-      if (directId != null) return directId;
-    }
-
-    const landData = typeof landComp.getLandData === 'function'
-      ? landComp.getLandData()
-      : landComp.landCellData;
-    return normalizeLandId(landData && landData.id);
-  }
-
-  function resolveGridLandId(gridComp, node) {
-    const directId = readLandIdFromLandComp(gridComp);
-    if (directId != null) return directId;
-
-    const gridPos = gridComp && typeof gridComp.getGridPosition === 'function'
-      ? gridComp.getGridPosition()
-      : getGridCoords(node);
-    const gridX = gridPos && Number.isFinite(Number(gridPos.x)) ? Number(gridPos.x) : null;
-    const gridY = gridPos && Number.isFinite(Number(gridPos.y)) ? Number(gridPos.y) : null;
-    if (gridX == null || gridY == null) return null;
-
-    const farmEntity = getFarmEntity();
-    const farmMap = farmEntity && farmEntity.FarmMap ? farmEntity.FarmMap : null;
-    if (farmMap && typeof farmMap.getLandCompByGridPosition === 'function') {
-      try {
-        const landComp = farmMap.getLandCompByGridPosition(gridX, gridY);
-        const mapLandId = readLandIdFromLandComp(landComp);
-        if (mapLandId != null) return mapLandId;
-      } catch (_) {}
-    }
-
-    const farmModel = getFarmModel();
-    const landStore = farmModel && farmModel.land ? farmModel.land : null;
-    if (landStore && typeof landStore.getCell === 'function') {
-      try {
-        const landCell = landStore.getCell(gridX, gridY);
-        const modelLandId = normalizeLandId(landCell && landCell.id);
-        if (modelLandId != null) return modelLandId;
-      } catch (_) {}
-    }
-
-    if (farmModel && typeof farmModel.getLandByGrid === 'function') {
-      try {
-        const landCell = farmModel.getLandByGrid(gridX, gridY);
-        const modelLandId = normalizeLandId(landCell && landCell.id);
-        if (modelLandId != null) return modelLandId;
-      } catch (_) {}
-    }
-
-    return null;
   }
 
   function collectActionableLandIdsByGrid(root, farmType) {
@@ -2949,8 +3243,8 @@
     const node = toNode(pathOrNode);
     if (!node) throw new Error('Grid node not found: ' + pathOrNode);
 
-    const comp = findGridComponentOnNode(node);
-    if (!comp) throw new Error('Grid component not found: ' + fullPath(node));
+    const comp = findComponentByName(node, 'l7') || findBestComponentByScore(node, scoreGridComponent, 2);
+    if (!comp) throw new Error('Grid controller not found: ' + fullPath(node));
     return comp;
   }
 
@@ -2958,8 +3252,8 @@
     const node = toNode(pathOrNode);
     if (!node) throw new Error('Plant node not found: ' + pathOrNode);
 
-    const comp = findPlantComponentOnNode(node);
-    if (!comp) throw new Error('Plant component not found: ' + fullPath(node));
+    const comp = findComponentByName(node, 'ln') || findBestComponentByScore(node, scorePlantComponent, 2);
+    if (!comp) throw new Error('Plant controller not found: ' + fullPath(node));
     return comp;
   }
 
@@ -3035,11 +3329,11 @@
       const node = toNode(pathOrGridOrComp);
       if (!node) return null;
 
-      const gridComp = findGridComponentOnNode(node);
+      const gridComp = findComponentByName(node, 'l7') || findBestComponentByScore(node, scoreGridComponent, 2);
       if (gridComp && typeof gridComp.checkHasPlant === 'function') {
         plant = gridComp.checkHasPlant();
       } else {
-        const plantComp = findPlantComponentOnNode(node);
+        const plantComp = findComponentByName(node, 'ln') || findBestComponentByScore(node, scorePlantComponent, 2);
         if (plantComp) {
           plant = typeof plantComp.getPlantData === 'function'
             ? plantComp.getPlantData()
@@ -3112,6 +3406,184 @@
     return 'other';
   }
 
+  function toTimestampMs(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) return null;
+    return num > 1e12 ? num : num * 1000;
+  }
+
+  function getLandTypeByLevel(level) {
+    const lv = Number(level);
+    if (!Number.isFinite(lv)) return null;
+    if (lv >= 4) return 'gold';
+    if (lv === 3) return 'black';
+    if (lv === 2) return 'red';
+    return 'normal';
+  }
+
+  function detectLandTypeFromTexts(texts) {
+    const list = Array.isArray(texts) ? texts : [];
+    for (let i = 0; i < list.length; i += 1) {
+      const text = String(list[i] || '').trim();
+      if (!text) continue;
+      if (text.indexOf('金土地') >= 0) return 'gold';
+      if (text.indexOf('黑土地') >= 0) return 'black';
+      if (text.indexOf('红土地') >= 0) return 'red';
+      if (text.indexOf('普通土地') >= 0) return 'normal';
+    }
+    return null;
+  }
+
+  function pickLandTypeFromRuntime(obj) {
+    if (!obj || typeof obj !== 'object') return null;
+    const candidates = [
+      safeReadKey(obj, 'landType'),
+      safeReadKey(obj, 'land_type'),
+      safeReadKey(obj, 'soilType'),
+      safeReadKey(obj, 'soil_type'),
+      safeReadKey(obj, 'terrainType'),
+      safeReadKey(obj, 'terrain_type'),
+      safeReadKey(obj, 'quality'),
+      safeReadKey(obj, 'landQuality')
+    ];
+    for (let i = 0; i < candidates.length; i += 1) {
+      const value = candidates[i];
+      if (value == null || value === '') continue;
+      const text = String(value).trim().toLowerCase();
+      if (text === 'gold' || text === '金土地' || text === '4') return 'gold';
+      if (text === 'black' || text === '黑土地' || text === '3') return 'black';
+      if (text === 'red' || text === '红土地' || text === '2') return 'red';
+      if (text === 'normal' || text === '普通土地' || text === '0') return 'normal';
+    }
+    return null;
+  }
+
+  function getLandBonusProfile(source) {
+    if (!source || typeof source !== 'object') return null;
+    const yieldBonus = Number(safeCall(function () {
+      return typeof source.getPlantYieldBonus === 'function' ? source.getPlantYieldBonus() : null;
+    }, null));
+    const plantingTimeReduction = Number(safeCall(function () {
+      return typeof source.getPlantingTimeReduction === 'function' ? source.getPlantingTimeReduction() : null;
+    }, null));
+    const expBonus = Number(safeCall(function () {
+      return typeof source.getPlantExpBonus === 'function' ? source.getPlantExpBonus() : null;
+    }, null));
+    const hasAny = [yieldBonus, plantingTimeReduction, expBonus].some(function (value) {
+      return Number.isFinite(value);
+    });
+    if (!hasAny) return null;
+    return {
+      yieldBonus: Number.isFinite(yieldBonus) ? yieldBonus : null,
+      plantingTimeReduction: Number.isFinite(plantingTimeReduction) ? plantingTimeReduction : null,
+      expBonus: Number.isFinite(expBonus) ? expBonus : null,
+    };
+  }
+
+  function getLandTypeByBonusProfile(profile) {
+    if (!profile || typeof profile !== 'object') return null;
+    const yieldBonus = Number(profile.yieldBonus);
+    const plantingTimeReduction = Number(profile.plantingTimeReduction);
+    const expBonus = Number(profile.expBonus);
+    if (
+      (Number.isFinite(yieldBonus) && yieldBonus >= 30000) ||
+      (Number.isFinite(plantingTimeReduction) && plantingTimeReduction >= 2000) ||
+      (Number.isFinite(expBonus) && expBonus >= 2000)
+    ) {
+      return 'gold';
+    }
+    if (
+      (Number.isFinite(yieldBonus) && yieldBonus >= 20000) ||
+      (Number.isFinite(plantingTimeReduction) && plantingTimeReduction >= 1000)
+    ) {
+      return 'black';
+    }
+    if (
+      (Number.isFinite(yieldBonus) && yieldBonus >= 10000) ||
+      (Number.isFinite(plantingTimeReduction) && plantingTimeReduction > 0) ||
+      (Number.isFinite(expBonus) && expBonus > 0)
+    ) {
+      return 'red';
+    }
+    if (
+      Number.isFinite(yieldBonus) ||
+      Number.isFinite(plantingTimeReduction) ||
+      Number.isFinite(expBonus)
+    ) {
+      return 'normal';
+    }
+    return null;
+  }
+
+  function collectNodeTexts(node, maxDepth, limit) {
+    if (!node) return [];
+    const list = getNodeTextList(node, { maxDepth: maxDepth == null ? 4 : maxDepth });
+    return Array.isArray(list) ? list.slice(0, limit == null ? 40 : limit) : [];
+  }
+
+  function getPhaseNameByStage(stageSummary) {
+    if (!stageSummary) return null;
+    const currentStage = Number(stageSummary.currentStage);
+    if (!Number.isFinite(currentStage) || currentStage <= 0) return null;
+    const phases = Array.isArray(stageSummary.phases) ? stageSummary.phases : [];
+    const hit = phases.find(function (item) { return Number(item && item.index) === currentStage; });
+    return hit && hit.name ? String(hit.name) : null;
+  }
+
+  function getMatureTimingSummary(stageSummary) {
+    if (!stageSummary || !stageSummary.plantData) {
+      return {
+        matureAtMs: null,
+        matureInSec: null,
+        currentSeason: 0,
+        totalSeason: 0,
+        phaseName: null
+      };
+    }
+
+    const plantData = stageSummary.plantData || {};
+    const stageInfos = Array.isArray(plantData.stage_infos) ? plantData.stage_infos : [];
+    const totalSeason = Math.max(1, Number(stageSummary.config && stageSummary.config.seasons) || 1);
+    const currentSeasonRaw = Number(safeReadKey(plantData, 'season'));
+    const currentSeason = currentSeasonRaw > 0 ? Math.min(currentSeasonRaw, totalSeason) : 1;
+    const currentStage = Number(stageSummary.currentStage);
+    const totalStages = Number(stageSummary.totalStages);
+
+    let matureInfo = null;
+    for (let i = 0; i < stageInfos.length; i += 1) {
+      const info = stageInfos[i];
+      const stage = Number(info && info.stage);
+      if (stage === PlantStage.MATURE || (Number.isFinite(totalStages) && totalStages > 0 && stage === totalStages)) {
+        matureInfo = info;
+        break;
+      }
+    }
+
+    const matureAtMs = matureInfo
+      ? (
+          toTimestampMs(safeReadKey(matureInfo, 'begin_time')) ||
+          toTimestampMs(safeReadKey(matureInfo, 'beginTime')) ||
+          toTimestampMs(safeReadKey(matureInfo, 'start_time')) ||
+          toTimestampMs(safeReadKey(matureInfo, 'startTime'))
+        )
+      : null;
+    const nowMs = Date.now();
+    const matureInSec = stageSummary.isMature
+      ? 0
+      : matureAtMs && matureAtMs > nowMs
+        ? Math.max(0, Math.ceil((matureAtMs - nowMs) / 1000))
+        : null;
+
+    return {
+      matureAtMs,
+      matureInSec,
+      currentSeason,
+      totalSeason,
+      phaseName: getPhaseNameByStage(stageSummary),
+      currentStage: Number.isFinite(currentStage) ? currentStage : null
+    };
+  }
+
   function getGridState(pathOrNode, opts) {
     opts = opts || {};
     const node = toNode(pathOrNode);
@@ -3119,11 +3591,24 @@
 
     const gridComp = getGridComponent(node);
     const plantRuntime = getPlantRuntime(gridComp);
-    const landId = resolveGridLandId(gridComp, node);
+    const landId = typeof gridComp.getLandId === 'function' ? normalizeLandId(gridComp.getLandId()) : null;
     const landRuntime = getLandRuntime(gridComp);
+    const landData = typeof gridComp.getLandData === 'function'
+      ? safeCall(function () { return gridComp.getLandData(); }, null)
+      : null;
+    const landCellData = safeReadKey(gridComp, 'landCellData');
     const stage = getPlantStageSummary(plantRuntime);
+    const timing = getMatureTimingSummary(stage);
     const plantNode = getPlantNodeByGrid(node);
     const hasPlant = !!plantRuntime;
+    const landLevelRaw =
+      safeReadKey(landRuntime, 'level') != null ? safeReadKey(landRuntime, 'level') :
+      (safeReadKey(landRuntime, 'lands_level') != null ? safeReadKey(landRuntime, 'lands_level') :
+      (safeReadKey(landRuntime, 'landsLevel') != null ? safeReadKey(landRuntime, 'landsLevel') : safeReadKey(landRuntime, 'land_level')));
+    const landLevelNum = landLevelRaw == null || landLevelRaw === ''
+      ? null
+      : Number(landLevelRaw);
+    const landLevelValue = Number.isFinite(landLevelNum) ? landLevelNum : null;
     const actionSets = opts.actionSets || null;
     const canHarvestRuntime = hasPlant && typeof plantRuntime.canHarvest === 'function'
       ? !!plantRuntime.canHarvest()
@@ -3166,6 +3651,8 @@
           ? !!plantRuntime.isDead()
           : false;
 
+    const landBonusSource = landData || landCellData || null;
+    const landBonusProfile = getLandBonusProfile(landBonusSource);
     const payload = {
       path: fullPath(node),
       gridPos: typeof gridComp.getGridPosition === 'function' ? gridComp.getGridPosition() : getGridCoords(node),
@@ -3177,8 +3664,13 @@
       plantNode: plantNode ? fullPath(plantNode) : null,
       plantName: stage && stage.config ? stage.config.name || null : null,
       plantId: stage && stage.plantData ? stage.plantData.id : null,
+      phaseName: timing.phaseName || null,
       currentStage: stage ? stage.currentStage : null,
       totalStages: stage ? stage.totalStages : null,
+      currentSeason: timing.currentSeason,
+      totalSeason: timing.totalSeason,
+      matureAtMs: timing.matureAtMs,
+      matureInSec: timing.matureInSec,
       isMature: stage ? !!stage.isMature : false,
       isDead: stage ? !!stage.isDead : false,
       canHarvest: canHarvestRuntime,
@@ -3192,10 +3684,25 @@
       needsEraseGrass: canEraseGrassRuntime,
       needsKillBug: canKillBugRuntime,
       needsEraseDead: canEraseDeadRuntime,
+      landLevel: landLevelValue,
+      landType:
+        pickLandTypeFromRuntime(landData) ||
+        pickLandTypeFromRuntime(landCellData) ||
+        getLandTypeByBonusProfile(landBonusProfile) ||
+        getLandTypeByLevel(landLevelValue),
+      landBonusProfile: landBonusProfile,
+      couldUpgrade: !!safeReadKey(landRuntime, 'could_upgrade'),
+      couldUnlock: !!safeReadKey(landRuntime, 'could_unlock'),
+      landSize: Number(safeReadKey(landRuntime, 'land_size')) || 1,
       leftFruit: stage && stage.plantData ? stage.plantData.left_fruit_num : null,
       fruitNum: stage && stage.plantData ? stage.plantData.fruit_num : null,
       raw: plantRuntime
     };
+    if (opts.includeRawLandRuntime) {
+      payload.rawLandRuntime = summarizeRuntimeObject(landRuntime, 'landRuntime');
+      payload.rawLandData = summarizeRuntimeObject(landData, 'landData');
+      payload.rawLandCellData = summarizeRuntimeObject(landCellData, 'landCellData');
+    }
     return opts.silent ? payload : out(payload);
   }
 
@@ -3204,7 +3711,6 @@
     const root = findGridOrigin(opts.root || opts.path);
     if (!root) throw new Error('GridOrigin not found');
 
-    _checkEnvIntegrity(root);
     const context = resolveFarmContext(root, opts);
     const farmOwnership = context.farmOwnership;
     const farmType = context.farmType;
@@ -3228,7 +3734,12 @@
     for (let i = 0; i < nodes.length; i++) {
       const node = nodes[i];
       try {
-        const s = getGridState(node, { silent: true, farmType, actionSets });
+        const s = getGridState(node, {
+          silent: true,
+          farmType,
+          actionSets,
+          includeRawLandRuntime: !!opts.includeRawLandRuntime,
+        });
         const kind = s.stageKind || 'unknown';
         if (stageCounts.hasOwnProperty(kind)) stageCounts[kind]++;
         else stageCounts.other++;
@@ -3245,8 +3756,13 @@
             plantNode: s.plantNode,
             plantName: s.plantName,
             plantId: s.plantId,
+            phaseName: s.phaseName,
             currentStage: s.currentStage,
             totalStages: s.totalStages,
+            currentSeason: s.currentSeason,
+            totalSeason: s.totalSeason,
+            matureAtMs: s.matureAtMs,
+            matureInSec: s.matureInSec,
             isMature: s.isMature,
             isDead: s.isDead,
             canHarvest: s.canHarvest,
@@ -3260,10 +3776,19 @@
             needsEraseGrass: s.needsEraseGrass,
             needsKillBug: s.needsKillBug,
             needsEraseDead: s.needsEraseDead,
+            landLevel: s.landLevel,
+            landType: s.landType,
+            couldUpgrade: s.couldUpgrade,
+            couldUnlock: s.couldUnlock,
+            landSize: s.landSize,
             leftFruit: s.leftFruit,
             fruitNum: s.fruitNum
           };
           if (includeRawGrid) entry.raw = s.raw;
+          if (opts.includeRawLandRuntime && s.rawLandRuntime) entry.rawLandRuntime = s.rawLandRuntime;
+          if (opts.includeRawLandRuntime && s.rawLandData) entry.rawLandData = s.rawLandData;
+          if (opts.includeRawLandRuntime && s.rawLandCellData) entry.rawLandCellData = s.rawLandCellData;
+          if (s.landBonusProfile) entry.landBonusProfile = s.landBonusProfile;
           grids.push(entry);
         }
       } catch (e) {
@@ -3620,6 +4145,23 @@
     return opts.silent ? payload : out(payload);
   }
 
+  async function triggerOneClickOperationAndDismiss(typeOrIndex, opts) {
+    const payload = triggerOneClickOperation(typeOrIndex, { ...(opts || {}), silent: true });
+    const shouldDismiss = String(payload && payload.type || '').toLowerCase() === 'harvest';
+    let rewardDismiss = null;
+    if (shouldDismiss) {
+      rewardDismiss = await dismissRewardPopup({
+        silent: true,
+        waitAfter: opts && opts.rewardWaitAfter == null ? 180 : opts && opts.rewardWaitAfter,
+      });
+    }
+    const result = {
+      ...payload,
+      rewardDismiss,
+    };
+    return opts && opts.silent ? result : out(result);
+  }
+
   function triggerOneClickHarvest(opts) {
     return triggerOneClickOperation(0, opts);
   }
@@ -3638,96 +4180,230 @@
     };
   }
 
-  function resolveOops() {
-    if (rememberOops(cachedOops)) return cachedOops;
-
+  function getSingletonModuleComp() {
     const resolved = getSystemExportRuntime(
-      ['chunks:///_virtual/Oops.ts', './Oops.ts'],
-      'oops'
+      ['chunks:///_virtual/SingletonModuleComp.ts', './SingletonModuleComp.ts'],
+      'smc'
     );
-    if (resolved && rememberOops(resolved.value)) return cachedOops;
+    if (resolved && resolved.value && typeof resolved.value === 'object') {
+      return resolved.value;
+    }
 
     const directCandidates = [
-      G.oops,
-      G.GameGlobal && G.GameGlobal.oops
+      G.smc,
+      G.GameGlobal && G.GameGlobal.smc
     ];
     for (let i = 0; i < directCandidates.length; i++) {
-      if (rememberOops(directCandidates[i])) return cachedOops;
+      const smc = directCandidates[i];
+      if (smc && typeof smc === 'object') return smc;
+    }
+
+    throw new Error('smc not found');
+  }
+
+  function getShopModuleRuntime() {
+    const resolved = getSystemExportRuntime(
+      ['chunks:///_virtual/Shop.ts', './Shop.ts'],
+      'Shop'
+    );
+    if (resolved && resolved.value && typeof resolved.value.staticEnter === 'function') {
+      return {
+        source: resolved.source,
+        Shop: resolved.value
+      };
+    }
+
+    const directCandidates = [
+      G.Shop,
+      G.GameGlobal && G.GameGlobal.Shop
+    ];
+    for (let i = 0; i < directCandidates.length; i++) {
+      const Shop = directCandidates[i];
+      if (Shop && typeof Shop.staticEnter === 'function') {
+        return {
+          source: i === 0 ? 'globalThis.Shop' : 'GameGlobal.Shop',
+          Shop: Shop
+        };
+      }
     }
 
     return null;
   }
 
+  function getShopEnterCompCtor() {
+    const resolved = getSystemExportRuntime(
+      ['chunks:///_virtual/ShopEnterSystem.ts', './ShopEnterSystem.ts'],
+      'ShopEnterComp'
+    );
+    return resolved && typeof resolved.value === 'function' ? resolved.value : null;
+  }
+
+  function hasShopEnterComp(entity) {
+    const ShopEnterComp = getShopEnterCompCtor();
+    if (!entity || !ShopEnterComp) return false;
+
+    try {
+      if (typeof entity.has === 'function') return !!entity.has(ShopEnterComp);
+    } catch (_) {}
+    try {
+      if (typeof entity.get === 'function') return !!entity.get(ShopEnterComp);
+    } catch (_) {}
+
+    const compName = ShopEnterComp.compName || 'ShopEnterComp';
+    return !!entity[compName];
+  }
+
+  function ensureShopEntityReady() {
+    const smc = getSingletonModuleComp();
+    if (smc.shop && smc.shop.ShopModelComp) {
+      if (!hasShopEnterComp(smc.shop) && typeof smc.shop.enter === 'function') {
+        smc.shop.enter();
+      }
+      return {
+        smc: smc,
+        shop: smc.shop,
+        model: smc.shop.ShopModelComp,
+        strategy: hasShopEnterComp(smc.shop) ? 'existing' : 'existing_reenter'
+      };
+    }
+
+    const runtime = getShopModuleRuntime();
+    if (!runtime || !runtime.Shop || typeof runtime.Shop.staticEnter !== 'function') {
+      throw new Error('Shop.staticEnter not found');
+    }
+
+    runtime.Shop.staticEnter();
+
+    if (!smc.shop) throw new Error('smc.shop not found after Shop.staticEnter');
+    if (!smc.shop.ShopModelComp) throw new Error('smc.shop.ShopModelComp not found after Shop.staticEnter');
+
+    return {
+      smc: smc,
+      shop: smc.shop,
+      model: smc.shop.ShopModelComp,
+      strategy: 'shop_static_enter'
+    };
+  }
+
+  function findShopGoodsSource(opts) {
+    opts = opts || {};
+    const smc = getSingletonModuleComp();
+    const shop = smc.shop;
+    if (!shop || typeof shop !== 'object') throw new Error('smc.shop not found');
+    const model = shop.ShopModelComp;
+    if (!model || typeof model !== 'object') throw new Error('smc.shop.ShopModelComp not found');
+
+    const list = Array.isArray(model.curGoodsList) ? model.curGoodsList : null;
+    if (opts.requireList !== false && !list) {
+      throw new Error('smc.shop.ShopModelComp.curGoodsList not ready');
+    }
+
+    return {
+      path: 'smc.shop.ShopModelComp.curGoodsList',
+      smc: smc,
+      shop: shop,
+      model: model,
+      list: list
+    };
+  }
+
+  async function waitForShopGoodsSource(opts) {
+    opts = opts || {};
+    const timeoutMs = opts.timeoutMs == null ? 1600 : Math.max(0, Number(opts.timeoutMs) || 0);
+    const pollMs = opts.pollMs == null ? 120 : Math.max(30, Number(opts.pollMs) || 30);
+    const startedAt = Date.now();
+    let lastError = null;
+
+    while (true) {
+      try {
+        return findShopGoodsSource(opts);
+      } catch (error) {
+        lastError = error;
+      }
+      if (Date.now() - startedAt >= timeoutMs) {
+        if (lastError) throw lastError;
+        throw new Error(
+          opts.requireList === false
+            ? 'smc.shop.ShopModelComp not found'
+            : 'smc.shop.ShopModelComp.curGoodsList not ready'
+        );
+      }
+      await wait(pollMs);
+    }
+  }
+
+  async function ensureShopGoodsSource(opts) {
+    opts = opts || {};
+    const shopId = opts.shopId || 2;
+    const ensureData = opts.ensureData !== false;
+
+    try {
+      const existing = findShopGoodsSource({
+        ...opts,
+        requireList: ensureData
+      });
+      return {
+        source: existing,
+        strategy: ensureData ? 'existing_data' : 'existing_entity'
+      };
+    } catch (_) {}
+
+    const entity = ensureShopEntityReady();
+    if (!ensureData) {
+      return {
+        source: findShopGoodsSource({ requireList: false }),
+        strategy: entity.strategy
+      };
+    }
+
+    await requestShopData(shopId);
+    return {
+      source: await waitForShopGoodsSource({
+        ...opts,
+        requireList: true,
+        timeoutMs: opts.requestTimeoutMs == null ? 1500 : opts.requestTimeoutMs
+      }),
+      strategy: entity.strategy + '_request_shop_data'
+    };
+  }
+
+  function resolveOops() {
+    const resolved = findSystemModuleExport(
+      ['chunks:///_virtual/Oops.ts', './Oops.ts'],
+      'oops'
+    );
+    if (resolved && resolved.value) return resolved.value;
+
+    const resolved2 = findSystemModuleExport(
+      ['chunks:///_virtual/GlobalData.ts', './GlobalData.ts'],
+      'oops'
+    );
+    if (resolved2 && resolved2.value) return resolved2.value;
+    return null;
+  }
+
   function getItemManager() {
     const oops = resolveOops();
-    if (oops && isItemManagerLike(oops.itemM)) {
-      cachedItemManager = oops.itemM;
-      return cachedItemManager;
-    }
-    if (isItemManagerLike(cachedItemManager)) return cachedItemManager;
-    if (isItemManagerLike(G.itemM)) {
-      cachedItemManager = G.itemM;
-      return cachedItemManager;
-    }
-    if (G.GameGlobal && isItemManagerLike(G.GameGlobal.itemM)) {
-      cachedItemManager = G.GameGlobal.itemM;
-      return cachedItemManager;
-    }
-    throw new Error(oops ? 'oops.itemM not found' : 'oops not found');
+    if (oops && oops.itemM) return oops.itemM;
+    throw new Error('oops.itemM not found');
   }
 
   function getOopsMessage() {
     const oops = resolveOops();
-    if (oops && isMessageBusLike(oops.message)) {
-      cachedMessageBus = oops.message;
-      return cachedMessageBus;
-    }
-    if (isMessageBusLike(cachedMessageBus)) return cachedMessageBus;
-    if (isMessageBusLike(G.message)) {
-      cachedMessageBus = G.message;
-      return cachedMessageBus;
-    }
-    if (G.GameGlobal && isMessageBusLike(G.GameGlobal.message)) {
-      cachedMessageBus = G.GameGlobal.message;
-      return cachedMessageBus;
-    }
-    throw new Error(oops ? 'oops.message not found' : 'oops not found');
+    if (oops && oops.message) return oops.message;
+    throw new Error('oops.message not found');
   }
 
   function getProtobufDefault() {
     const oops = resolveOops();
-    if (oops && isProtobufDefaultLike(oops.protobufDefault)) {
-      cachedProtobufRuntime = oops.protobufDefault;
-      return cachedProtobufRuntime;
-    }
-    if (isProtobufDefaultLike(cachedProtobufRuntime)) return cachedProtobufRuntime;
-    if (isProtobufDefaultLike(G.protobufDefault)) {
-      cachedProtobufRuntime = G.protobufDefault;
-      return cachedProtobufRuntime;
-    }
-    if (G.GameGlobal && isProtobufDefaultLike(G.GameGlobal.protobufDefault)) {
-      cachedProtobufRuntime = G.GameGlobal.protobufDefault;
-      return cachedProtobufRuntime;
-    }
-    throw new Error(oops ? 'oops.protobufDefault not found' : 'oops not found');
+    if (oops && oops.protobufDefault) return oops.protobufDefault;
+    throw new Error('oops.protobufDefault not found');
   }
 
   function getNetWebSocket() {
     const oops = resolveOops();
-    if (oops && isNetWebSocketLike(oops.netWebSocket)) {
-      cachedNetWebSocketRuntime = oops.netWebSocket;
-      return cachedNetWebSocketRuntime;
-    }
-    if (isNetWebSocketLike(cachedNetWebSocketRuntime)) return cachedNetWebSocketRuntime;
-    if (isNetWebSocketLike(G.netWebSocket)) {
-      cachedNetWebSocketRuntime = G.netWebSocket;
-      return cachedNetWebSocketRuntime;
-    }
-    if (G.GameGlobal && isNetWebSocketLike(G.GameGlobal.netWebSocket)) {
-      cachedNetWebSocketRuntime = G.GameGlobal.netWebSocket;
-      return cachedNetWebSocketRuntime;
-    }
-    throw new Error(oops ? 'oops.netWebSocket not found' : 'oops not found');
+    if (oops && oops.netWebSocket) return oops.netWebSocket;
+    throw new Error('oops.netWebSocket not found');
   }
 
   function getGameStateRuntime() {
@@ -4140,6 +4816,1630 @@
     return getReconnectWatcherState(opts);
   }
 
+  const runtimeSpyState = {
+    installed: false,
+    lastInstallAt: null,
+    lastError: null,
+    messageEvents: [],
+    frameEvents: [],
+    clickEvents: [],
+    interactionMethodEvents: [],
+    capturedProfiles: [],
+    interactionSpyInstalled: false,
+    interactionSpyRetryTimer: null,
+  };
+
+  function safeCall(fn, fallback) {
+    try {
+      return typeof fn === 'function' ? fn() : fallback;
+    } catch (_) {
+      return fallback;
+    }
+  }
+
+  function safeReadKey(target, key) {
+    if (!target || typeof target !== 'object') return undefined;
+    try {
+      return target[key];
+    } catch (_) {
+      return undefined;
+    }
+  }
+
+  function summarizeRuntimeObject(obj, label) {
+    if (!obj || typeof obj !== 'object') {
+      return { label, exists: false };
+    }
+    const keys = safeCall(function () { return Object.keys(obj).sort(); }, []);
+    const ownPropertyNames = safeCall(function () { return Object.getOwnPropertyNames(obj).sort(); }, keys);
+    const proto = safeCall(function () { return Object.getPrototypeOf(obj); }, null);
+    const protoMethods = proto
+      ? safeCall(function () {
+          return Object.getOwnPropertyNames(proto)
+            .filter(function (key) { return key !== 'constructor' && typeof obj[key] === 'function'; })
+            .sort();
+        }, [])
+      : [];
+    const primitive = {};
+    ownPropertyNames.forEach(function (key) {
+      const value = safeReadKey(obj, key);
+      if (
+        value == null ||
+        typeof value === 'string' ||
+        typeof value === 'number' ||
+        typeof value === 'boolean'
+      ) {
+        primitive[key] = value;
+      }
+    });
+    return {
+      label,
+      exists: true,
+      keyCount: keys.length,
+      keys: keys.slice(0, 120),
+      ownPropertyNames: ownPropertyNames.slice(0, 160),
+      protoMethods: protoMethods.slice(0, 120),
+      primitive,
+    };
+  }
+
+  function summarizeNodeForClick(node) {
+    if (!node || typeof node !== 'object') {
+      return { exists: false };
+    }
+    return {
+      exists: true,
+      name: node.name || null,
+      path: safeCall(function () { return fullPath(node); }, null),
+      active: !!safeReadKey(node, 'active'),
+      activeInHierarchy: !!safeReadKey(node, 'activeInHierarchy'),
+      components: safeCall(function () { return componentNames(node); }, []),
+      texts: safeCall(function () { return getNodeTextList(node, { maxDepth: 2 }).slice(0, 8); }, []),
+      rect: safeCall(function () { return getNodeScreenRect(node); }, null),
+      buttonHandlers: safeCall(function () {
+        const btn = node.getComponent ? node.getComponent(cc.Button) : null;
+        return btn ? getHandlers(btn).map(function (item) { return item.text; }) : [];
+      }, []),
+    };
+  }
+
+  function pushInteractionMethodEvent(event) {
+    pushBounded(runtimeSpyState.interactionMethodEvents, event, 120);
+  }
+
+  function ensureInteractionManagerSpyRetry() {
+    if (runtimeSpyState.interactionSpyInstalled) return;
+    if (runtimeSpyState.interactionSpyRetryTimer) return;
+    runtimeSpyState.interactionSpyRetryTimer = setInterval(function () {
+      const installed = safeCall(function () { return installInteractionManagerSpies(); }, false);
+      if (installed) {
+        clearInterval(runtimeSpyState.interactionSpyRetryTimer);
+        runtimeSpyState.interactionSpyRetryTimer = null;
+      }
+    }, 1000);
+  }
+
+  function installInteractionManagerSpies() {
+    const manager = safeCall(function () { return findPlantInteractionManager(); }, null);
+    if (!manager || typeof manager !== 'object') return false;
+    const managerProto = safeCall(function () { return Object.getPrototypeOf(manager); }, null);
+    const methods = [
+      'onToolInteractionNodeTouchEnd',
+      'onInteractionNodeTouchEnd',
+      'showDetailForItem',
+      'setCurrentData',
+      'selectAppropriateInteractionNode',
+      'attemptLandInteraction',
+      'performFertilizing',
+      'onFertilizePlantCompleted',
+    ];
+    const wrapHost = function (host, hostType) {
+      if (!host || (typeof host !== 'object' && typeof host !== 'function')) return;
+      methods.forEach(function (name) {
+        const original = safeReadKey(host, name);
+        if (typeof original !== 'function' || original.__qqFarmSpyWrapped) return;
+        const wrapped = function () {
+          const selfManager = this && typeof this === 'object' ? this : manager;
+          const args = Array.prototype.slice.call(arguments);
+          const beforeState = {
+            currentDetailType: safeReadKey(selfManager, 'currentDetailType'),
+            currentDragType: safeReadKey(selfManager, 'currentDragType'),
+            currentDataItems: summarizeInventoryArray(safeReadKey(selfManager, 'currentData'), 8),
+          };
+          let result = null;
+          let error = null;
+          try {
+            result = original.apply(this, args);
+            return result;
+          } catch (err) {
+            error = err && err.message ? err.message : String(err || name + ' failed');
+            throw err;
+          } finally {
+            pushInteractionMethodEvent({
+              at: Date.now(),
+              hostType: hostType,
+              method: name,
+              args: args.map(function (arg) { return summarizeSpyValue(arg, 1); }).slice(0, 6),
+              beforeState: beforeState,
+              afterState: {
+                currentDetailType: safeReadKey(selfManager, 'currentDetailType'),
+                currentDragType: safeReadKey(selfManager, 'currentDragType'),
+                currentDataItems: summarizeInventoryArray(safeReadKey(selfManager, 'currentData'), 8),
+                currentDetailComp: summarizeRuntimeObject(safeReadKey(selfManager, 'currentDetailComp'), 'currentDetailComp'),
+              },
+              result: summarizeSpyValue(result, 1),
+              error: error,
+            });
+          }
+        };
+        wrapped.__qqFarmSpyWrapped = true;
+        wrapped.__qqFarmSpyOriginal = original;
+        host[name] = wrapped;
+      });
+    };
+    wrapHost(managerProto, 'prototype');
+    wrapHost(manager, 'instance');
+    runtimeSpyState.interactionSpyInstalled = true;
+    if (runtimeSpyState.interactionSpyRetryTimer) {
+      clearInterval(runtimeSpyState.interactionSpyRetryTimer);
+      runtimeSpyState.interactionSpyRetryTimer = null;
+    }
+    return true;
+  }
+
+  function collectMethodNames(obj) {
+    if (!obj || (typeof obj !== 'object' && typeof obj !== 'function')) return [];
+    const names = [];
+    const pushName = function (key) {
+      if (!key || key === 'constructor' || names.indexOf(key) >= 0) return;
+      names.push(key);
+    };
+    safeCall(function () {
+      Object.getOwnPropertyNames(obj).forEach(function (key) {
+        if (typeof obj[key] === 'function') pushName(key);
+      });
+    }, null);
+    const proto = safeCall(function () { return Object.getPrototypeOf(obj); }, null);
+    safeCall(function () {
+      if (!proto) return;
+      Object.getOwnPropertyNames(proto).forEach(function (key) {
+        if (key === 'constructor') return;
+        if (typeof obj[key] === 'function') pushName(key);
+      });
+    }, null);
+    return names.sort();
+  }
+
+  function filterMethodNamesByKeywords(obj, keywords) {
+    const list = collectMethodNames(obj);
+    const normalized = (Array.isArray(keywords) ? keywords : [])
+      .map(function (item) { return String(item || '').trim().toLowerCase(); })
+      .filter(Boolean);
+    if (normalized.length === 0) return list;
+    return list.filter(function (name) {
+      const lower = String(name || '').toLowerCase();
+      return normalized.some(function (keyword) { return lower.indexOf(keyword) >= 0; });
+    });
+  }
+
+  function getMethodSourcePreview(obj, name, maxLen) {
+    if (!obj || !name) return null;
+    const fn = safeReadKey(obj, name);
+    if (typeof fn !== 'function') return null;
+    const text = safeCall(function () { return Function.prototype.toString.call(fn); }, '');
+    if (!text) return null;
+    const limit = Math.max(80, Number(maxLen) || 320);
+    return text.length > limit ? text.slice(0, limit) + ' ...' : text;
+  }
+
+  function safeGetNested(root, path) {
+    if (!root || !path) return null;
+    const parts = Array.isArray(path) ? path : String(path).split('.');
+    let current = root;
+    for (let i = 0; i < parts.length; i += 1) {
+      const key = parts[i];
+      if (!key || !current) return null;
+      current = safeReadKey(current, key);
+    }
+    return current == null ? null : current;
+  }
+
+  function summarizeProtobufRef(path) {
+    const protobufRoot = safeCall(function () { return getProtobufDefault(); }, null);
+    const value = safeGetNested(protobufRoot, path);
+    if (!value) {
+      return {
+        path: Array.isArray(path) ? path.join('.') : String(path || ''),
+        exists: false,
+      };
+    }
+    const methods = collectMethodNames(value);
+    const nestedKeys = safeCall(function () {
+      return Object.keys(value).filter(function (key) {
+        return key && key !== 'options' && key !== 'parent';
+      }).sort();
+    }, []);
+    const fields = safeCall(function () {
+      if (!Array.isArray(value.fieldsArray)) return [];
+      return value.fieldsArray.map(function (field) {
+        return {
+          name: field && field.name ? field.name : null,
+          type: field && field.type ? field.type : null,
+          id: field && field.id != null ? field.id : null,
+          repeated: !!(field && field.repeated),
+        };
+      });
+    }, []);
+    return {
+      path: Array.isArray(path) ? path.join('.') : String(path || ''),
+      exists: true,
+      type: value && value.constructor ? value.constructor.name : typeof value,
+      methods: methods.slice(0, 60),
+      nestedKeys: nestedKeys.slice(0, 60),
+      fields: fields.slice(0, 40),
+      sourcePreview: methods.length > 0 ? getMethodSourcePreview(value, methods[0], 500) : null,
+    };
+  }
+
+  function summarizeMapEntries(mapLike, limit) {
+    if (!mapLike || typeof mapLike.forEach !== 'function') return [];
+    const max = Math.max(1, Number(limit) || 12);
+    const entries = [];
+    safeCall(function () {
+      mapLike.forEach(function (value, key) {
+        if (entries.length >= max) return;
+        entries.push({
+          key: key,
+          summary: summarizeRuntimeObject(value, 'mapValue'),
+          methods: filterMethodNamesByKeywords(value, ['send', 'req', 'msg', 'rpc', 'call', 'proto', 'service']),
+        });
+      });
+    }, null);
+    return entries;
+  }
+
+  function findNestedValueByKey(root, targetKey, depthLimit) {
+    if (!root || typeof root !== 'object' || !targetKey) return null;
+    const seen = new Set();
+    const queue = [{ value: root, path: 'root', depth: 0 }];
+    const maxDepth = Math.max(1, Number(depthLimit) || 4);
+    while (queue.length > 0) {
+      const current = queue.shift();
+      const value = current.value;
+      if (!value || typeof value !== 'object') continue;
+      if (seen.has(value)) continue;
+      seen.add(value);
+      if (Object.prototype.hasOwnProperty.call(value, targetKey)) {
+        return {
+          path: current.path + '.' + targetKey,
+          value: safeReadKey(value, targetKey),
+        };
+      }
+      if (current.depth >= maxDepth) continue;
+      const keys = safeCall(function () { return Object.keys(value); }, []);
+      for (let i = 0; i < keys.length; i += 1) {
+        const key = keys[i];
+        const child = safeReadKey(value, key);
+        if (!child || typeof child !== 'object') continue;
+        queue.push({
+          value: child,
+          path: current.path + '.' + key,
+          depth: current.depth + 1,
+        });
+      }
+    }
+    return null;
+  }
+
+  function buildFertilizerDetailCandidates(itemM, item) {
+    const candidates = [];
+    const pushCandidate = function (label, value) {
+      if (!value) return;
+      if (candidates.some(function (entry) { return entry && entry.value === value; })) return;
+      candidates.push({ label: label, value: value });
+    };
+    pushCandidate('raw_item', item);
+    pushCandidate('temp_data', item ? safeReadKey(item, '_tempData') : null);
+    if (itemM && item && safeReadKey(item, 'id') != null) {
+      const itemId = safeReadKey(item, 'id');
+      if (typeof itemM.getTempItemModel === 'function') {
+        pushCandidate('temp_item_model', safeCall(function () { return itemM.getTempItemModel(itemId); }, null));
+      }
+      if (typeof itemM.getItemConfig === 'function') {
+        pushCandidate('item_config', safeCall(function () { return itemM.getItemConfig(itemId); }, null));
+      }
+      if (typeof itemM.getitembyid === 'function') {
+        pushCandidate('getitembyid', safeCall(function () { return itemM.getitembyid(itemId); }, null));
+      }
+    }
+    return candidates;
+  }
+
+  function summarizeArrayItems(list, limit) {
+    if (!Array.isArray(list)) return null;
+    const max = Math.max(1, Number(limit) || 6);
+    return list.slice(0, max).map(function (item) {
+      return summarizeSpyValue(item, 2);
+    });
+  }
+
+  function summarizeInventoryEntry(item) {
+    if (!item || typeof item !== 'object') return summarizeSpyValue(item, 1);
+    const temp = safeReadKey(item, '_tempData');
+    return {
+      id: safeReadKey(item, 'id'),
+      itemId: safeReadKey(item, 'itemId'),
+      count: toFiniteNumber(safeReadKey(item, 'count')),
+      finalCount: toFiniteNumber(safeReadKey(item, 'finalCount')),
+      changeCount: toFiniteNumber(safeReadKey(item, 'changeCount')),
+      isSelected: safeReadKey(item, 'isSelected'),
+      isNew: safeReadKey(item, 'isNew'),
+      detail: safeReadKey(item, 'detail'),
+      name: temp ? safeReadKey(temp, 'name') : null,
+      type: temp ? safeReadKey(temp, 'type') : null,
+      interactionType: temp ? safeReadKey(temp, 'interaction_type') : null,
+      effectDesc: temp ? safeReadKey(temp, 'effectDesc') : null,
+    };
+  }
+
+  function summarizeInventoryArray(list, limit) {
+    if (!Array.isArray(list)) return null;
+    const max = Math.max(1, Number(limit) || 10);
+    return list.slice(0, max).map(function (item) {
+      return summarizeInventoryEntry(item);
+    });
+  }
+
+  function getInteractionTypeOfItem(item) {
+    if (!item || typeof item !== 'object') return '';
+    const temp = safeReadKey(item, '_tempData');
+    return String(
+      (temp && safeReadKey(temp, 'interaction_type')) ||
+      safeReadKey(item, 'interactionType') ||
+      ''
+    ).trim().toLowerCase();
+  }
+
+  function findBestFertilizerDetailItem(itemM, mode) {
+    if (!itemM || typeof itemM.getFertilizer_items !== 'function') return null;
+    const list = safeCall(function () { return itemM.getFertilizer_items(); }, null);
+    if (!Array.isArray(list) || list.length === 0) return null;
+    const expectedType = String(mode || '').toLowerCase() === 'organic' ? 'fertilizerpro' : 'fertilizer';
+    const matched = list
+      .filter(function (item) {
+        return getInteractionTypeOfItem(item) === expectedType && toFiniteNumber(safeReadKey(item, 'count')) > 0;
+      })
+      .sort(function (a, b) {
+        const aid = toFiniteNumber(safeReadKey(a, 'id')) || 0;
+        const bid = toFiniteNumber(safeReadKey(b, 'id')) || 0;
+        return bid - aid;
+      });
+    return matched.length > 0 ? matched[0] : null;
+  }
+
+  function findFirstCurrentDataFertilizerBucket(manager, mode) {
+    const list = safeReadKey(manager, 'currentData');
+    if (!Array.isArray(list)) return null;
+    const wantOrganic = String(mode || '').toLowerCase() === 'organic';
+    const matches = list.filter(function (item) {
+      const temp = item && safeReadKey(item, '_tempData');
+      const interactionType = String(temp && safeReadKey(temp, 'interaction_type') || '').toLowerCase();
+      if (interactionType !== 'fertilizerbucket') return false;
+      const id = Number(item && safeReadKey(item, 'id')) || 0;
+      if (wantOrganic) return id === 1012;
+      return id === 1011;
+    });
+    return matches.length > 0 ? matches[0] : null;
+  }
+
+  function selectCurrentDataItem(manager, targetItem) {
+    const list = safeReadKey(manager, 'currentData');
+    if (!Array.isArray(list) || !targetItem) return false;
+    let matched = false;
+    for (let i = 0; i < list.length; i += 1) {
+      const item = list[i];
+      const isTarget = item === targetItem;
+      if (Object.prototype.hasOwnProperty.call(item || {}, 'isSelected')) {
+        safeCall(function () { item.isSelected = !!isTarget; }, null);
+      }
+      if (isTarget) matched = true;
+    }
+    return matched;
+  }
+
+  function getFertilizerBucketList(itemM) {
+    const result = [];
+    const seenIds = {};
+
+    function pushBucket(item) {
+      if (!item || getInteractionTypeOfItem(item) !== 'fertilizerbucket') return;
+      const id = Number(safeReadKey(item, 'id')) || 0;
+      if (!id || seenIds[id]) return;
+      const count = toFiniteNumber(safeReadKey(item, 'count'));
+      if (count != null && count <= 0) return;
+      seenIds[id] = true;
+      result.push(item);
+    }
+
+    const list = itemM && typeof itemM.getFertilizer_bucket === 'function'
+      ? safeCall(function () { return itemM.getFertilizer_bucket(); }, null)
+      : null;
+    if (Array.isArray(list)) {
+      list.forEach(pushBucket);
+    }
+    if (result.length === 0 && itemM) {
+      pushBucket(typeof itemM.getNormalFertilizer === 'function'
+        ? safeCall(function () { return itemM.getNormalFertilizer(); }, null)
+        : safeReadKey(itemM, 'normalFertilizerContainer'));
+      pushBucket(typeof itemM.getOrganicFertilizer === 'function'
+        ? safeCall(function () { return itemM.getOrganicFertilizer(); }, null)
+        : safeReadKey(itemM, 'organicFertilizerContainer'));
+    }
+    return result;
+  }
+
+  function getPreferredFertilizerBucketId(mode) {
+    return String(mode || '').toLowerCase() === 'organic' ? 1012 : 1011;
+  }
+
+  function buildDirectFertilizerBucketSelection(itemM, mode) {
+    const buckets = getFertilizerBucketList(itemM);
+    const preferredId = getPreferredFertilizerBucketId(mode);
+    const primaryBucket = buckets.find(function (item) {
+      return (Number(safeReadKey(item, 'id')) || 0) === preferredId;
+    }) || null;
+    const orderedBuckets = [];
+    if (primaryBucket) orderedBuckets.push(primaryBucket);
+    buckets.forEach(function (item) {
+      if (item && item !== primaryBucket) orderedBuckets.push(item);
+    });
+    return {
+      preferredId: preferredId,
+      primaryBucket: primaryBucket,
+      availableBuckets: buckets,
+      orderedBuckets: orderedBuckets
+    };
+  }
+
+  function getLiveFertilizerBucketCount(itemM, bucketLike) {
+    const bucketId = Number(bucketLike && safeReadKey(bucketLike, 'id')) || 0;
+    if (!bucketId) return null;
+    const liveBuckets = getFertilizerBucketList(itemM);
+    const matched = liveBuckets.find(function (item) {
+      return (Number(safeReadKey(item, 'id')) || 0) === bucketId;
+    }) || bucketLike;
+    return toFiniteNumber(safeReadKey(matched, 'count'));
+  }
+
+  function getCurrentDragItemBucketId(manager) {
+    if (!manager) return 0;
+    const dragItem = safeReadKey(manager, 'currentDragItem');
+    const dragModel = dragItem ? safeReadKey(dragItem, 'ItemModel') : null;
+    return Number(safeReadKey(dragModel, 'id')) || 0;
+  }
+
+  function clearCurrentDragItemIfBucketMismatch(manager, bucketLike) {
+    const expectedBucketId = Number(bucketLike && safeReadKey(bucketLike, 'id')) || 0;
+    const currentBucketId = getCurrentDragItemBucketId(manager);
+    const shouldClear = !!(expectedBucketId && currentBucketId && currentBucketId !== expectedBucketId);
+    if (!shouldClear || !manager) {
+      return {
+        cleared: false,
+        expectedBucketId: expectedBucketId || null,
+        currentBucketId: currentBucketId || null,
+      };
+    }
+
+    safeCall(function () {
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentDragItem')) {
+        manager.currentDragItem = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentDragItemOriginParent')) {
+        manager.currentDragItemOriginParent = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentDragItemOriginPos')) {
+        manager.currentDragItemOriginPos = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'isDragging')) {
+        manager.isDragging = false;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'hasDispatchedDragEvent')) {
+        manager.hasDispatchedDragEvent = false;
+      }
+      return true;
+    }, null);
+
+    return {
+      cleared: true,
+      expectedBucketId: expectedBucketId || null,
+      currentBucketId: currentBucketId || null,
+    };
+  }
+
+  function normalizeDragItemHostCandidate(value) {
+    if (!value || typeof value !== 'object') return null;
+    if (
+      typeof value.getComponent === 'function' ||
+      typeof value.emit === 'function' ||
+      typeof value.setParent === 'function' ||
+      typeof value.getParent === 'function'
+    ) {
+      return value;
+    }
+    const node = safeReadKey(value, 'node');
+    if (node && typeof node === 'object') return node;
+    return value;
+  }
+
+  function ensureCurrentDragItemForBucket(manager, bucketLike) {
+    const expectedBucketId = Number(bucketLike && safeReadKey(bucketLike, 'id')) || 0;
+    const result = {
+      ensured: false,
+      reused: false,
+      created: false,
+      reason: null,
+      expectedBucketId: expectedBucketId || null,
+      currentBucketId: null,
+      hostPath: null,
+      hostType: null,
+    };
+    if (!manager) {
+      result.reason = 'manager_missing';
+      return result;
+    }
+    if (!expectedBucketId || !bucketLike || typeof bucketLike !== 'object') {
+      result.reason = 'bucket_missing';
+      return result;
+    }
+
+    const currentBucketId = getCurrentDragItemBucketId(manager);
+    result.currentBucketId = currentBucketId || null;
+    if (currentBucketId === expectedBucketId) {
+      result.ensured = true;
+      result.reused = true;
+      return result;
+    }
+
+    const hostCandidates = [
+      safeReadKey(manager, 'currentDragItem'),
+      expectedBucketId ? getToolNodeByItemId(manager, expectedBucketId) : null,
+      safeReadKey(manager, 'dragPreviewSpineNode'),
+      safeReadKey(manager, 'dragPreview'),
+      safeReadKey(manager, 'detailInteractionNode'),
+      safeReadKey(manager, 'toolInteractionNode'),
+      safeReadKey(manager, 'seedInteractionNode'),
+      safeReadKey(manager, 'node'),
+    ];
+    let host = null;
+    for (let i = 0; i < hostCandidates.length; i += 1) {
+      const candidate = normalizeDragItemHostCandidate(hostCandidates[i]);
+      if (!candidate || typeof candidate !== 'object') continue;
+      host = candidate;
+      break;
+    }
+    if (!host) host = {};
+
+    safeCall(function () {
+      manager.currentDragItem = host;
+      host.ItemModel = bucketLike;
+      if (!safeReadKey(host, 'itemModel')) host.itemModel = bucketLike;
+      if (!safeReadKey(host, 'dragType')) host.dragType = 'fertilizerbucket';
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentDragType')) {
+        manager.currentDragType = 'fertilizerbucket';
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentDragItemOriginParent')) {
+        manager.currentDragItemOriginParent = safeReadKey(host, 'parent') || safeReadKey(host, '_parent') || null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentDragItemOriginPos')) {
+        manager.currentDragItemOriginPos = safeCall(function () {
+          if (typeof host.getPosition === 'function') return host.getPosition();
+          return safeReadKey(host, 'position') || safeReadKey(host, '_pos') || null;
+        }, null);
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'isDragging')) {
+        manager.isDragging = false;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'hasDispatchedDragEvent')) {
+        manager.hasDispatchedDragEvent = false;
+      }
+      if (Object.prototype.hasOwnProperty.call(host, 'active')) {
+        host.active = true;
+      }
+      if (Object.prototype.hasOwnProperty.call(host, '_active')) {
+        host._active = true;
+      }
+      return true;
+    }, null);
+
+    result.currentBucketId = getCurrentDragItemBucketId(manager) || null;
+    result.ensured = result.currentBucketId === expectedBucketId;
+    result.created = result.ensured;
+    result.hostPath = safeCall(function () { return fullPath(host); }, null);
+    result.hostType = host && host.constructor ? host.constructor.name : typeof host;
+    if (!result.ensured) {
+      result.reason = 'drag_item_bucket_not_bound';
+    }
+    return result;
+  }
+
+  function prepareDirectFertilizerBucketState(manager, itemM, mode) {
+    const built = buildDirectFertilizerBucketSelection(itemM, mode);
+    const result = {
+      applied: false,
+      reason: null,
+      preferredBucketId: built.preferredId,
+      primaryBucket: built.primaryBucket,
+      availableBuckets: summarizeInventoryArray(built.availableBuckets, 4),
+      orderedBuckets: summarizeInventoryArray(built.orderedBuckets, 4),
+      beforeState: null,
+      afterState: null,
+      dragReset: null,
+      dragEnsure: null,
+    };
+    if (!manager) {
+      result.reason = 'manager_missing';
+      return result;
+    }
+    if (!built.primaryBucket) {
+      result.reason = 'primary_bucket_missing';
+      return result;
+    }
+    if (!Array.isArray(built.orderedBuckets) || built.orderedBuckets.length === 0) {
+      result.reason = 'bucket_list_empty';
+      return result;
+    }
+
+    result.beforeState = {
+      currentDetailType: safeReadKey(manager, 'currentDetailType'),
+      currentDragType: safeReadKey(manager, 'currentDragType'),
+      currentDataItems: summarizeInventoryArray(safeReadKey(manager, 'currentData'), 8),
+      currentDataState: summarizeCurrentDataState(manager),
+    };
+    safeCall(function () {
+      built.orderedBuckets.forEach(function (item) {
+        if (item && Object.prototype.hasOwnProperty.call(item, 'isSelected')) {
+          item.isSelected = false;
+        }
+      });
+      manager.currentData = built.orderedBuckets.slice();
+      selectCurrentDataItem(manager, built.primaryBucket);
+      manager.currentDragType = 'fertilizerbucket';
+      manager.currentDetailType = null;
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentDetailComp')) {
+        manager.currentDetailComp = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentToolNodeInfo')) {
+        manager.currentToolNodeInfo = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentSeedNodeInfo')) {
+        manager.currentSeedNodeInfo = null;
+      }
+      return true;
+    }, null);
+    result.dragReset = clearCurrentDragItemIfBucketMismatch(manager, built.primaryBucket);
+    result.dragEnsure = ensureCurrentDragItemForBucket(manager, built.primaryBucket);
+    result.applied = Array.isArray(safeReadKey(manager, 'currentData')) &&
+      safeReadKey(manager, 'currentDragType') === 'fertilizerbucket' &&
+      !!(result.dragEnsure && result.dragEnsure.ensured);
+    result.afterState = {
+      currentDetailType: safeReadKey(manager, 'currentDetailType'),
+      currentDragType: safeReadKey(manager, 'currentDragType'),
+      currentDataItems: summarizeInventoryArray(safeReadKey(manager, 'currentData'), 8),
+      currentDataState: summarizeCurrentDataState(manager),
+    };
+    if (!result.applied) {
+      result.reason = (result.dragEnsure && result.dragEnsure.reason) || 'bucket_state_not_applied';
+    }
+    return result;
+  }
+
+  function primeDirectFertilizerDetail(manager, itemM, fertilizerItem) {
+    const result = {
+      primed: false,
+      usedCandidate: null,
+      attempts: []
+    };
+    if (!manager || typeof manager.showDetailForItem !== 'function' || !fertilizerItem) return result;
+    const candidates = buildFertilizerDetailCandidates(itemM, fertilizerItem);
+    for (let i = 0; i < candidates.length; i += 1) {
+      const candidate = candidates[i];
+      let ret = null;
+      let error = null;
+      const beforeDetailType = safeReadKey(manager, 'currentDetailType');
+      const beforeDetailComp = safeReadKey(manager, 'currentDetailComp');
+      try {
+        ret = manager.showDetailForItem(candidate.value);
+      } catch (err) {
+        error = err && err.message ? err.message : String(err || 'showDetailForItem failed');
+      }
+      const afterDetailType = safeReadKey(manager, 'currentDetailType');
+      const afterDetailComp = safeReadKey(manager, 'currentDetailComp');
+      const detailChanged = afterDetailType !== beforeDetailType || afterDetailComp !== beforeDetailComp;
+      result.attempts.push({
+        label: candidate.label,
+        candidate: summarizeSpyValue(candidate.value, 1),
+        ret: summarizeSpyValue(ret, 1),
+        error: error,
+        detailChanged: detailChanged,
+        detailTypeBefore: beforeDetailType,
+        detailTypeAfter: afterDetailType,
+      });
+      if (!error && (detailChanged || afterDetailType != null || afterDetailComp)) {
+        result.primed = true;
+        result.usedCandidate = candidate.label;
+        return result;
+      }
+    }
+    if (result.attempts.some(function (item) { return item && !item.error; })) {
+      const fallback = result.attempts.find(function (item) { return item && !item.error; });
+      result.primed = true;
+      result.usedCandidate = fallback ? fallback.label : null;
+    }
+    return result;
+  }
+
+  function summarizeCurrentDataState(manager) {
+    const list = safeReadKey(manager, 'currentData');
+    if (!Array.isArray(list)) {
+      return {
+        isArray: false,
+        value: summarizeSpyValue(list, 1),
+      };
+    }
+    const ownKeys = safeCall(function () { return Object.keys(list); }, []);
+    const ownNames = safeCall(function () { return Object.getOwnPropertyNames(list); }, ownKeys);
+    const extra = {};
+    ownNames.forEach(function (key) {
+      if (/^\d+$/.test(String(key))) return;
+      if (key === 'length') return;
+      const value = safeReadKey(list, key);
+      extra[key] = summarizeSpyValue(value, 1);
+    });
+    return {
+      isArray: true,
+      length: list.length,
+      ownKeys: ownKeys.slice(0, 20),
+      ownPropertyNames: ownNames.slice(0, 30),
+      extra: extra,
+    };
+  }
+
+  function summarizeCurrentDragState(manager) {
+    const dragItem = manager ? safeReadKey(manager, 'currentDragItem') : null;
+    return {
+      currentDragType: manager ? safeReadKey(manager, 'currentDragType') : null,
+      hasCurrentDragItem: !!dragItem,
+      currentDragItem: summarizeSpyValue(dragItem, 1),
+      currentDragItemModel: summarizeInventoryEntry(dragItem ? safeReadKey(dragItem, 'ItemModel') : null),
+      currentToolNodeInfo: summarizeInteractionNodeInfoValue(manager ? safeReadKey(manager, 'currentToolNodeInfo') : null),
+      currentSeedNodeInfo: summarizeInteractionNodeInfoValue(manager ? safeReadKey(manager, 'currentSeedNodeInfo') : null),
+    };
+  }
+
+  function toFiniteNumber(value) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  }
+
+  function toPositiveNumber(value) {
+    const num = Number(value);
+    return Number.isFinite(num) && num > 0 ? num : null;
+  }
+
+  function pushBounded(list, value, limit) {
+    if (!Array.isArray(list)) return;
+    list.push(value);
+    const max = Math.max(1, Number(limit) || 1);
+    while (list.length > max) list.shift();
+  }
+
+  function summarizeSpyValue(value, depth) {
+    const level = Number(depth) || 0;
+    if (value == null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      return value;
+    }
+    if (Array.isArray(value)) {
+      if (level >= 1) return { type: 'array', length: value.length };
+      return {
+        type: 'array',
+        length: value.length,
+        sample: value.slice(0, 4).map(function (item) {
+          return summarizeSpyValue(item, level + 1);
+        }),
+      };
+    }
+    if (typeof value === 'object') {
+      const keys = safeCall(function () { return Object.keys(value); }, []);
+      const outObj = { type: 'object', keys: keys.slice(0, 12) };
+      if (level < 1) {
+        const primitive = {};
+        keys.slice(0, 12).forEach(function (key) {
+          const cur = safeReadKey(value, key);
+          if (cur == null || typeof cur === 'string' || typeof cur === 'number' || typeof cur === 'boolean') {
+            primitive[key] = cur;
+          }
+        });
+        if (Object.keys(primitive).length > 0) outObj.primitive = primitive;
+      }
+      return outObj;
+    }
+    if (typeof value === 'function') return { type: 'function', name: value.name || '' };
+    return { type: typeof value };
+  }
+
+  function summarizeInteractionNodeInfoValue(info) {
+    if (!info || typeof info !== 'object') return summarizeSpyValue(info, 1);
+    const mainNode = safeReadKey(info, 'mainNode');
+    const subNodes = safeReadKey(info, 'subNodes');
+    return {
+      type: 'object',
+      keys: safeCall(function () { return Object.keys(info).slice(0, 16); }, []),
+      mainNode: mainNode ? {
+        path: fullPath(mainNode),
+        name: mainNode.name || null,
+        texts: getNodeTextList(mainNode, { maxDepth: 2 }).slice(0, 6),
+      } : null,
+      subNodes: Array.isArray(subNodes)
+        ? subNodes.slice(0, 8).map(function (node) {
+            return node ? {
+              path: fullPath(node),
+              name: node.name || null,
+              texts: getNodeTextList(node, { maxDepth: 2 }).slice(0, 6),
+            } : null;
+          }).filter(Boolean)
+        : [],
+      nodeCount: Array.isArray(subNodes) ? subNodes.length : toFiniteNumber(safeReadKey(info, 'nodeCount')),
+    };
+  }
+
+  function getToolNodeByItemId(manager, itemId) {
+    if (!manager || typeof manager.getToolNode !== 'function') return null;
+    const id = Number(itemId) || 0;
+    if (id <= 0) return null;
+    return safeCall(function () { return manager.getToolNode(id); }, null);
+  }
+
+  function normalizeCapturedProfile(profile, source) {
+    if (!profile || typeof profile !== 'object') return null;
+    const normalized = {
+      gid: toPositiveNumber(profile.gid != null ? profile.gid : (profile.uid != null ? profile.uid : profile.playerId)),
+      name: normalizeText(profile.name || profile.limitName || profile.nickname || profile.nick || profile.displayName),
+      level: toFiniteNumber(profile.level != null ? profile.level : (profile.lv != null ? profile.lv : profile.grade)),
+      exp: toFiniteNumber(
+        profile.exp != null ? profile.exp :
+        (profile._exp != null ? profile._exp :
+        (profile.curExp != null ? profile.curExp : profile.currentExp))
+      ),
+      nextLevelExp: toFiniteNumber(profile.nextLevelExp),
+      playerId: toPositiveNumber(profile.playerId != null ? profile.playerId : profile.roleId),
+      gold: toFiniteNumber(profile.gold != null ? profile.gold : (profile.coin != null ? profile.coin : profile.money)),
+      coupon: toFiniteNumber(profile.coupon != null ? profile.coupon : (profile.ticket != null ? profile.ticket : profile.pointCoupon)),
+      diamond: toFiniteNumber(profile.diamond != null ? profile.diamond : profile.rechargeDiamond),
+      bean: toFiniteNumber(
+        profile.goldenBean != null ? profile.goldenBean :
+        (profile.bean != null ? profile.bean : profile.goldBean)
+      ),
+      source: source || null,
+      capturedAt: Date.now(),
+    };
+    const hasIdentity = !!(
+      normalized.gid != null ||
+      normalized.name ||
+      normalized.level != null ||
+      normalized.exp != null ||
+      normalized.gold != null
+    );
+    const hasAssets = !!(
+      normalized.coupon != null ||
+      normalized.diamond != null ||
+      normalized.bean != null
+    );
+    if (!hasIdentity && !hasAssets) return null;
+    if (normalized.name === '1111' && normalized.gid === 1111) return null;
+    return normalized;
+  }
+
+  function rememberCapturedProfile(profile, source) {
+    const normalized = normalizeCapturedProfile(profile, source);
+    if (!normalized) return null;
+    pushBounded(runtimeSpyState.capturedProfiles, normalized, 40);
+    return normalized;
+  }
+
+  function inspectRuntimeSpyValue(value, source) {
+    if (!value || typeof value !== 'object') return;
+    const queue = [{ value, depth: 0, source: source || 'runtime' }];
+    const seen = new Set();
+    while (queue.length > 0) {
+      const item = queue.shift();
+      const cur = item && item.value;
+      const depth = item && item.depth || 0;
+      const curSource = item && item.source || source || 'runtime';
+      if (!cur || typeof cur !== 'object') continue;
+      if (seen.has(cur)) continue;
+      seen.add(cur);
+      rememberCapturedProfile(cur, curSource);
+      if (depth >= 2) continue;
+      const keys = safeCall(function () { return Object.keys(cur); }, []);
+      for (let i = 0; i < keys.length; i += 1) {
+        const key = keys[i];
+        const child = safeReadKey(cur, key);
+        if (!child || typeof child !== 'object') continue;
+        queue.push({ value: child, depth: depth + 1, source: curSource + '.' + key });
+      }
+    }
+  }
+
+  function getBestCapturedRuntimeProfile() {
+    const list = Array.isArray(runtimeSpyState.capturedProfiles) ? runtimeSpyState.capturedProfiles : [];
+    let best = null;
+    let bestScore = -1;
+    for (let i = 0; i < list.length; i += 1) {
+      const item = list[i];
+      if (!item || typeof item !== 'object') continue;
+      let score = 0;
+      if (item.gid != null) score += 8;
+      if (item.name) score += 8;
+      if (item.level != null) score += 7;
+      if (item.exp != null) score += 6;
+      if (item.gold != null) score += 6;
+      if (item.coupon != null) score += 3;
+      if (item.diamond != null) score += 3;
+      if (item.bean != null) score += 3;
+      if (item.source && /login|basic|reply|notify/i.test(item.source)) score += 10;
+      if (item.source && /dispatch:/i.test(item.source)) score += 2;
+      if (item.source && /frame:/i.test(item.source)) score += 2;
+      if (!best || score > bestScore || (score === bestScore && (item.capturedAt || 0) > (best.capturedAt || 0))) {
+        best = item;
+        bestScore = score;
+      }
+    }
+    return best ? { ...best, score: bestScore } : null;
+  }
+
+  function getRuntimeSpySnapshot() {
+    return {
+      installed: runtimeSpyState.installed,
+      lastInstallAt: runtimeSpyState.lastInstallAt,
+      lastError: runtimeSpyState.lastError,
+      messageEvents: runtimeSpyState.messageEvents.slice(-20),
+      frameEvents: runtimeSpyState.frameEvents.slice(-20),
+      capturedProfiles: runtimeSpyState.capturedProfiles.slice(-12),
+      bestProfile: getBestCapturedRuntimeProfile(),
+    };
+  }
+
+  function installRuntimeSpies() {
+    if (runtimeSpyState.installed) return runtimeSpyState;
+    runtimeSpyState.lastInstallAt = Date.now();
+    try {
+      const message = safeCall(function () { return getOopsMessage(); }, null);
+      if (message && typeof message.dispatchEvent === 'function' && !message.dispatchEvent.__qqFarmSpyWrapped) {
+        const originalDispatchEvent = message.dispatchEvent;
+        const wrappedDispatchEvent = function () {
+          const args = Array.prototype.slice.call(arguments);
+          const eventName = typeof args[0] === 'string' ? args[0] : null;
+          pushBounded(runtimeSpyState.messageEvents, {
+            at: Date.now(),
+            name: eventName,
+            args: args.slice(1, 4).map(function (arg) { return summarizeSpyValue(arg, 0); }),
+          }, 80);
+          for (let i = 1; i < args.length; i += 1) {
+            inspectRuntimeSpyValue(args[i], 'dispatch:' + (eventName || 'unknown'));
+          }
+          return originalDispatchEvent.apply(this, args);
+        };
+        wrappedDispatchEvent.__qqFarmSpyWrapped = true;
+        wrappedDispatchEvent.__qqFarmSpyOriginal = originalDispatchEvent;
+        message.dispatchEvent = wrappedDispatchEvent;
+      }
+
+      const net = safeCall(function () { return getNetWebSocket(); }, null);
+      if (net && typeof net.onFrame === 'function' && !net.onFrame.__qqFarmSpyWrapped) {
+        const originalOnFrame = net.onFrame;
+        const wrappedOnFrame = function () {
+          const args = Array.prototype.slice.call(arguments);
+          pushBounded(runtimeSpyState.frameEvents, {
+            at: Date.now(),
+            args: args.slice(0, 4).map(function (arg) { return summarizeSpyValue(arg, 0); }),
+          }, 80);
+          for (let i = 0; i < args.length; i += 1) {
+            inspectRuntimeSpyValue(args[i], 'frame');
+          }
+          const result = originalOnFrame.apply(this, args);
+          inspectRuntimeSpyValue(result, 'frame.result');
+          return result;
+        };
+        wrappedOnFrame.__qqFarmSpyWrapped = true;
+        wrappedOnFrame.__qqFarmSpyOriginal = originalOnFrame;
+        net.onFrame = wrappedOnFrame;
+      }
+
+      const nodeProto = cc && cc.Node && cc.Node.prototype;
+      if (nodeProto && typeof nodeProto.dispatchEvent === 'function' && !nodeProto.dispatchEvent.__qqFarmSpyWrapped) {
+        const originalNodeDispatchEvent = nodeProto.dispatchEvent;
+        const wrappedNodeDispatchEvent = function (event) {
+          const type = event && event.type ? String(event.type).toLowerCase() : '';
+          if (type === 'touchend' || type === 'click' || type === 'mouse-up') {
+            const target = safeReadKey(event, 'target') || this;
+            const currentTarget = safeReadKey(event, 'currentTarget') || this;
+            pushBounded(runtimeSpyState.clickEvents, {
+              at: Date.now(),
+              type: type,
+              target: summarizeNodeForClick(target),
+              currentTarget: summarizeNodeForClick(currentTarget),
+              activeDetailState: safeCall(function () {
+                const manager = findPlantInteractionManager();
+                return manager ? {
+                  currentDetailType: safeReadKey(manager, 'currentDetailType'),
+                  currentDragType: safeReadKey(manager, 'currentDragType'),
+                  currentDataItems: summarizeInventoryArray(safeReadKey(manager, 'currentData'), 8),
+                  currentDetailComp: summarizeRuntimeObject(safeReadKey(manager, 'currentDetailComp'), 'currentDetailComp'),
+                } : null;
+              }, null),
+            }, 80);
+          }
+          return originalNodeDispatchEvent.apply(this, arguments);
+        };
+        wrappedNodeDispatchEvent.__qqFarmSpyWrapped = true;
+        wrappedNodeDispatchEvent.__qqFarmSpyOriginal = originalNodeDispatchEvent;
+        nodeProto.dispatchEvent = wrappedNodeDispatchEvent;
+      }
+
+      const buttonProto = cc && cc.Button && cc.Button.prototype;
+      if (buttonProto && typeof buttonProto._onTouchEnded === 'function' && !buttonProto._onTouchEnded.__qqFarmSpyWrapped) {
+        const originalButtonTouchEnded = buttonProto._onTouchEnded;
+        const wrappedButtonTouchEnded = function (event) {
+          const node = safeReadKey(this, 'node') || safeReadKey(event, 'currentTarget') || safeReadKey(event, 'target') || null;
+          pushBounded(runtimeSpyState.clickEvents, {
+            at: Date.now(),
+            type: 'button_touchend',
+            target: summarizeNodeForClick(safeReadKey(event, 'target') || node),
+            currentTarget: summarizeNodeForClick(node),
+            activeDetailState: safeCall(function () {
+              const manager = findPlantInteractionManager();
+              return manager ? {
+                currentDetailType: safeReadKey(manager, 'currentDetailType'),
+                currentDragType: safeReadKey(manager, 'currentDragType'),
+                currentDataItems: summarizeInventoryArray(safeReadKey(manager, 'currentData'), 8),
+                currentDetailComp: summarizeRuntimeObject(safeReadKey(manager, 'currentDetailComp'), 'currentDetailComp'),
+              } : null;
+            }, null),
+          }, 120);
+          return originalButtonTouchEnded.apply(this, arguments);
+        };
+        wrappedButtonTouchEnded.__qqFarmSpyWrapped = true;
+        wrappedButtonTouchEnded.__qqFarmSpyOriginal = originalButtonTouchEnded;
+        buttonProto._onTouchEnded = wrappedButtonTouchEnded;
+      }
+
+      if (buttonProto && typeof buttonProto._onTouchBegan === 'function' && !buttonProto._onTouchBegan.__qqFarmSpyWrapped) {
+        const originalButtonTouchBegan = buttonProto._onTouchBegan;
+        const wrappedButtonTouchBegan = function (event) {
+          const node = safeReadKey(this, 'node') || safeReadKey(event, 'currentTarget') || safeReadKey(event, 'target') || null;
+          pushBounded(runtimeSpyState.clickEvents, {
+            at: Date.now(),
+            type: 'button_touchstart',
+            target: summarizeNodeForClick(safeReadKey(event, 'target') || node),
+            currentTarget: summarizeNodeForClick(node),
+            activeDetailState: safeCall(function () {
+              const manager = findPlantInteractionManager();
+              return manager ? {
+                currentDetailType: safeReadKey(manager, 'currentDetailType'),
+                currentDragType: safeReadKey(manager, 'currentDragType'),
+                currentDataItems: summarizeInventoryArray(safeReadKey(manager, 'currentData'), 8),
+                currentDetailComp: summarizeRuntimeObject(safeReadKey(manager, 'currentDetailComp'), 'currentDetailComp'),
+              } : null;
+            }, null),
+          }, 120);
+          return originalButtonTouchBegan.apply(this, arguments);
+        };
+        wrappedButtonTouchBegan.__qqFarmSpyWrapped = true;
+        wrappedButtonTouchBegan.__qqFarmSpyOriginal = originalButtonTouchBegan;
+        buttonProto._onTouchBegan = wrappedButtonTouchBegan;
+      }
+
+      runtimeSpyState.installed = true;
+      if (!installInteractionManagerSpies()) {
+        ensureInteractionManagerSpyRetry();
+      }
+      runtimeSpyState.lastError = null;
+    } catch (err) {
+      runtimeSpyState.lastError = err && err.message ? err.message : String(err);
+    }
+    return runtimeSpyState;
+  }
+
+  function isPlaceholderAccountShape(obj) {
+    if (!obj || typeof obj !== 'object') return false;
+    const gid = toPositiveNumber(
+      safeReadKey(obj, 'gid') != null ? safeReadKey(obj, 'gid') :
+      (safeReadKey(obj, 'uid') != null ? safeReadKey(obj, 'uid') : safeReadKey(obj, 'playerId'))
+    );
+    const name = normalizeText(
+      safeReadKey(obj, 'name') ||
+      safeReadKey(obj, 'limitName') ||
+      safeReadKey(obj, 'nickname') ||
+      safeReadKey(obj, 'nick')
+    );
+    const level = toFiniteNumber(
+      safeReadKey(obj, 'level') != null ? safeReadKey(obj, 'level') :
+      (safeReadKey(obj, 'lv') != null ? safeReadKey(obj, 'lv') : safeReadKey(obj, 'grade'))
+    );
+    const gold = toFiniteNumber(safeReadKey(obj, 'gold'));
+    const coupon = toFiniteNumber(
+      safeReadKey(obj, 'coupon') != null ? safeReadKey(obj, 'coupon') : safeReadKey(obj, 'ticket')
+    );
+    const diamond = toFiniteNumber(safeReadKey(obj, 'diamond'));
+    const bean = toFiniteNumber(
+      safeReadKey(obj, 'goldenBean') != null ? safeReadKey(obj, 'goldenBean') :
+      (safeReadKey(obj, 'bean') != null ? safeReadKey(obj, 'bean') : safeReadKey(obj, 'goldBean'))
+    );
+    const exp = toFiniteNumber(
+      safeReadKey(obj, 'exp') != null ? safeReadKey(obj, 'exp') :
+      (safeReadKey(obj, '_exp') != null ? safeReadKey(obj, '_exp') : safeReadKey(obj, 'curExp'))
+    );
+    const nameLooksPlaceholder = !!name && (/^1+$/.test(name) || name === '游客' || name === '默认');
+    return gid === 1111 && level === 1 && (gold || 0) === 0 && (coupon || 0) === 0 && (diamond || 0) === 0 && (bean || 0) === 0 && (exp || 0) === 0 && nameLooksPlaceholder;
+  }
+
+  function collectNestedObjects(roots, maxDepth) {
+    const queue = [];
+    const seen = new Set();
+    const results = [];
+    for (let i = 0; i < roots.length; i += 1) {
+      const root = roots[i];
+      if (root && root.value && typeof root.value === 'object') {
+        queue.push({ value: root.value, depth: 0, source: root.source || null });
+      }
+    }
+    while (queue.length > 0) {
+      const item = queue.shift();
+      const value = item.value;
+      const depth = item.depth || 0;
+      const source = item.source || null;
+      if (!value || typeof value !== 'object') continue;
+      if (seen.has(value)) continue;
+      seen.add(value);
+      results.push({ value, depth, source });
+      if (depth >= maxDepth) continue;
+      const keys = Object.keys(value);
+      for (let i = 0; i < keys.length; i += 1) {
+        const key = keys[i];
+        const child = safeReadKey(value, key);
+        if (!child || typeof child !== 'object') continue;
+        const childSource = source ? source + '.' + key : key;
+        queue.push({ value: child, depth: depth + 1, source: childSource });
+      }
+    }
+    return results;
+  }
+
+  function scoreAccountLikeObject(obj) {
+    if (!obj || typeof obj !== 'object') return -1;
+    let score = 0;
+    const gid = toPositiveNumber(
+      safeReadKey(obj, 'gid') != null ? safeReadKey(obj, 'gid') :
+      (safeReadKey(obj, 'uid') != null ? safeReadKey(obj, 'uid') :
+      (safeReadKey(obj, 'playerId') != null ? safeReadKey(obj, 'playerId') : safeReadKey(obj, 'roleId')))
+    );
+    const name = normalizeText(
+      safeReadKey(obj, 'name') ||
+      safeReadKey(obj, 'limitName') ||
+      safeReadKey(obj, 'nickname') ||
+      safeReadKey(obj, 'nick') ||
+      safeReadKey(obj, 'displayName')
+    );
+    const level = toFiniteNumber(
+      safeReadKey(obj, 'level') != null ? safeReadKey(obj, 'level') :
+      (safeReadKey(obj, 'lv') != null ? safeReadKey(obj, 'lv') : safeReadKey(obj, 'grade'))
+    );
+    const gold = toFiniteNumber(
+      safeReadKey(obj, 'gold') != null ? safeReadKey(obj, 'gold') :
+      (safeReadKey(obj, 'coin') != null ? safeReadKey(obj, 'coin') : safeReadKey(obj, 'money'))
+    );
+    const coupon = toFiniteNumber(
+      safeReadKey(obj, 'coupon') != null ? safeReadKey(obj, 'coupon') :
+      (safeReadKey(obj, 'ticket') != null ? safeReadKey(obj, 'ticket') : safeReadKey(obj, 'couponNum'))
+    );
+    const bean = toFiniteNumber(
+      safeReadKey(obj, 'goldenBean') != null ? safeReadKey(obj, 'goldenBean') :
+      (safeReadKey(obj, 'bean') != null ? safeReadKey(obj, 'bean') : safeReadKey(obj, 'goldBean'))
+    );
+    const exp = toFiniteNumber(
+      safeReadKey(obj, 'exp') != null ? safeReadKey(obj, 'exp') :
+      (safeReadKey(obj, '_exp') != null ? safeReadKey(obj, '_exp') :
+      (safeReadKey(obj, 'curExp') != null ? safeReadKey(obj, 'curExp') : safeReadKey(obj, 'currentExp')))
+    );
+
+    if (gid != null) score += 4;
+    if (name) score += 4;
+    if (level != null) score += 4;
+    if (gold != null) score += 4;
+    if (coupon != null) score += 3;
+    if (bean != null) score += 3;
+    if (exp != null) score += 3;
+    if (safeReadKey(obj, 'openid') != null || safeReadKey(obj, 'openId') != null) score += 2;
+    if (safeReadKey(obj, 'avatar') != null || safeReadKey(obj, 'avatarUrl') != null) score += 1;
+    if (safeReadKey(obj, 'authorized_status') != null) score += 1;
+    if (Array.isArray(safeReadKey(obj, 'unlockSystems'))) score += 2;
+    if (isPlaceholderAccountShape(obj)) score -= 20;
+    if (name && /蒙面偷菜的好友/.test(name)) score -= 8;
+    return score;
+  }
+
+  function findBestProtocolAccountObject() {
+    const oops = resolveOops();
+    const net = safeCall(function () { return getNetWebSocket(); }, null);
+    const itemM = safeCall(function () { return getItemManager(); }, null);
+    const roots = [];
+    if (oops && typeof oops === 'object') roots.push({ value: oops, source: 'oops' });
+    if (net && typeof net === 'object') roots.push({ value: net, source: 'net' });
+    if (itemM && typeof itemM === 'object') roots.push({ value: itemM, source: 'itemM' });
+
+    const candidates = collectNestedObjects(roots, 3);
+    let best = null;
+    for (let i = 0; i < candidates.length; i += 1) {
+      const entry = candidates[i];
+      const score = scoreAccountLikeObject(entry.value);
+      if (score < 10) continue;
+      if (!best || score > best.score) {
+        best = {
+          value: entry.value,
+          source: entry.source,
+          depth: entry.depth,
+          score,
+        };
+      }
+    }
+    return best;
+  }
+
+  function getProtocolAccountProfile() {
+    installRuntimeSpies();
+    const oops = resolveOops();
+    const net = safeCall(function () { return getNetWebSocket(); }, null);
+    const itemM = safeCall(function () { return getItemManager(); }, null);
+    const bestNested = findBestProtocolAccountObject();
+    const bestCaptured = getBestCapturedRuntimeProfile();
+    const candidates = [];
+
+    function pushCandidate(value, source) {
+      if (!value || typeof value !== 'object') return;
+      candidates.push({ value: value, source: source || null });
+    }
+
+    if (oops) {
+      pushCandidate(oops.userM, 'oops.userM');
+      pushCandidate(oops.userModel, 'oops.userModel');
+      pushCandidate(oops.userInfo, 'oops.userInfo');
+      pushCandidate(oops.playerData, 'oops.playerData');
+      pushCandidate(oops.user, 'oops.user');
+    }
+    if (net) {
+      pushCandidate(net.userState, 'net.userState');
+      pushCandidate(net._userState, 'net._userState');
+      pushCandidate(safeCall(function () { return net.getUserState(); }, null), 'net.getUserState()');
+      pushCandidate(net.loginReply, 'net.loginReply');
+      pushCandidate(safeReadKey(net, 'basic'), 'net.basic');
+      pushCandidate(safeReadKey(net, 'user'), 'net.user');
+    }
+    if (itemM) {
+      pushCandidate(itemM.userState, 'itemM.userState');
+      pushCandidate(itemM.user, 'itemM.user');
+      pushCandidate(itemM.player, 'itemM.player');
+    }
+    if (bestNested && bestNested.value) {
+      pushCandidate(bestNested.value, bestNested.source || 'protocol.nested');
+    }
+    if (bestCaptured) {
+      pushCandidate(bestCaptured, bestCaptured.source || 'runtime.spy');
+    }
+
+    const profile = {
+      gid: null,
+      name: null,
+      level: null,
+      exp: null,
+      nextLevelExp: null,
+      playerId: null,
+      gold: null,
+      coupon: null,
+      diamond: null,
+      bean: null,
+      source: null,
+    };
+
+    for (let i = 0; i < candidates.length; i += 1) {
+      const candidate = candidates[i];
+      const value = candidate.value;
+      if (!value || typeof value !== 'object') continue;
+
+      if (profile.gid == null) {
+        profile.gid = toPositiveNumber(
+          safeReadKey(value, 'gid') != null ? safeReadKey(value, 'gid') :
+          (safeReadKey(value, 'uid') != null ? safeReadKey(value, 'uid') :
+          (safeReadKey(value, 'playerId') != null ? safeReadKey(value, 'playerId') : safeReadKey(value, 'roleId')))
+        );
+      }
+      if (!profile.name) {
+        const nameVal = normalizeText(
+          safeReadKey(value, 'name') ||
+          safeReadKey(value, 'limitName') ||
+          safeReadKey(value, 'nickname') ||
+          safeReadKey(value, 'nick') ||
+          safeReadKey(value, 'displayName')
+        );
+        if (nameVal) profile.name = nameVal;
+      }
+      if (profile.level == null) {
+        profile.level = toFiniteNumber(
+          safeReadKey(value, 'level') != null ? safeReadKey(value, 'level') :
+          (safeReadKey(value, 'lv') != null ? safeReadKey(value, 'lv') : safeReadKey(value, 'grade'))
+        );
+      }
+      if (profile.exp == null) {
+        profile.exp = toFiniteNumber(
+          safeReadKey(value, 'exp') != null ? safeReadKey(value, 'exp') :
+          (safeReadKey(value, '_exp') != null ? safeReadKey(value, '_exp') :
+          (safeReadKey(value, 'curExp') != null ? safeReadKey(value, 'curExp') : safeReadKey(value, 'currentExp')))
+        );
+      }
+      if (profile.gold == null) {
+        profile.gold = toFiniteNumber(
+          safeReadKey(value, 'gold') != null ? safeReadKey(value, 'gold') :
+          (safeReadKey(value, 'coin') != null ? safeReadKey(value, 'coin') : safeReadKey(value, 'money'))
+        );
+      }
+      if (profile.coupon == null) {
+        profile.coupon = toFiniteNumber(
+          safeReadKey(value, 'coupon') != null ? safeReadKey(value, 'coupon') :
+          (safeReadKey(value, 'ticket') != null ? safeReadKey(value, 'ticket') : safeReadKey(value, 'couponNum'))
+        );
+      }
+      if (profile.diamond == null) {
+        profile.diamond = toFiniteNumber(safeReadKey(value, 'diamond'));
+      }
+      if (profile.bean == null) {
+        profile.bean = toFiniteNumber(
+          safeReadKey(value, 'goldenBean') != null ? safeReadKey(value, 'goldenBean') :
+          (safeReadKey(value, 'bean') != null ? safeReadKey(value, 'bean') : safeReadKey(value, 'goldBean'))
+        );
+      }
+
+      if (
+        profile.source == null &&
+        (profile.gid != null || profile.name || profile.level != null || profile.gold != null || profile.coupon != null || profile.bean != null)
+      ) {
+        profile.source = candidate.source;
+      }
+    }
+
+    return profile;
+  }
+
+  function getItemCountById(itemId) {
+    const targetId = Number(itemId) || 0;
+    if (targetId <= 0) return null;
+    const itemM = safeCall(function () { return getItemManager(); }, null);
+    if (!itemM) return null;
+
+    safeCall(function () {
+      if (typeof itemM.updateItems === 'function') itemM.updateItems();
+    }, null);
+
+    const methodNames = ['getItemAllCount', 'getItemCountById', 'getItemNumById', 'getItemCount', 'getItemNum', 'getCountById', 'getNumById'];
+    for (let i = 0; i < methodNames.length; i += 1) {
+      const fn = itemM[methodNames[i]];
+      if (typeof fn !== 'function') continue;
+      const result = safeCall(function () { return fn.call(itemM, targetId); }, null);
+      const count = toFiniteNumber(result);
+      if (count != null) return count;
+    }
+
+    const legacyItem = safeCall(function () { return itemM.getitembyid(targetId); }, null);
+    if (legacyItem && typeof legacyItem === 'object') {
+      const count = toFiniteNumber(
+        safeReadKey(legacyItem, 'count') != null ? safeReadKey(legacyItem, 'count') :
+        (safeReadKey(legacyItem, 'num') != null ? safeReadKey(legacyItem, 'num') : safeReadKey(legacyItem, 'value'))
+      );
+      if (count != null) return count;
+    }
+
+    const directItem = safeCall(function () { return itemM.getItemById(targetId); }, null);
+    if (directItem && typeof directItem === 'object') {
+      const count = toFiniteNumber(
+        safeReadKey(directItem, 'count') != null ? safeReadKey(directItem, 'count') :
+        (safeReadKey(directItem, 'num') != null ? safeReadKey(directItem, 'num') : safeReadKey(directItem, 'value'))
+      );
+      if (count != null) return count;
+    }
+
+    const bags = [
+      safeReadKey(itemM, 'itemsData'),
+      safeReadKey(itemM, 'items'),
+      safeReadKey(itemM, 'itemList'),
+      safeReadKey(itemM, '_items'),
+      safeReadKey(itemM, '_itemList'),
+      safeReadKey(itemM, 'bagItems'),
+      safeReadKey(itemM, 'itemMap')
+    ];
+    for (let i = 0; i < bags.length; i += 1) {
+      const bag = bags[i];
+      if (!bag) continue;
+      if (Array.isArray(bag)) {
+        for (let j = 0; j < bag.length; j += 1) {
+          const item = bag[j];
+          const id = Number(
+            safeReadKey(item, 'id') != null ? safeReadKey(item, 'id') :
+            (safeReadKey(item, 'itemId') != null ? safeReadKey(item, 'itemId') : safeReadKey(item, 'uid'))
+          );
+          if (id !== targetId) continue;
+          const count = toFiniteNumber(
+            safeReadKey(item, 'count') != null ? safeReadKey(item, 'count') :
+            (safeReadKey(item, 'num') != null ? safeReadKey(item, 'num') : safeReadKey(item, 'value'))
+          );
+          if (count != null) return count;
+        }
+      } else if (typeof bag === 'object') {
+        const byKey = safeReadKey(bag, String(targetId));
+        if (byKey != null) {
+          if (typeof byKey === 'number') return byKey;
+          const count = toFiniteNumber(
+            safeReadKey(byKey, 'count') != null ? safeReadKey(byKey, 'count') :
+            (safeReadKey(byKey, 'num') != null ? safeReadKey(byKey, 'num') : safeReadKey(byKey, 'value'))
+          );
+          if (count != null) return count;
+        }
+        const keys = Object.keys(bag).slice(0, 500);
+        for (let j = 0; j < keys.length; j += 1) {
+          const item = safeReadKey(bag, keys[j]);
+          if (!item || typeof item !== 'object') continue;
+          const id = Number(
+            safeReadKey(item, 'id') != null ? safeReadKey(item, 'id') :
+            (safeReadKey(item, 'itemId') != null ? safeReadKey(item, 'itemId') :
+            (safeReadKey(item, 'cfgId') != null ? safeReadKey(item, 'cfgId') : safeReadKey(item, 'uid')))
+          );
+          if (id !== targetId) continue;
+          const count = toFiniteNumber(
+            safeReadKey(item, 'count') != null ? safeReadKey(item, 'count') :
+            (safeReadKey(item, 'num') != null ? safeReadKey(item, 'num') : safeReadKey(item, 'value'))
+          );
+          if (count != null) return count;
+        }
+      }
+    }
+
+    const allItems = safeCall(function () { return itemM.getAllItems(); }, null);
+    if (Array.isArray(allItems)) {
+      for (let i = 0; i < allItems.length; i += 1) {
+        const item = allItems[i];
+        const id = Number(
+          safeReadKey(item, 'id') != null ? safeReadKey(item, 'id') :
+          (safeReadKey(item, 'itemId') != null ? safeReadKey(item, 'itemId') :
+          (safeReadKey(item, 'cfgId') != null ? safeReadKey(item, 'cfgId') : safeReadKey(item, 'uid')))
+        );
+        if (id !== targetId) continue;
+        const count = toFiniteNumber(
+          safeReadKey(item, 'count') != null ? safeReadKey(item, 'count') :
+          (safeReadKey(item, 'num') != null ? safeReadKey(item, 'num') : safeReadKey(item, 'value'))
+        );
+        if (count != null) return count;
+      }
+    }
+    return null;
+  }
+
+  function getItemDebugSnapshot() {
+    const itemM = safeCall(function () { return getItemManager(); }, null);
+    const result = {
+      hasItemManager: !!itemM,
+      coupon1002: getItemCountById(1002),
+      bean1005: getItemCountById(1005),
+      allItemCount1002: null,
+      allItemCount1005: null,
+      rechargeDiamond: null,
+      sources: [],
+    };
+    if (!itemM) return result;
+
+    result.allItemCount1002 = safeCall(function () {
+      return toFiniteNumber(itemM.getItemAllCount(1002));
+    }, null);
+    result.allItemCount1005 = safeCall(function () {
+      return toFiniteNumber(itemM.getItemAllCount(1005));
+    }, null);
+
+    const rechargeDiamond = safeCall(function () {
+      if (typeof itemM.updateRechargeDiamond === 'function') itemM.updateRechargeDiamond();
+      return toFiniteNumber(safeReadKey(itemM, 'rechargeDiamond'));
+    }, null);
+    if (rechargeDiamond != null) result.rechargeDiamond = rechargeDiamond;
+
+    const allItems = safeCall(function () { return itemM.getAllItems(); }, null);
+    if (Array.isArray(allItems)) {
+      result.sources.push({
+        name: 'getAllItems()',
+        type: 'array',
+        size: allItems.length,
+        sample: allItems.slice(0, 12).map(function (item) {
+          return {
+            id: safeReadKey(item, 'id'),
+            itemId: safeReadKey(item, 'itemId'),
+            cfgId: safeReadKey(item, 'cfgId'),
+            uid: safeReadKey(item, 'uid'),
+            count: safeReadKey(item, 'count'),
+            num: safeReadKey(item, 'num'),
+            value: safeReadKey(item, 'value'),
+            name: safeReadKey(item, 'name'),
+          };
+        }),
+      });
+    }
+
+    const bags = [
+      ['itemsData', safeReadKey(itemM, 'itemsData')],
+      ['items', safeReadKey(itemM, 'items')],
+      ['itemList', safeReadKey(itemM, 'itemList')],
+      ['_items', safeReadKey(itemM, '_items')],
+      ['_itemList', safeReadKey(itemM, '_itemList')],
+      ['bagItems', safeReadKey(itemM, 'bagItems')],
+      ['itemMap', safeReadKey(itemM, 'itemMap')]
+    ];
+
+    for (let i = 0; i < bags.length; i += 1) {
+      const name = bags[i][0];
+      const bag = bags[i][1];
+      if (!bag) continue;
+      const entry = {
+        name,
+        type: Array.isArray(bag) ? 'array' : typeof bag,
+        size: null,
+        sample: [],
+      };
+      if (Array.isArray(bag)) {
+        entry.size = bag.length;
+        for (let j = 0; j < Math.min(bag.length, 8); j += 1) {
+          const item = bag[j];
+          if (!item || typeof item !== 'object') continue;
+          entry.sample.push({
+            id: safeReadKey(item, 'id'),
+            itemId: safeReadKey(item, 'itemId'),
+            cfgId: safeReadKey(item, 'cfgId'),
+            uid: safeReadKey(item, 'uid'),
+            count: safeReadKey(item, 'count'),
+            num: safeReadKey(item, 'num'),
+            value: safeReadKey(item, 'value'),
+          });
+        }
+      } else if (bag && typeof bag === 'object') {
+        const keys = Object.keys(bag);
+        entry.size = keys.length;
+        for (let j = 0; j < Math.min(keys.length, 8); j += 1) {
+          const key = keys[j];
+          const item = safeReadKey(bag, key);
+          if (item && typeof item === 'object') {
+            entry.sample.push({
+              key,
+              id: safeReadKey(item, 'id'),
+              itemId: safeReadKey(item, 'itemId'),
+              cfgId: safeReadKey(item, 'cfgId'),
+              uid: safeReadKey(item, 'uid'),
+              count: safeReadKey(item, 'count'),
+              num: safeReadKey(item, 'num'),
+              value: safeReadKey(item, 'value'),
+            });
+          } else {
+            entry.sample.push({ key, value: item });
+          }
+        }
+      }
+      result.sources.push(entry);
+    }
+
+    return result;
+  }
+
   /**
    * 获取背包中所有种子
    * sortMode: 1=按层级降序, 2=按稀有度降序, 3=按等级降序, 4=按id升序
@@ -4150,288 +6450,202 @@
     return itemM.getAllSeeds(sortMode || 0);
   }
 
-  function initSeedModel(seed) {
-    if (!seed || typeof seed !== 'object') return seed;
-    if (typeof seed.initPlantData === 'function') {
-      try {
-        seed.initPlantData();
-      } catch (_) {}
-    }
-    return seed;
-  }
-
-  function summarizeSeedModel(seed) {
-    if (!seed) return null;
-    initSeedModel(seed);
-    const detail = seed.detail || seed.tempData || {};
-    const plantData = seed.plantData || {};
-    return {
-      itemId: seed.itemId || seed.id,
-      seedId: seed.id,
-      name: seed.name || '未知种子',
-      count: Math.max(0, Number(seed.count) || 0),
-      level: Number(detail.level || seed.level || 0),
-      rarity: Number(detail.rarity || 0),
-      layer: Number(detail.layer || seed.layerNum || 0),
-      isMultiLandPlant: !!seed.isMultiLandPlant,
-      plantSize: Math.max(1, Number(plantData.size) || 1),
-      plantId: plantData.id == null ? null : plantData.id
-    };
-  }
-
-  function getSeedModel(target, opts) {
-    opts = opts || {};
-
-    if (target && typeof target === 'object' && target.id != null) {
-      return initSeedModel(target);
-    }
-
-    const seeds = getAllSeeds(opts.sortMode || 0);
-    const targetId = toPositiveNumber(target);
-    const targetName = normalizeMatchText(target);
-
-    for (let i = 0; i < seeds.length; i++) {
-      const seed = initSeedModel(seeds[i]);
-      if (!seed) continue;
-
-      const count = Math.max(0, Number(seed.count) || 0);
-      if (!opts.includeZeroCount && count <= 0) continue;
-
-      if (targetId != null) {
-        if (toPositiveNumber(seed.id) === targetId) return seed;
-        if (toPositiveNumber(seed.itemId) === targetId) return seed;
-      }
-
-      if (targetName && normalizeMatchText(seed.name) === targetName) {
-        return seed;
-      }
-    }
-
-    return null;
-  }
-
   /**
    * 获取种子列表（供外部调用的精简版）
    */
   function getSeedList(opts) {
     opts = opts || {};
     const seeds = getAllSeeds(opts.sortMode || 3);
-    const list = seeds
-      .map(summarizeSeedModel)
-      .filter(Boolean)
-      .filter(function (s) {
-        return !opts.availableOnly || s.count > 0;
-      });
+    const list = seeds.map(function (s) {
+      const detail = s.detail || s.tempData || {};
+      return {
+        itemId: s.itemId || s.id,
+        seedId: s.id,
+        name: s.name || '未知种子',
+        count: s.count || 0,
+        level: detail.level || s.level || 0,
+        rarity: detail.rarity || 0,
+        layer: detail.layer || 0,
+      };
+    });
     return opts.silent ? list : out(list);
   }
 
-  function getSingletonModuleComp() {
-    const resolved = getSystemExportRuntime(
-      ['chunks:///_virtual/SingletonModuleComp.ts', './SingletonModuleComp.ts'],
-      'smc'
-    );
-    if (resolved && resolved.value && typeof resolved.value === 'object') {
-      return resolved.value;
+  function getBackpackSeedCount(seedId) {
+    const targetSeedId = Number(seedId) || 0;
+    if (targetSeedId <= 0) return 0;
+    const seeds = getAllSeeds(3);
+    for (let i = 0; i < seeds.length; i += 1) {
+      const seed = seeds[i];
+      if (Number(seed && seed.id) !== targetSeedId) continue;
+      return Number(seed && seed.count) || 0;
     }
-
-    const directCandidates = [
-      G.smc,
-      G.GameGlobal && G.GameGlobal.smc
-    ];
-    for (let i = 0; i < directCandidates.length; i++) {
-      const smc = directCandidates[i];
-      if (smc && typeof smc === 'object') return smc;
-    }
-
-    throw new Error('smc not found');
+    return 0;
   }
 
-  function getShopModuleRuntime() {
-    const resolved = getSystemExportRuntime(
-      ['chunks:///_virtual/Shop.ts', './Shop.ts'],
-      'Shop'
-    );
-    if (resolved && resolved.value && typeof resolved.value.staticEnter === 'function') {
+  function resolveSeedDisplayName(seedId, fallbackName) {
+    if (fallbackName) return String(fallbackName);
+    const plantableSeed = resolvePlantableSeedItem(seedId);
+    if (plantableSeed) {
+      if (plantableSeed.plantName) return String(plantableSeed.plantName);
+      if (plantableSeed.name) return String(plantableSeed.name).replace(/种子$/, '');
+    }
+    return '';
+  }
+
+  function resolvePlantableSeedItem(seedId) {
+    const targetSeedId = Number(seedId) || 0;
+    if (targetSeedId <= 0) return null;
+    const seeds = getAllSeeds(3);
+    for (let i = 0; i < seeds.length; i += 1) {
+      const seed = seeds[i];
+      const runtimeSeedId = Number(seed && seed.id) || 0;
+      const runtimeItemId = Number(seed && seed.itemId) || 0;
+      if (runtimeSeedId !== targetSeedId && runtimeItemId !== targetSeedId) continue;
       return {
-        source: resolved.source,
-        Shop: resolved.value
+        requestedSeedId: targetSeedId,
+        runtimeSeedId: runtimeSeedId > 0 ? runtimeSeedId : null,
+        itemId: runtimeItemId > 0 ? runtimeItemId : (runtimeSeedId > 0 ? runtimeSeedId : null),
+        name: seed && seed.name ? String(seed.name) : null,
+        count: Number(seed && seed.count) || 0,
       };
     }
-
-    const directCandidates = [
-      G.Shop,
-      G.GameGlobal && G.GameGlobal.Shop
-    ];
-    for (let i = 0; i < directCandidates.length; i++) {
-      const Shop = directCandidates[i];
-      if (Shop && typeof Shop.staticEnter === 'function') {
-        return {
-          source: i === 0 ? 'globalThis.Shop' : 'GameGlobal.Shop',
-          Shop: Shop
-        };
-      }
-    }
-
     return null;
   }
 
-  function getShopEnterCompCtor() {
-    const resolved = getSystemExportRuntime(
-      ['chunks:///_virtual/ShopEnterSystem.ts', './ShopEnterSystem.ts'],
-      'ShopEnterComp'
+  function isShopGoodsLike(item) {
+    if (!item || typeof item !== 'object') return false;
+    const goodsId = Number(
+      safeReadKey(item, 'id') != null ? safeReadKey(item, 'id') :
+      (safeReadKey(item, 'goodsId') != null ? safeReadKey(item, 'goodsId') : safeReadKey(item, 'gid'))
     );
-    return resolved && typeof resolved.value === 'function' ? resolved.value : null;
+    const itemId = Number(
+      safeReadKey(item, 'itemId') != null ? safeReadKey(item, 'itemId') :
+      (safeReadKey(item, 'seedId') != null ? safeReadKey(item, 'seedId') : safeReadKey(item, 'cfgId'))
+    );
+    const price = Number(
+      safeReadKey(item, 'price') != null ? safeReadKey(item, 'price') :
+      (safeReadKey(item, 'cost') != null ? safeReadKey(item, 'cost') : safeReadKey(item, 'buyPrice'))
+    );
+    return goodsId > 0 && itemId > 0 && Number.isFinite(price) && price >= 0;
   }
 
-  function hasShopEnterComp(entity) {
-    const ShopEnterComp = getShopEnterCompCtor();
-    if (!entity || !ShopEnterComp) return false;
+  function collectShopGoodsArrays(root, maxDepth) {
+    const results = [];
+    const seen = new Set();
 
-    try {
-      if (typeof entity.has === 'function') {
-        return !!entity.has(ShopEnterComp);
+    function visit(value, path, depth) {
+      if (!value || depth > maxDepth) return;
+      if (Array.isArray(value)) {
+        const goods = value.filter(isShopGoodsLike);
+        if (goods.length > 0) {
+          results.push({
+            path: path || 'root',
+            score: goods.length,
+            list: value,
+          });
+        }
+        return;
       }
-    } catch (_) {}
-
-    try {
-      if (typeof entity.get === 'function') {
-        return !!entity.get(ShopEnterComp);
+      if (typeof value !== 'object') return;
+      if (seen.has(value)) return;
+      seen.add(value);
+      const keys = safeCall(function () { return Object.keys(value); }, []).slice(0, 80);
+      for (let i = 0; i < keys.length; i += 1) {
+        const key = keys[i];
+        visit(safeReadKey(value, key), path ? (path + '.' + key) : key, depth + 1);
       }
-    } catch (_) {}
+    }
 
-    const compName = ShopEnterComp.compName || 'ShopEnterComp';
-    return !!entity[compName];
+    visit(root, '', 0);
+    results.sort(function (a, b) { return b.score - a.score; });
+    return results;
   }
 
-  function ensureShopEntityReady() {
-    const smc = getSingletonModuleComp();
-    if (smc.shop && smc.shop.ShopModelComp) {
-      if (!hasShopEnterComp(smc.shop) && typeof smc.shop.enter === 'function') {
-        smc.shop.enter();
-      }
-      return {
-        smc: smc,
-        shop: smc.shop,
-        model: smc.shop.ShopModelComp,
-        strategy: hasShopEnterComp(smc.shop) ? 'existing' : 'existing_reenter'
-      };
-    }
+  function resolveShopGoodsName(g, itemId, tempModel, plantData) {
+    const itemData = safeReadKey(g, 'itemData');
+    const configByItem = safeCall(function () {
+      const itemM = getItemManager();
+      if (!itemM) return null;
+      if (typeof itemM.getItemConfig === 'function') return itemM.getItemConfig(itemId);
+      if (typeof itemM.getTempItemModel === 'function') return itemM.getTempItemModel(itemId);
+      if (typeof itemM.getitembyid === 'function') return itemM.getitembyid(itemId);
+      return null;
+    }, null);
 
-    const runtime = getShopModuleRuntime();
-    if (!runtime || !runtime.Shop || typeof runtime.Shop.staticEnter !== 'function') {
-      throw new Error('Shop.staticEnter not found');
-    }
+    return (
+      safeReadKey(g, 'name') ||
+      (tempModel && safeReadKey(tempModel, 'name')) ||
+      (itemData && safeReadKey(itemData, 'name')) ||
+      (itemData && safeReadKey(itemData, '_name')) ||
+      (configByItem && safeReadKey(configByItem, 'name')) ||
+      (configByItem && safeReadKey(configByItem, '_name')) ||
+      (plantData && safeReadKey(plantData, 'name')) ||
+      '未知'
+    );
+  }
 
-    runtime.Shop.staticEnter();
+  function normalizeShopGoodsItem(g) {
+    if (!g || typeof g !== 'object') return null;
+    const goodsId = Number(
+      safeReadKey(g, 'id') != null ? safeReadKey(g, 'id') :
+      (safeReadKey(g, 'goodsId') != null ? safeReadKey(g, 'goodsId') : safeReadKey(g, 'gid'))
+    ) || 0;
+    const itemId = Number(
+      safeReadKey(g, 'itemId') != null ? safeReadKey(g, 'itemId') :
+      (safeReadKey(g, 'seedId') != null ? safeReadKey(g, 'seedId') : safeReadKey(g, 'cfgId'))
+    ) || 0;
+    if (goodsId <= 0 || itemId <= 0) return null;
 
-    if (!smc.shop) {
-      throw new Error('smc.shop not found after Shop.staticEnter');
+    const tempModel = safeReadKey(g, 'tempModel');
+    if (tempModel && typeof tempModel.initPlantData === 'function') {
+      safeCall(function () { return tempModel.initPlantData(); }, null);
     }
-    if (!smc.shop.ShopModelComp) {
-      throw new Error('smc.shop.ShopModelComp not found after Shop.staticEnter');
-    }
+    const plantData =
+      safeReadKey(g, 'plantData') ||
+      (tempModel && safeReadKey(tempModel, 'plantData')) ||
+      null;
+    const level = Number(
+      tempModel && safeReadKey(tempModel, 'level') != null ? safeReadKey(tempModel, 'level') :
+      (plantData && safeReadKey(plantData, 'level') != null ? safeReadKey(plantData, 'level') :
+      (safeReadKey(g, 'level') != null ? safeReadKey(g, 'level') :
+      (safeReadKey(g, '_unlockLevel') != null ? safeReadKey(g, '_unlockLevel') : safeReadKey(g, 'unlockLevel'))))
+    ) || 0;
+    const unlocked = safeReadKey(g, 'unlocked');
+    const isBuyAll = safeReadKey(g, 'isBuyAll');
+    if (unlocked === false) return null;
+    if (isBuyAll === true) return null;
+
+    const inferredIsSeed = safeReadKey(g, 'isSeed');
+    const isSeed = inferredIsSeed != null
+      ? inferredIsSeed
+      : !!(itemId > 0 && (plantData || tempModel || safeReadKey(g, 'itemData')));
 
     return {
-      smc: smc,
-      shop: smc.shop,
-      model: smc.shop.ShopModelComp,
-      strategy: 'shop_static_enter'
-    };
-  }
-
-  function findShopGoodsSource(opts) {
-    opts = opts || {};
-    const smc = getSingletonModuleComp();
-    const shop = smc.shop;
-    if (!shop || typeof shop !== 'object') {
-      throw new Error('smc.shop not found');
-    }
-    const model = shop.ShopModelComp;
-    if (!model || typeof model !== 'object') {
-      throw new Error('smc.shop.ShopModelComp not found');
-    }
-
-    const list = Array.isArray(model.curGoodsList) ? model.curGoodsList : null;
-    if (opts.requireList !== false && !list) {
-      throw new Error('smc.shop.ShopModelComp.curGoodsList not ready');
-    }
-
-    return {
-      path: 'smc.shop.ShopModelComp.curGoodsList',
-      smc: smc,
-      shop: shop,
-      model: model,
-      list: list
-    };
-  }
-
-  async function waitForShopGoodsSource(opts) {
-    opts = opts || {};
-    const timeoutMs = opts.timeoutMs == null ? 1600 : Math.max(0, Number(opts.timeoutMs) || 0);
-    const pollMs = opts.pollMs == null ? 120 : Math.max(30, Number(opts.pollMs) || 30);
-    const startedAt = Date.now();
-    let lastError = null;
-
-    while (true) {
-      try {
-        return findShopGoodsSource(opts);
-      } catch (error) {
-        lastError = error;
-      }
-
-      if (Date.now() - startedAt >= timeoutMs) {
-        if (lastError) throw lastError;
-        throw new Error(
-          opts.requireList === false
-            ? 'smc.shop.ShopModelComp not found'
-            : 'smc.shop.ShopModelComp.curGoodsList not ready'
-        );
-      }
-      await wait(pollMs);
-    }
-  }
-
-  async function ensureShopGoodsSource(opts) {
-    opts = opts || {};
-    const shopId = opts.shopId || 2;
-    const ensureData = opts.ensureData !== false;
-
-    try {
-      const existing = findShopGoodsSource({
-        ...opts,
-        requireList: ensureData
-      });
-      return {
-        source: existing,
-        strategy: ensureData ? 'existing_data' : 'existing_entity',
-        openedByUi: false,
-        buttonPath: null
-      };
-    } catch (_) {}
-
-    const entity = ensureShopEntityReady();
-    if (!ensureData) {
-      const source = findShopGoodsSource({ requireList: false });
-      return {
-        source: source,
-        strategy: entity.strategy,
-        openedByUi: false,
-        buttonPath: null
-      };
-    }
-
-    await requestShopData(shopId);
-
-    const ready = await waitForShopGoodsSource({
-      ...opts,
-      requireList: true,
-      timeoutMs: opts.requestTimeoutMs == null ? 1500 : opts.requestTimeoutMs
-    });
-    return {
-      source: ready,
-      strategy: entity.strategy + '_request_shop_data',
-      openedByUi: false,
-      buttonPath: null
+      goodsId: goodsId,
+      itemId: itemId,
+      name: resolveShopGoodsName(g, itemId, tempModel, plantData),
+      price: Number(
+        safeReadKey(g, 'price') != null ? safeReadKey(g, 'price') :
+        (safeReadKey(g, 'cost') != null ? safeReadKey(g, 'cost') : safeReadKey(g, 'buyPrice'))
+      ) || 0,
+      priceId: Number(
+        safeReadKey(g, 'priceId') != null ? safeReadKey(g, 'priceId') :
+        (safeReadKey(g, 'costId') != null ? safeReadKey(g, 'costId') : safeReadKey(g, 'currencyId'))
+      ) || 0,
+      unlockLevel: Number(
+        safeReadKey(g, 'unlockLevel') != null ? safeReadKey(g, 'unlockLevel') : safeReadKey(g, '_unlockLevel')
+      ) || 0,
+      buyNum: Number(safeReadKey(g, 'buyNum')) || 0,
+      limitCount: Number(
+        safeReadKey(g, 'limitCount') != null ? safeReadKey(g, 'limitCount') : safeReadKey(g, 'buyLimit')
+      ) || 0,
+      level: level,
+      plantId: Number(
+        plantData && safeReadKey(plantData, 'id') != null ? safeReadKey(plantData, 'id') : 0
+      ) || null,
+      unlocked: unlocked !== false,
+      isSeed: isSeed,
     };
   }
 
@@ -4441,38 +6655,29 @@
    */
   function readShopSeedList(opts) {
     opts = opts || {};
-    const source = opts.shopSource || findShopGoodsSource(opts);
-    const allGoods = source && Array.isArray(source.list) ? source.list : null;
-    if (!Array.isArray(allGoods)) return opts.silent ? [] : out([]);
-    const seedGoods = allGoods.filter(function (g) {
-      return g && g.isSeed && g.unlocked && !g.isBuyAll;
-    });
-    const list = seedGoods.map(function (g) {
-      const tempModel = g.tempModel || null;
-      if (tempModel && typeof tempModel.initPlantData === 'function') {
-        try {
-          tempModel.initPlantData();
-        } catch (_) {}
-      }
-      const plantData = tempModel && tempModel.plantData ? tempModel.plantData : {};
-      return {
-        goodsId: g.id,
-        itemId: g.itemId,
-        name: g.name || '未知',
-        price: g.price || 0,
-        priceId: g.priceId || 0,
-        unlockLevel: g.unlockLevel || 0,
-        buyNum: g.buyNum || 0,
-        limitCount: g.limitCount || 0,
-        level: tempModel ? (tempModel.level || 0) : 0,
-        rarity: tempModel && tempModel.detail ? (tempModel.detail.rarity || 0) : 0,
-        layer: tempModel ? (tempModel.layerNum || 0) : 0,
-        isMultiLandPlant: !!(tempModel && tempModel.isMultiLandPlant),
-        plantSize: Math.max(1, Number(plantData.size) || 1),
-        plantId: plantData.id == null ? null : plantData.id,
-        source: 'shop'
-      };
-    });
+    const source = opts.shopSource || safeCall(function () {
+      return findShopGoodsSource({
+        ...opts,
+        requireList: opts.requireList !== false
+      });
+    }, null);
+    const allGoods = source && Array.isArray(source.list)
+      ? source.list
+      : null;
+    if (!Array.isArray(allGoods)) throw new Error('shop goods list not found');
+
+    const playerLevel = getCurrentPlayerLevel();
+
+    const list = allGoods
+      .map(normalizeShopGoodsItem)
+      .filter(Boolean)
+      .filter(function (g) {
+        if (g.isSeed === false || g.unlocked === false) return false;
+        const unlockLevel = Number(g.unlockLevel) || 0;
+        if (unlockLevel <= 0) return true;
+        if ((Number(playerLevel) || 0) <= 0) return true;
+        return unlockLevel <= playerLevel;
+      });
     if (opts.sortByLevel) {
       list.sort(function (a, b) { return b.level - a.level; });
     }
@@ -4485,25 +6690,347 @@
       ...opts,
       ensureData: opts.ensureData !== false
     });
-    const list = readShopSeedList({
+    return readShopSeedList({
       ...opts,
       silent: true,
       sortByLevel: opts.sortByLevel !== false,
-      shopSource: ready.source
-    }).filter(function (item) {
-      return !opts.availableOnly || !item.isMultiLandPlant;
+      shopSource: ready && ready.source ? ready.source : null,
+      requireList: true,
     });
+  }
 
-    if (ready.openedByUi && opts.closeOverlayAfterEnsure === true) {
-      try {
-        await dismissActiveOverlay({
-          silent: true,
-          waitAfter: opts.closeOverlayWaitMs == null ? 220 : opts.closeOverlayWaitMs
-        });
-      } catch (_) {}
+  function findShopPopupRoot() {
+    return (
+      findNode('startup/root/ui/LayerPopUp/view_shop') ||
+      findNode('root/ui/LayerPopUp/view_shop') ||
+      null
+    );
+  }
+
+  async function ensureShopUiOpen(opts) {
+    opts = opts || {};
+    const existing = findShopPopupRoot();
+    if (existing && existing.activeInHierarchy) {
+      return {
+        ok: true,
+        action: 'already_open',
+        rootPath: fullPath(existing),
+      };
     }
 
-    return opts.silent ? list : out(list);
+    const mainMenu = findMainMenuComp();
+    if (mainMenu && typeof mainMenu.openShop === 'function') {
+      safeCall(function () { return mainMenu.openShop(); }, null);
+    } else {
+      triggerButton('startup/root/ui/LayerUI/main_ui_v2/Menu/Node_shop/btn_shop');
+    }
+
+    const timeoutMs = Math.max(400, Number(opts.timeoutMs) || 2500);
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const root = findShopPopupRoot();
+      if (root && root.activeInHierarchy) {
+        return {
+          ok: true,
+          action: 'opened',
+          rootPath: fullPath(root),
+        };
+      }
+      await wait(120);
+    }
+
+    return {
+      ok: false,
+      action: 'timeout',
+      rootPath: null,
+    };
+  }
+
+  function getShopItemNodes() {
+    const root = findShopPopupRoot();
+    if (!root) return [];
+    return walk(root).filter(function (node) {
+      return !!(node && node.activeInHierarchy && node.name === 'item_shop');
+    });
+  }
+
+  async function waitForShopItemNodes(opts) {
+    opts = opts || {};
+    const timeoutMs = Math.max(600, Number(opts.timeoutMs) || 4000);
+    const deadline = Date.now() + timeoutMs;
+    let shopRequestTriggered = false;
+    while (Date.now() < deadline) {
+      const nodes = getShopItemNodes();
+      if (nodes.length > 0) return nodes;
+      if (!shopRequestTriggered) {
+        shopRequestTriggered = true;
+        safeCall(function () {
+          const message = getOopsMessage();
+          message.dispatchEvent('RequestShopData', 2);
+          return true;
+        }, null);
+      }
+      await wait(160);
+    }
+    return [];
+  }
+
+  function normalizeSeedDisplayName(name) {
+    return normalizeMatchText(String(name || '').replace(/种子$/g, ''));
+  }
+
+  function parseUnlockLevelFromTexts(texts) {
+    const list = Array.isArray(texts) ? texts : [];
+    for (let i = 0; i < list.length; i += 1) {
+      const text = String(list[i] || '').trim();
+      const match = text.match(/(\d+)\s*级解锁/);
+      if (match) return Number(match[1]) || 0;
+    }
+    return 0;
+  }
+
+  function getCurrentPlayerLevel() {
+    const profile = safeCall(function () { return getPlayerProfile({ silent: true }); }, null);
+    return Number(profile && (profile.plantLevel != null ? profile.plantLevel : (
+      profile.farmMaxLandLevel != null ? profile.farmMaxLandLevel : profile.level
+    ))) || 0;
+  }
+
+  function isShopItemUnlocked(node) {
+    const texts = getNodeTextList(node, { maxDepth: 2 });
+    const unlockLevel = parseUnlockLevelFromTexts(texts);
+    if (unlockLevel <= 0) return true;
+    const playerLevel = getCurrentPlayerLevel();
+    if (playerLevel <= 0) return false;
+    return playerLevel >= unlockLevel;
+  }
+
+  function findShopItemNodeByName(seedName) {
+    const target = normalizeSeedDisplayName(seedName);
+    const nodes = getShopItemNodes();
+    for (let i = 0; i < nodes.length; i += 1) {
+      const node = nodes[i];
+      if (!isShopItemUnlocked(node)) continue;
+      const texts = getNodeTextList(node, { maxDepth: 2 }).map(normalizeSeedDisplayName);
+      if (texts.indexOf(target) >= 0) return node;
+    }
+    return null;
+  }
+
+  function openShopItemDetail(node) {
+    if (!node) return false;
+    const components = Array.isArray(node.components) ? node.components : [];
+    for (let i = 0; i < components.length; i += 1) {
+      const comp = components[i];
+      if (!comp || typeof comp !== 'object') continue;
+      if (typeof comp.onClickThis === 'function') {
+        safeCall(function () { return comp.onClickThis(); }, null);
+        return true;
+      }
+    }
+    emitNodeTouch(node, 80);
+    return false;
+  }
+
+  async function waitForShopBuyPopup(opts) {
+    opts = opts || {};
+    const timeoutMs = Math.max(400, Number(opts.timeoutMs) || 2500);
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const node = findNode('startup/root/ui/LayerPopUp/view_goodsbuy') ||
+        findNode('root/ui/LayerPopUp/view_goodsbuy');
+      if (node && node.activeInHierarchy) return node;
+      await wait(120);
+    }
+    return null;
+  }
+
+  async function buySeedsFromShopUi(opts) {
+    opts = opts || {};
+    const seedName = String(opts.seedName || '').trim();
+    const seedId = Number(opts.seedId) || 0;
+    const targetCount = Math.max(1, Number(opts.count) || 1);
+    if (!seedName) throw new Error('seedName required');
+
+    const buyConfirmPath = 'startup/root/ui/LayerPopUp/view_goodsbuy/btn_buy';
+    const fallbackBuyConfirmPath = 'root/ui/LayerPopUp/view_goodsbuy/btn_buy';
+    const attempts = [];
+    let boughtCount = 0;
+
+    for (let i = 0; i < targetCount; i += 1) {
+      const openResult = await ensureShopUiOpen({ timeoutMs: 3000 });
+      if (!openResult || !openResult.ok) {
+        return {
+          ok: false,
+          reason: 'shop_ui_open_failed',
+          boughtCount: boughtCount,
+          attempts: attempts,
+        };
+      }
+
+      let itemNode = findShopItemNodeByName(seedName);
+      if (!itemNode) {
+        await waitForShopItemNodes({ timeoutMs: 3500 });
+        itemNode = findShopItemNodeByName(seedName);
+      }
+      if (!itemNode) {
+        return {
+          ok: false,
+          reason: 'shop_item_not_found',
+          seedName: seedName,
+          boughtCount: boughtCount,
+          visibleItems: getShopItemNodes().slice(0, 16).map(function (node) {
+            return getNodeTextList(node, { maxDepth: 2 });
+          }),
+          attempts: attempts,
+        };
+      }
+
+      const beforeCount = seedId > 0 ? getBackpackSeedCount(seedId) : null;
+      const invokedDirect = openShopItemDetail(itemNode);
+      const popup = await waitForShopBuyPopup({ timeoutMs: 2500 });
+      if (!popup) {
+        attempts.push({
+          index: i,
+          step: 'open_buy_popup',
+          ok: false,
+          invokedDirect: invokedDirect,
+          itemTexts: getNodeTextList(itemNode, { maxDepth: 2 }),
+        });
+        return {
+          ok: false,
+          reason: 'shop_buy_popup_not_found',
+          boughtCount: boughtCount,
+          attempts: attempts,
+        };
+      }
+
+      const buyPath = findNode(buyConfirmPath) ? buyConfirmPath : fallbackBuyConfirmPath;
+      triggerButton(buyPath);
+      await wait(900);
+      const afterCount = seedId > 0 ? getBackpackSeedCount(seedId) : null;
+      const delta = beforeCount != null && afterCount != null ? Math.max(0, afterCount - beforeCount) : null;
+      const success = delta == null ? true : delta > 0;
+      attempts.push({
+        index: i,
+        step: 'buy_once',
+        ok: success,
+        invokedDirect: invokedDirect,
+        beforeCount: beforeCount,
+        afterCount: afterCount,
+        delta: delta,
+      });
+      if (!success) {
+        return {
+          ok: false,
+          reason: 'shop_buy_not_applied',
+          boughtCount: boughtCount,
+          attempts: attempts,
+        };
+      }
+      boughtCount += delta == null ? 1 : delta;
+    }
+
+    return {
+      ok: true,
+      boughtCount: boughtCount,
+      attempts: attempts,
+    };
+  }
+
+  async function inspectShopUi(opts) {
+    opts = opts || {};
+    const openResult = await ensureShopUiOpen({ timeoutMs: opts.timeoutMs });
+    const root = findShopPopupRoot();
+    const content = findNode('startup/root/ui/LayerPopUp/view_shop/shop/listNode/view/content') ||
+      findNode('root/ui/LayerPopUp/view_shop/shop/listNode/view/content');
+    const buyPopup = findNode('startup/root/ui/LayerPopUp/view_goodsbuy') ||
+      findNode('root/ui/LayerPopUp/view_goodsbuy');
+
+    const itemNodes = content && Array.isArray(content.children) ? content.children : [];
+    const items = itemNodes.slice(0, 12).map(function (node, index) {
+      return {
+        index: index,
+        node: describeNode(node),
+        componentDetails: (node.components || []).map(function (comp, compIndex) {
+          return summarizeRuntimeObject(comp, 'shopItemComp#' + compIndex);
+        }),
+      };
+    });
+
+    const result = {
+      openResult: openResult,
+      root: root ? describeNode(root) : null,
+      content: content ? describeNode(content) : null,
+      itemCount: itemNodes.length,
+      items: items,
+      buyPopup: buyPopup ? describeNode(buyPopup) : null,
+      buyPopupComponents: buyPopup
+        ? (buyPopup.components || []).map(function (comp, compIndex) {
+          return summarizeRuntimeObject(comp, 'shopBuyComp#' + compIndex);
+        })
+        : [],
+    };
+    return opts.silent ? result : out(result);
+  }
+
+  async function inspectShopModelRuntime(opts) {
+    opts = opts || {};
+    let entity = null;
+    let source = null;
+    let requestOk = null;
+    let requestError = null;
+
+    try {
+      entity = ensureShopEntityReady();
+      source = entity && entity.strategy ? entity.strategy : null;
+    } catch (error) {
+      requestError = error && error.message ? error.message : String(error);
+    }
+
+    if (entity) {
+      try {
+        requestOk = await requestShopData(opts.shopId || 2);
+      } catch (error) {
+        requestError = error && error.message ? error.message : String(error);
+      }
+    }
+
+    const smc = safeCall(function () { return getSingletonModuleComp(); }, null);
+    const shop = smc && smc.shop ? smc.shop : null;
+    const model = shop && shop.ShopModelComp ? shop.ShopModelComp : null;
+    const candidateArrays = [];
+
+    if (model && typeof model === 'object') {
+      const keys = safeCall(function () { return Object.keys(model); }, []);
+      keys.forEach(function (key) {
+        const value = safeReadKey(model, key);
+        if (!Array.isArray(value)) return;
+        candidateArrays.push({
+          key: key,
+          length: value.length,
+          sample: value.slice(0, 3).map(function (item) {
+            return summarizeRuntimeObject(item, key + '_item');
+          })
+        });
+      });
+    }
+
+    const payload = {
+      source: source,
+      requestOk: requestOk,
+      requestError: requestError,
+      smc: summarizeRuntimeObject(smc, 'smc'),
+      shop: summarizeRuntimeObject(shop, 'shop'),
+      model: summarizeRuntimeObject(model, 'ShopModelComp'),
+      candidateArrays: candidateArrays,
+      curGoodsListPreview: model && Array.isArray(model.curGoodsList)
+        ? model.curGoodsList.slice(0, 5).map(function (item) {
+            return summarizeRuntimeObject(item, 'curGoodsListItem');
+          })
+        : []
+    };
+    return opts.silent ? payload : out(payload);
   }
 
   /**
@@ -4514,16 +7041,24 @@
     ensureShopEntityReady();
     const message = getOopsMessage();
     return new Promise(function (resolve) {
+      let settled = false;
+      function resolveWithDelay(ok) {
+        if (settled) return;
+        settled = true;
+        setTimeout(function () {
+          resolve(ok);
+        }, 180);
+      }
       const handler = function () {
         message.off('ShopDataReady', handler);
-        resolve(true);
+        resolveWithDelay(true);
       };
       message.on('ShopDataReady', handler);
       message.dispatchEvent('RequestShopData', shopId);
       // 超时兜底
       setTimeout(function () {
         message.off('ShopDataReady', handler);
-        resolve(false);
+        resolveWithDelay(false);
       }, 5000);
     });
   }
@@ -4548,304 +7083,22 @@
     });
   }
 
-  function compareSeedPriority(a, b, order) {
-    const direction = order === 'asc' ? 1 : -1;
-    const levelDiff = ((Number(a && a.level) || 0) - (Number(b && b.level) || 0)) * direction;
-    if (levelDiff !== 0) return levelDiff;
-    const layerDiff = ((Number(a && a.layer) || 0) - (Number(b && b.layer) || 0)) * direction;
-    if (layerDiff !== 0) return layerDiff;
-    const rarityDiff = ((Number(a && a.rarity) || 0) - (Number(b && b.rarity) || 0)) * direction;
-    if (rarityDiff !== 0) return rarityDiff;
-    return (Number(a && (a.itemId || a.seedId)) || 0) - (Number(b && (b.itemId || b.seedId)) || 0);
-  }
-
-  function sortSeedsByPriority(list, order) {
-    const arr = Array.isArray(list) ? list.slice() : [];
-    arr.sort(function (a, b) {
-      return compareSeedPriority(a, b, order);
-    });
-    return arr;
-  }
-
-  function filterSingleLandSeeds(list) {
-    return (Array.isArray(list) ? list : []).filter(function (item) {
-      return item && !item.isMultiLandPlant;
-    });
-  }
-
-  function findSeedInList(list, target) {
-    const targetId = toPositiveNumber(target);
-    const targetText = normalizeMatchText(target);
-    const arr = Array.isArray(list) ? list : [];
-
-    for (let i = 0; i < arr.length; i++) {
-      const item = arr[i];
-      if (!item) continue;
-      if (targetId != null) {
-        if (toPositiveNumber(item.seedId) === targetId) return item;
-        if (toPositiveNumber(item.itemId) === targetId) return item;
-        if (toPositiveNumber(item.goodsId) === targetId) return item;
-      }
-      if (targetText && normalizeMatchText(item.name) === targetText) {
-        return item;
-      }
-    }
-
-    return null;
-  }
-
-  function normalizeAutoPlantMode(mode) {
-    const raw = String(mode || 'none').trim();
-    if (!raw) return 'none';
-    if (raw === 'backpack_first') return 'highest';
-    if (raw === 'buy_highest') return 'highest';
-    if (raw === 'buy_lowest') return 'lowest';
-    if (raw === 'specific') return 'selected';
-    return raw;
-  }
-
-  function normalizeAutoPlantSource(mode, source) {
-    const rawMode = String(mode || '').trim();
-    const rawSource = String(source || '').trim();
-    if (rawSource === 'backpack' || rawSource === 'shop' || rawSource === 'auto') {
-      return rawSource;
-    }
-    if (rawMode === 'backpack_first') return 'backpack';
-    if (rawMode === 'buy_highest' || rawMode === 'buy_lowest') return 'shop';
-    return 'auto';
-  }
-
-  async function getSeedCatalog(opts) {
-    opts = opts || {};
-    const availableOnly = opts.availableOnly !== false;
-    const includeBackpack = opts.includeBackpack !== false;
-    const includeShop = opts.includeShop !== false;
-    const catalog = {
-      fetchedAt: new Date().toISOString(),
-      availableOnly: !!availableOnly,
-      backpack: [],
-      shop: [],
-      errors: {}
-    };
-
-    if (includeBackpack) {
-      try {
-        catalog.backpack = filterSingleLandSeeds(getSeedList({
-          silent: true,
-          availableOnly: availableOnly,
-          sortMode: opts.sortMode || 3
-        }));
-      } catch (error) {
-        catalog.errors.backpack = error && error.message ? error.message : String(error);
-      }
-    }
-
-    if (includeShop) {
-      try {
-        catalog.shop = filterSingleLandSeeds(await getShopSeedList({
-          silent: true,
-          ensureData: opts.ensureShopData !== false,
-          shopId: opts.shopId || 2,
-          sortByLevel: true
-        }));
-      } catch (error) {
-        catalog.errors.shop = error && error.message ? error.message : String(error);
-      }
-    }
-
-    catalog.all = []
-      .concat((catalog.backpack || []).map(function (item) { return { ...item, source: 'backpack' }; }))
-      .concat((catalog.shop || []).map(function (item) { return { ...item, source: 'shop' }; }));
-    catalog.counts = {
-      backpack: catalog.backpack.length,
-      shop: catalog.shop.length,
-      all: catalog.all.length
-    };
-
-    return opts.silent ? catalog : out(catalog);
-  }
-
-  function normalizeLandIds(landIds) {
-    const list = Array.isArray(landIds) ? landIds : [landIds];
-    const seen = new Set();
-    const outArr = [];
-
-    for (let i = 0; i < list.length; i++) {
-      const landId = toPositiveNumber(list[i]);
-      if (landId == null || seen.has(landId)) continue;
-      seen.add(landId);
-      outArr.push(landId);
-    }
-
-    return outArr;
-  }
-
+  /**
+   * 在指定空地上种植作物
+   * plantOrSeedId: 优先传作物配置 id，兼容旧版 seed/item id
+   * landIds: 要种植的地块 id 数组
+   */
   function getGridInfoByLandId(landId) {
     const targetLandId = toPositiveNumber(landId);
     if (targetLandId == null) return null;
 
     const status = getFarmStatus({ includeGrids: true, includeLandIds: false, silent: true });
     const grids = Array.isArray(status && status.grids) ? status.grids : [];
-
-    for (let i = 0; i < grids.length; i++) {
+    for (let i = 0; i < grids.length; i += 1) {
       const grid = grids[i];
       if (toPositiveNumber(grid && grid.landId) === targetLandId) return grid;
     }
-
     return null;
-  }
-
-  function getLandRuntimeByLandId(landId) {
-    const targetLandId = toPositiveNumber(landId);
-    if (targetLandId == null) return null;
-
-    const farmModel = getFarmModel();
-    if (!farmModel || typeof farmModel.getLandById !== 'function') return null;
-    try {
-      return farmModel.getLandById(targetLandId) || null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  function getPlantRuntimeByLandId(landId) {
-    const targetLandId = toPositiveNumber(landId);
-    if (targetLandId == null) return null;
-
-    const farmModel = getFarmModel();
-    if (!farmModel || typeof farmModel.getPlantByLandId !== 'function') return null;
-    try {
-      return farmModel.getPlantByLandId(targetLandId) || null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  function getLandTypeName(landRuntime) {
-    if (!landRuntime) return '';
-    if (typeof landRuntime.typeName === 'string' && landRuntime.typeName.trim()) {
-      return landRuntime.typeName.trim();
-    }
-    const levelConfig = landRuntime.levelConfig || null;
-    if (levelConfig && typeof levelConfig.level_name === 'string' && levelConfig.level_name.trim()) {
-      return levelConfig.level_name.trim();
-    }
-    return '';
-  }
-
-  function isSpecialHarvestLand(landRuntime) {
-    const landTypeName = getLandTypeName(landRuntime);
-    return /福地|良田|沃土/.test(landTypeName);
-  }
-
-  function getPlantCompByLandId(landId) {
-    const targetLandId = toPositiveNumber(landId);
-    if (targetLandId == null) return null;
-
-    const farmMap = getFarmMap();
-    if (farmMap && typeof farmMap.getPlantCompByLandId === 'function') {
-      try {
-        const plantComp = farmMap.getPlantCompByLandId(targetLandId);
-        if (plantComp) return plantComp;
-      } catch (_) {}
-    }
-
-    const grid = getGridInfoByLandId(targetLandId);
-    if (grid && grid.plantNode) {
-      try {
-        return getPlantComponent(grid.plantNode);
-      } catch (_) {}
-    }
-
-    return null;
-  }
-
-  function getHarvestablePlantLandIds(opts) {
-    opts = opts || {};
-    const farmModel = getFarmModel();
-    const plants = Array.isArray(farmModel && farmModel.plants) ? farmModel.plants : [];
-    const matureOnly = opts.matureOnly !== false;
-    const multiLandOnly = !!opts.multiLandOnly;
-    const farmType = opts.farmType == null
-      ? (
-          farmModel && farmModel.isOwerFarm === true
-            ? 'own'
-            : farmModel && farmModel.isOwerFarm === false
-              ? 'friend'
-              : null
-        )
-      : String(opts.farmType);
-    const seen = new Set();
-    const list = [];
-
-    for (let i = 0; i < plants.length; i++) {
-      const plant = plants[i];
-      if (!plant) continue;
-
-      let landId = toPositiveNumber(plant.land_id);
-      if (landId == null) continue;
-
-      const land = typeof farmModel.getLandById === 'function'
-        ? farmModel.getLandById(landId)
-        : null;
-      const landTypeName = getLandTypeName(land);
-      const isSpecialLand = isSpecialHarvestLand(land);
-      const masterLandId = land && land.isSlaveLand
-        ? toPositiveNumber(land.masterLandId) || landId
-        : landId;
-      const isMultiLand = !!(
-        (land && (land.isMutiLand || land.isMasterLand || land.isSlaveLand))
-        || isSpecialLand
-        || plant.isMultiLandPlant
-      );
-      const isMature = typeof plant.isMature === 'function'
-        ? !!plant.isMature()
-        : false;
-      const canHarvest = typeof plant.canHarvest === 'function'
-        ? !!plant.canHarvest()
-        : isMature;
-      const canSteal = typeof plant.canSteal === 'function'
-        ? !!plant.canSteal()
-        : false;
-      const canCollect = farmType === 'friend'
-        ? (canSteal || isMature)
-        : farmType === 'own'
-          ? (canHarvest || isMature)
-          : (canHarvest || canSteal || isMature);
-
-      if (multiLandOnly && !isMultiLand) continue;
-      if (matureOnly && !isMature) continue;
-      if (!canCollect) continue;
-      if (seen.has(masterLandId)) continue;
-      seen.add(masterLandId);
-
-      list.push({
-        landId: masterLandId,
-        sourceLandId: landId,
-        isMultiLand,
-        isSpecialLand,
-        landTypeName: landTypeName || null,
-        isMasterLand: !!(land && land.isMasterLand),
-        isSlaveLand: !!(land && land.isSlaveLand),
-        canHarvest,
-        canSteal,
-        canCollect,
-        isMature,
-        plantName: typeof plant.getPlantName === 'function' ? plant.getPlantName() : null,
-        plantId: toPositiveNumber(plant.id),
-        currentStage: toPositiveNumber(plant.current_stage)
-      });
-    }
-
-    const payload = {
-      farmType,
-      matureOnly,
-      multiLandOnly,
-      count: list.length,
-      landIds: list.map(function (item) { return item.landId; }),
-      list
-    };
-    return opts.silent ? payload : out(payload);
   }
 
   function isPlantableEmptyGrid(grid) {
@@ -4856,37 +7109,25 @@
     );
   }
 
-  async function waitForLandPlantResult(landId, opts) {
-    opts = opts || {};
-    const timeoutMs = opts.timeoutMs == null ? 2500 : Math.max(0, Number(opts.timeoutMs) || 0);
-    const pollMs = opts.pollMs == null ? 150 : Math.max(30, Number(opts.pollMs) || 30);
-    const startedAt = Date.now();
-    let last = null;
-
-    while (true) {
-      last = getGridInfoByLandId(landId);
-      if (last && last.stageKind && last.stageKind !== 'empty') {
-        return {
-          ok: true,
-          reason: 'planted',
-          landId: toPositiveNumber(landId),
-          elapsedMs: Date.now() - startedAt,
-          after: last
-        };
+  function getEmptyLandIds() {
+    const status = getFarmStatus({ includeGrids: true, includeLandIds: false, silent: true });
+    const grids = Array.isArray(status && status.grids) ? status.grids : [];
+    const ids = [];
+    for (let i = 0; i < grids.length; i += 1) {
+      const grid = grids[i];
+      if (isPlantableEmptyGrid(grid) && grid.landId != null) {
+        ids.push(Number(grid.landId));
       }
-
-      if (Date.now() - startedAt >= timeoutMs) {
-        return {
-          ok: false,
-          reason: 'plant_timeout',
-          landId: toPositiveNumber(landId),
-          elapsedMs: Date.now() - startedAt,
-          after: last
-        };
-      }
-
-      await wait(pollMs);
     }
+    return ids.filter(function (id) { return Number.isFinite(id) && id > 0; });
+  }
+
+  function getPlantCompByLandId(landId) {
+    const grid = getGridInfoByLandId(landId);
+    if (grid && grid.plantNode) {
+      return safeCall(function () { return getPlantComponent(grid.plantNode); }, null);
+    }
+    return null;
   }
 
   async function waitForLandHarvestResult(landId, before, opts) {
@@ -4905,11 +7146,11 @@
       const afterLeftFruit = last && last.leftFruit != null ? Number(last.leftFruit) : null;
       const afterPlantId = last && last.plantId != null ? Number(last.plantId) : null;
       const changed =
-        !last
-        || !!(last && last.stageKind !== (beforeInfo && beforeInfo.stageKind))
-        || !!(last && !!last.hasPlant !== beforeHasPlant)
-        || (beforePlantId != null && afterPlantId != null && beforePlantId !== afterPlantId)
-        || (beforeLeftFruit != null && afterLeftFruit != null && beforeLeftFruit !== afterLeftFruit);
+        !last ||
+        !!(last && last.stageKind !== (beforeInfo && beforeInfo.stageKind)) ||
+        !!(last && !!last.hasPlant !== beforeHasPlant) ||
+        (beforePlantId != null && afterPlantId != null && beforePlantId !== afterPlantId) ||
+        (beforeLeftFruit != null && afterLeftFruit != null && beforeLeftFruit !== afterLeftFruit);
       if (changed) {
         return {
           ok: true,
@@ -4934,28 +7175,6 @@
     }
   }
 
-  function dispatchSingleLandPlant(seed, landId) {
-    const message = getOopsMessage();
-    const payload = {
-      land_id: landId,
-      seed_id: seed.id
-    };
-    message.dispatchEvent('REQUEST_CREATE_NEW_PLANT', payload);
-    return payload;
-  }
-
-  function dispatchMultiLandPlant(seed, landIds) {
-    const message = getOopsMessage();
-    const normalized = normalizeLandIds(landIds);
-    const payload = {
-      seed_id: seed.id,
-      land_id: normalized[0],
-      mutiPlantData: normalized
-    };
-    message.dispatchEvent('REQUEST_CREATE_NEW_MULTI_LAND_PLANT', payload);
-    return payload;
-  }
-
   function dispatchSingleLandHarvest(landId, isAll) {
     const message = getOopsMessage();
     const payload = {
@@ -4964,514 +7183,6 @@
     };
     message.dispatchEvent('REQUEST_HARVEST_PLANT', payload);
     return payload;
-  }
-
-  function getSingleLandCareSpec(kind) {
-    const actionType = normalizeGridActionType(kind);
-    const specs = {
-      water: {
-        kind: 'water',
-        action: 'water_single',
-        batchAction: 'water_batch',
-        requestEvent: 'REQUEST_WATER_PLANT',
-        batchRequestEvent: 'REQUEST_WATER_PLANTS',
-        completedEvent: 'WATER_PLANT_COMPLETED',
-        canKey: 'canWater',
-        notActionableReason: 'land_not_waterable'
-      },
-      killBug: {
-        kind: 'killBug',
-        action: 'kill_bug_single',
-        batchAction: 'kill_bug_batch',
-        requestEvent: 'REQUEST_KILL_BUG',
-        batchRequestEvent: 'REQUEST_KILL_BUGS',
-        completedEvent: 'KILL_BUG_COMPLETED',
-        canKey: 'canKillBug',
-        notActionableReason: 'land_not_kill_buggable'
-      },
-      eraseGrass: {
-        kind: 'eraseGrass',
-        action: 'erase_grass_single',
-        batchAction: 'erase_grass_batch',
-        requestEvent: 'REQUEST_ERASE_GRASS',
-        batchRequestEvent: 'REQUEST_ERASE_GRASSES',
-        completedEvent: 'ERASE_GRASS_COMPLETED',
-        canKey: 'canEraseGrass',
-        notActionableReason: 'land_not_erase_grassable'
-      }
-    };
-    if (!specs[actionType]) throw new Error('Unsupported single land care action: ' + kind);
-    return specs[actionType];
-  }
-
-  async function dispatchSingleLandCareAction(kind, landId, opts) {
-    opts = opts || {};
-    const spec = getSingleLandCareSpec(kind);
-    const message = getOopsMessage();
-    const payload = {
-      land_id: landId
-    };
-
-    if (opts.waitForResult === false) {
-      message.dispatchEvent(spec.requestEvent, payload);
-      return {
-        ok: true,
-        reason: 'dispatched',
-        request: payload,
-        dispatched: true
-      };
-    }
-
-    const timeoutMs = opts.actionTimeoutMs == null
-      ? (opts.timeoutMs == null ? 2500 : Math.max(0, Number(opts.timeoutMs) || 0))
-      : Math.max(0, Number(opts.actionTimeoutMs) || 0);
-    const startedAt = Date.now();
-
-    return await new Promise(function (resolve) {
-      let settled = false;
-      let timer = null;
-
-      function finish(result) {
-        if (settled) return;
-        settled = true;
-        if (timer) clearTimeout(timer);
-        resolve({
-          request: payload,
-          dispatched: true,
-          elapsedMs: Date.now() - startedAt,
-          ...result
-        });
-      }
-
-      payload.onComplete = function (ok, errorCode) {
-        finish({
-          ok: !!ok,
-          reason: ok ? 'completed' : 'request_failed',
-          errorCode: Number.isFinite(Number(errorCode)) ? Number(errorCode) : null
-        });
-      };
-
-      try {
-        message.dispatchEvent(spec.requestEvent, payload);
-      } catch (error) {
-        finish({
-          ok: false,
-          reason: 'dispatch_error',
-          error: error && error.message ? error.message : String(error)
-        });
-        return;
-      }
-
-      timer = setTimeout(function () {
-        finish({
-          ok: false,
-          reason: 'request_timeout',
-          errorCode: null
-        });
-      }, timeoutMs);
-    });
-  }
-
-  async function dispatchBatchLandCareAction(kind, landIds, opts) {
-    opts = opts || {};
-    const spec = getSingleLandCareSpec(kind);
-    const message = getOopsMessage();
-    const normalizedLandIds = normalizeLandIds(landIds);
-    if (normalizedLandIds.length === 0) {
-      return {
-        ok: false,
-        reason: 'land_ids_empty',
-        request: null,
-        dispatched: false,
-        landIds: []
-      };
-    }
-
-    const payload = {
-      land_ids: normalizedLandIds.slice()
-    };
-    const eventName = normalizedLandIds.length > 1 && spec.batchRequestEvent
-      ? spec.batchRequestEvent
-      : spec.requestEvent;
-
-    if (opts.waitForResult === false) {
-      message.dispatchEvent(eventName, payload);
-      return {
-        ok: true,
-        reason: 'dispatched',
-        request: payload,
-        dispatched: true,
-        landIds: normalizedLandIds,
-        eventName
-      };
-    }
-
-    const timeoutMs = opts.actionTimeoutMs == null
-      ? (opts.timeoutMs == null ? 2500 : Math.max(0, Number(opts.timeoutMs) || 0))
-      : Math.max(0, Number(opts.actionTimeoutMs) || 0);
-    const startedAt = Date.now();
-
-    return await new Promise(function (resolve) {
-      let settled = false;
-      let timer = null;
-
-      function finish(result) {
-        if (settled) return;
-        settled = true;
-        if (timer) clearTimeout(timer);
-        resolve({
-          request: payload,
-          dispatched: true,
-          landIds: normalizedLandIds,
-          eventName,
-          elapsedMs: Date.now() - startedAt,
-          ...result
-        });
-      }
-
-      payload.onComplete = function (ok, errorCode) {
-        finish({
-          ok: !!ok,
-          reason: ok ? 'completed' : 'request_failed',
-          errorCode: Number.isFinite(Number(errorCode)) ? Number(errorCode) : null
-        });
-      };
-
-      try {
-        message.dispatchEvent(eventName, payload);
-      } catch (error) {
-        finish({
-          ok: false,
-          reason: 'dispatch_error',
-          error: error && error.message ? error.message : String(error)
-        });
-        return;
-      }
-
-      timer = setTimeout(function () {
-        finish({
-          ok: false,
-          reason: 'request_timeout',
-          errorCode: null
-        });
-      }, timeoutMs);
-    });
-  }
-
-  async function performSingleLandCareAction(kind, landId, opts) {
-    opts = opts || {};
-    const spec = getSingleLandCareSpec(kind);
-    const targetLandId = toPositiveNumber(landId);
-    if (targetLandId == null) throw new Error('landId required');
-
-    const before = getGridInfoByLandId(targetLandId);
-    if (!before) {
-      return {
-        ok: false,
-        reason: 'land_not_found',
-        action: spec.action,
-        kind: spec.kind,
-        landId: targetLandId
-      };
-    }
-
-    if (!before[spec.canKey]) {
-      return {
-        ok: false,
-        reason: spec.notActionableReason,
-        action: spec.action,
-        kind: spec.kind,
-        landId: targetLandId,
-        before
-      };
-    }
-
-    const expWatcher = opts.detectExp !== false
-      ? createSelfExpWatcher(null, {
-          timeoutMs: opts.expTimeoutMs,
-          pollMs: opts.expPollMs,
-          settleMs: opts.expSettleMs
-        })
-      : null;
-    const expBefore = expWatcher ? expWatcher.expBefore : readSelfExpValue();
-    let verify;
-    try {
-      verify = await dispatchSingleLandCareAction(spec.kind, targetLandId, opts);
-    } catch (error) {
-      if (expWatcher) expWatcher.close();
-      throw error;
-    }
-    if (opts.waitForResult === false) {
-      if (expWatcher) expWatcher.close();
-      return {
-        ok: verify.ok,
-        action: spec.action,
-        kind: spec.kind,
-        landId: targetLandId,
-        before,
-        request: verify.request,
-        verify,
-        expBefore,
-        dispatched: true
-      };
-    }
-
-    if (verify.ok && opts.afterWaitMs != null && Number(opts.afterWaitMs) > 0) {
-      await wait(Math.max(0, Number(opts.afterWaitMs) || 0));
-    }
-
-    function showToast(message) {
-      if (!wx || typeof wx.showToast !== "function") return;
-      try {
-        wx.showToast({
-          title: String(message || "").slice(0, 50),
-          icon: "none",
-          duration: 1000
-        });
-      } catch (_) {}
-    }
-
-    const after = getGridInfoByLandId(targetLandId);
-    const expWait = expWatcher
-      ? (verify.ok
-          ? await expWatcher.waitForSettled()
-          : (() => {
-              const snapshot = expWatcher.snapshot('exp_check_request_failed');
-              expWatcher.close();
-              return snapshot;
-            })())
-      : createSkippedSelfExpWaitResult(expBefore, 'exp_check_skipped');
-    const expOutcome = deriveCareExpOutcome(verify, expWait);
-
-    return {
-      ok: verify.ok,
-      reason: verify.reason,
-      action: spec.action,
-      kind: spec.kind,
-      landId: targetLandId,
-      before,
-      after,
-      request: verify.request,
-      verify,
-      expBefore: expOutcome.expBefore,
-      expAfter: expOutcome.expAfter,
-      expDelta: expOutcome.expDelta,
-      expChanged: expOutcome.expChanged,
-      expReadable: expOutcome.expReadable,
-      expEventCount: expOutcome.expEventCount,
-      basicInfoEventCount: expOutcome.basicInfoEventCount,
-      expSignalObserved: expOutcome.expSignalObserved,
-      noExpGain: expOutcome.noExpGain,
-      noExpGainReason: expOutcome.noExpGainReason,
-      noExpGainMode: expOutcome.noExpGainMode,
-      expLimitReachedGuess: expOutcome.expLimitReachedGuess,
-      expWait
-    };
-  }
-
-  async function performBatchLandCareAction(kind, landIds, opts) {
-    opts = opts || {};
-    const spec = getSingleLandCareSpec(kind);
-    const normalizedLandIds = normalizeLandIds(landIds);
-    if (normalizedLandIds.length === 0) throw new Error('landIds required');
-
-    const expWatcher = opts.detectExp !== false
-      ? createSelfExpWatcher(null, {
-          timeoutMs: opts.expTimeoutMs,
-          pollMs: opts.expPollMs,
-          settleMs: opts.expSettleMs
-        })
-      : null;
-    const expBefore = expWatcher ? expWatcher.expBefore : readSelfExpValue();
-    let verify;
-    try {
-      verify = await dispatchBatchLandCareAction(spec.kind, normalizedLandIds, opts);
-    } catch (error) {
-      if (expWatcher) expWatcher.close();
-      throw error;
-    }
-    if (opts.waitForResult === false) {
-      if (expWatcher) expWatcher.close();
-      return {
-        ok: verify.ok,
-        action: spec.batchAction,
-        kind: spec.kind,
-        landIds: normalizedLandIds,
-        request: verify.request,
-        verify,
-        expBefore,
-        dispatched: !!verify.dispatched
-      };
-    }
-
-    if (verify.ok && opts.afterWaitMs != null && Number(opts.afterWaitMs) > 0) {
-      await wait(Math.max(0, Number(opts.afterWaitMs) || 0));
-    }
-
-    let afterStatus = null;
-    try {
-      afterStatus = getFarmStatus({
-        includeGrids: false,
-        includeLandIds: true,
-        silent: true
-      });
-    } catch (_) {
-      afterStatus = null;
-    }
-
-    const expWait = expWatcher
-      ? (verify.ok
-          ? await expWatcher.waitForSettled()
-          : (() => {
-              const snapshot = expWatcher.snapshot('exp_check_request_failed');
-              expWatcher.close();
-              return snapshot;
-            })())
-      : createSkippedSelfExpWaitResult(expBefore, 'exp_check_skipped');
-    const expOutcome = deriveCareExpOutcome(verify, expWait);
-
-    return {
-      ok: verify.ok,
-      reason: verify.reason,
-      action: spec.batchAction,
-      kind: spec.kind,
-      landIds: normalizedLandIds,
-      request: verify.request,
-      verify,
-      afterStatus,
-      expBefore: expOutcome.expBefore,
-      expAfter: expOutcome.expAfter,
-      expDelta: expOutcome.expDelta,
-      expChanged: expOutcome.expChanged,
-      expReadable: expOutcome.expReadable,
-      expEventCount: expOutcome.expEventCount,
-      basicInfoEventCount: expOutcome.basicInfoEventCount,
-      expSignalObserved: expOutcome.expSignalObserved,
-      noExpGain: expOutcome.noExpGain,
-      noExpGainReason: expOutcome.noExpGainReason,
-      noExpGainMode: expOutcome.noExpGainMode,
-      expLimitReachedGuess: expOutcome.expLimitReachedGuess,
-      expWait
-    };
-  }
-
-  async function waterSingleLand(landId, opts) {
-    return await performSingleLandCareAction('water', landId, opts);
-  }
-
-  async function killBugSingleLand(landId, opts) {
-    return await performSingleLandCareAction('killBug', landId, opts);
-  }
-
-  async function eraseGrassSingleLand(landId, opts) {
-    return await performSingleLandCareAction('eraseGrass', landId, opts);
-  }
-
-  async function waterLands(landIds, opts) {
-    return await performBatchLandCareAction('water', landIds, opts);
-  }
-
-  async function killBugLands(landIds, opts) {
-    return await performBatchLandCareAction('killBug', landIds, opts);
-  }
-
-  async function eraseGrassLands(landIds, opts) {
-    return await performBatchLandCareAction('eraseGrass', landIds, opts);
-  }
-
-  async function plantSingleLand(seedIdOrItemId, landId, opts) {
-    opts = opts || {};
-    const targetLandId = toPositiveNumber(landId);
-    if (targetLandId == null) throw new Error('landId required');
-
-    const seed = getSeedModel(seedIdOrItemId, {
-      sortMode: opts.sortMode || 3,
-      includeZeroCount: !!opts.includeZeroCount
-    });
-    if (!seed) {
-      return {
-        ok: false,
-        reason: 'seed_not_found',
-        requestedSeed: seedIdOrItemId,
-        landId: targetLandId
-      };
-    }
-
-    const seedInfo = summarizeSeedModel(seed);
-    const before = getGridInfoByLandId(targetLandId);
-    if (!before) {
-      return {
-        ok: false,
-        reason: 'land_not_found',
-        landId: targetLandId,
-        seed: seedInfo
-      };
-    }
-
-    if (before.stageKind !== 'empty') {
-      return {
-        ok: false,
-        reason: 'land_not_empty',
-        landId: targetLandId,
-        seed: seedInfo,
-        before
-      };
-    }
-
-    if (!before.interactable) {
-      return {
-        ok: false,
-        reason: 'land_not_interactable',
-        landId: targetLandId,
-        seed: seedInfo,
-        before
-      };
-    }
-
-    if (seedInfo.count <= 0 && !opts.includeZeroCount) {
-      return {
-        ok: false,
-        reason: 'seed_count_empty',
-        landId: targetLandId,
-        seed: seedInfo,
-        before
-      };
-    }
-
-    if (seedInfo.isMultiLandPlant) {
-      return {
-        ok: false,
-        reason: 'multi_land_seed_requires_multi_land_request',
-        landId: targetLandId,
-        seed: seedInfo,
-        before
-      };
-    }
-
-    const request = dispatchSingleLandPlant(seed, targetLandId);
-    if (opts.waitForResult === false) {
-      return {
-        ok: true,
-        action: 'plant_single',
-        landId: targetLandId,
-        seed: seedInfo,
-        before,
-        request,
-        dispatched: true
-      };
-    }
-
-    const verify = await waitForLandPlantResult(targetLandId, opts);
-    return {
-      ok: verify.ok,
-      action: 'plant_single',
-      landId: targetLandId,
-      seed: seedInfo,
-      before,
-      after: verify.after,
-      request,
-      verify
-    };
   }
 
   async function harvestSingleLand(landId, opts) {
@@ -5527,10 +7238,6 @@
     if (targetLandId == null) throw new Error('landId required');
 
     const before = getGridInfoByLandId(targetLandId);
-    const landRuntime = getLandRuntimeByLandId(targetLandId);
-    const plantRuntime = getPlantRuntimeByLandId(targetLandId);
-    const landTypeName = getLandTypeName(landRuntime);
-    const isSpecialLandTarget = isSpecialHarvestLand(landRuntime);
     const plantComp = getPlantCompByLandId(targetLandId);
     const effect = plantComp && (plantComp.stealEffect || plantComp.matureEffect || null);
     if (effect && typeof effect.clickCallback === 'function') {
@@ -5547,6 +7254,10 @@
       }
 
       const verify = await waitForLandHarvestResult(targetLandId, before, opts);
+      const rewardDismiss = await dismissRewardPopup({
+        silent: true,
+        waitAfter: opts.rewardWaitAfter == null ? 180 : opts.rewardWaitAfter,
+      });
       return {
         ok: verify.ok,
         action: 'click_mature_effect',
@@ -5554,22 +7265,8 @@
         before,
         after: verify.after,
         effectType: plantComp.stealEffect === effect ? 'stealEffect' : 'matureEffect',
-        verify
-      };
-    }
-
-    const isMultiLandTarget = !!(
-      (landRuntime && (landRuntime.isMutiLand || landRuntime.isMasterLand || landRuntime.isSlaveLand))
-      || isSpecialLandTarget
-      || (plantRuntime && plantRuntime.isMultiLandPlant)
-    );
-    if (isMultiLandTarget) {
-      const fallback = await harvestSingleLand(targetLandId, opts);
-      return {
-        ...fallback,
-        action: 'click_mature_effect_multi_land_fallback_dispatch',
-        fallbackReason: isSpecialLandTarget ? 'special_land_no_mature_effect' : 'multi_land_no_mature_effect',
-        landTypeName: landTypeName || null
+        verify,
+        rewardDismiss
       };
     }
 
@@ -5579,149 +7276,185 @@
         reason: 'mature_effect_not_found',
         landId: targetLandId,
         before,
-        hasPlantComp: !!plantComp,
-        isMultiLandTarget,
-        isSpecialLandTarget,
-        landTypeName: landTypeName || null
+        hasPlantComp: !!plantComp
       };
     }
 
     const fallback = await harvestSingleLand(targetLandId, opts);
+    const rewardDismiss = await dismissRewardPopup({
+      silent: true,
+      waitAfter: opts.rewardWaitAfter == null ? 180 : opts.rewardWaitAfter,
+    });
     return {
       ...fallback,
-      action: 'click_mature_effect_fallback_dispatch'
+      action: 'click_mature_effect_fallback_dispatch',
+      rewardDismiss
     };
   }
 
-  /**
-   * 在指定空地上种植种子
-   * 普通种子按单块地顺序种植；多地块作物才走 REQUEST_CREATE_NEW_MULTI_LAND_PLANT
-   * landIds: 要种植的地块 id 数组
-   */
-  async function plantSeedsOnLands(seedIdOrItemId, landIds, opts) {
-    opts = opts || {};
-    const normalizedLandIds = normalizeLandIds(landIds);
-    if (normalizedLandIds.length === 0) throw new Error('landIds required');
+  function dispatchSingleLandPlant(seedId, landId) {
+    const message = getOopsMessage();
+    const payload = {
+      land_id: landId,
+      seed_id: seedId
+    };
+    message.dispatchEvent('REQUEST_CREATE_NEW_PLANT', payload);
+    return payload;
+  }
 
-    const seed = getSeedModel(seedIdOrItemId, {
-      sortMode: opts.sortMode || 3,
-      includeZeroCount: !!opts.includeZeroCount
+  function dispatchMultiLandPlant(seedId, landIds) {
+    const message = getOopsMessage();
+    const normalized = normalizeLandIds(landIds);
+    const payload = {
+      seed_id: seedId,
+      land_id: normalized[0],
+      mutiPlantData: normalized
+    };
+    message.dispatchEvent('REQUEST_CREATE_NEW_MULTI_LAND_PLANT', payload);
+    return payload;
+  }
+
+  function plantSeedsOnLands(plantOrSeedId, landIds, opts) {
+    if (!plantOrSeedId) throw new Error('plantOrSeedId required');
+    const requestedLandIds = normalizeLandIds(landIds);
+    if (!Array.isArray(requestedLandIds) || requestedLandIds.length === 0) throw new Error('landIds required');
+    const plantableLandSet = new Set(getEmptyLandIds());
+    const normalizedLandIds = requestedLandIds.filter(function (landId) {
+      return plantableLandSet.has(landId);
     });
-    if (!seed) {
-      return {
-        ok: false,
-        reason: 'seed_not_found',
-        requestedSeed: seedIdOrItemId,
-        landIds: normalizedLandIds
-      };
-    }
 
-    const seedInfo = summarizeSeedModel(seed);
-    if (seedInfo.count <= 0 && !opts.includeZeroCount) {
-      return {
-        ok: false,
-        reason: 'seed_count_empty',
-        seed: seedInfo,
-        landIds: normalizedLandIds
-      };
-    }
-
-    if (seedInfo.isMultiLandPlant) {
-      const targetLandIds = normalizedLandIds.slice(0, seedInfo.plantSize);
-      const before = targetLandIds.map(getGridInfoByLandId);
-      if (targetLandIds.length < seedInfo.plantSize) {
+    if (opts && opts.useMultiLandPlant === true) {
+      if (normalizedLandIds.length !== requestedLandIds.length || normalizedLandIds.length === 0) {
         return {
-          ok: false,
-          reason: 'multi_land_ids_insufficient',
-          seed: seedInfo,
+          planted: false,
+          plantOrSeedId: plantOrSeedId,
+          landCount: normalizedLandIds.length,
+          requestedLandCount: requestedLandIds.length,
+          requestedLandIds: requestedLandIds,
           landIds: normalizedLandIds,
-          requiredCount: seedInfo.plantSize
+          mode: 'multi',
+          reason: 'multi_land_target_not_plantable'
         };
       }
-      if (before.some(function (grid) { return !isPlantableEmptyGrid(grid); })) {
-        return {
-          ok: false,
-          reason: 'multi_land_target_not_plantable',
-          seed: seedInfo,
-          landIds: targetLandIds,
-          before
-        };
-      }
+      const payload = dispatchMultiLandPlant(plantOrSeedId, normalizedLandIds);
+      return {
+        planted: true,
+        plantOrSeedId: plantOrSeedId,
+        landCount: normalizedLandIds.length,
+        requestedLandCount: requestedLandIds.length,
+        requestedLandIds: requestedLandIds,
+        payload: payload,
+        mode: 'multi'
+      };
+    }
 
-      const request = dispatchMultiLandPlant(seed, targetLandIds);
-      if (opts.waitForResult === false) {
+    if (normalizedLandIds.length === 0) {
+      return {
+        planted: false,
+        plantOrSeedId: plantOrSeedId,
+        landCount: 0,
+        requestedLandCount: requestedLandIds.length,
+        requestedLandIds: requestedLandIds,
+        landIds: normalizedLandIds,
+        mode: 'single',
+        reason: 'no_plantable_empty_lands'
+      };
+    }
+
+    const payloads = [];
+    for (let i = 0; i < normalizedLandIds.length; i += 1) {
+      payloads.push(dispatchSingleLandPlant(plantOrSeedId, normalizedLandIds[i]));
+    }
+    return {
+      planted: true,
+      plantOrSeedId: plantOrSeedId,
+      landCount: normalizedLandIds.length,
+      requestedLandCount: requestedLandIds.length,
+      requestedLandIds: requestedLandIds,
+      payloads: payloads,
+      mode: 'single'
+    };
+  }
+
+  async function plantSeedsOnLandsVerified(seedCandidates, landIds, opts) {
+    const candidates = Array.isArray(seedCandidates) ? seedCandidates : [seedCandidates];
+    const requestedLandIds = Array.isArray(landIds) ? landIds.filter(function (id) {
+      return Number.isFinite(Number(id)) && Number(id) > 0;
+    }).map(function (id) { return Number(id); }) : [];
+    if (requestedLandIds.length === 0) throw new Error('landIds required');
+    const attempts = [];
+    const waitAfterPlantMs = Math.max(200, Number(opts && opts.waitAfterPlantMs) || 700);
+    const beforeEmptyIds = getEmptyLandIds();
+    const beforePlantableLandSet = new Set(beforeEmptyIds);
+    const targetLandIds = requestedLandIds.filter(function (landId) {
+      return beforePlantableLandSet.has(landId);
+    });
+    const skippedLandIds = requestedLandIds.filter(function (landId) {
+      return !beforePlantableLandSet.has(landId);
+    });
+    if (targetLandIds.length === 0) {
+      return {
+        ok: false,
+        reason: 'no_plantable_empty_lands',
+        attempts: attempts,
+        requestedLandIds: requestedLandIds,
+        skippedLandIds: skippedLandIds,
+        beforeEmptyIds: beforeEmptyIds,
+        afterEmptyIds: beforeEmptyIds.slice()
+      };
+    }
+
+    for (let i = 0; i < candidates.length; i += 1) {
+      const candidate = Number(candidates[i]) || 0;
+      if (candidate <= 0) continue;
+      let dispatchError = null;
+      let plantResult = null;
+      try {
+        plantResult = plantSeedsOnLands(candidate, targetLandIds, opts);
+      } catch (error) {
+        dispatchError = error && error.message ? error.message : String(error);
+      }
+      await wait(waitAfterPlantMs);
+      const afterEmptyIds = getEmptyLandIds();
+      const plantedCount = beforeEmptyIds.filter(function (id) {
+        return targetLandIds.indexOf(id) >= 0;
+      }).length - afterEmptyIds.filter(function (id) {
+        return targetLandIds.indexOf(id) >= 0;
+      }).length;
+      const attempt = {
+        candidateSeedId: candidate,
+        plantResult: plantResult,
+        dispatchError: dispatchError,
+        requestedLandIds: requestedLandIds,
+        skippedLandIds: skippedLandIds,
+        beforeEmptyIds: beforeEmptyIds,
+        afterEmptyIds: afterEmptyIds,
+        plantedCount: plantedCount,
+        ok: !dispatchError && plantedCount > 0,
+      };
+      attempts.push(attempt);
+      if (attempt.ok) {
         return {
           ok: true,
-          action: 'plant_multi_land',
-          seed: seedInfo,
-          landIds: targetLandIds,
-          before,
-          request,
-          dispatched: true
+          candidateSeedId: candidate,
+          plantedCount: plantedCount,
+          attempts: attempts,
+          requestedLandIds: requestedLandIds,
+          skippedLandIds: skippedLandIds,
+          beforeEmptyIds: beforeEmptyIds,
+          afterEmptyIds: afterEmptyIds,
         };
       }
-
-      const verify = await waitForLandPlantResult(targetLandIds[0], opts);
-      return {
-        ok: verify.ok,
-        action: 'plant_multi_land',
-        seed: seedInfo,
-        landIds: targetLandIds,
-        before,
-        after: targetLandIds.map(getGridInfoByLandId),
-        request,
-        verify
-      };
     }
-
-    const requestedLandIds = normalizedLandIds.slice();
-    const maxAttempts = opts.ignoreSeedCountLimit
-      ? requestedLandIds.length
-      : Math.min(requestedLandIds.length, Math.max(0, seedInfo.count || 0));
-    const attemptedLandIds = requestedLandIds.slice(0, maxAttempts);
-    const skippedLandIds = requestedLandIds.slice(attemptedLandIds.length);
-    const intervalMs = opts.intervalMs == null ? 100 : Math.max(0, Number(opts.intervalMs) || 0);
-    const results = [];
-
-    if (attemptedLandIds.length === 0) {
-      return {
-        ok: false,
-        action: 'plant_single_batch',
-        reason: 'seed_count_empty',
-        seed: seedInfo,
-        requestedLandIds,
-        attemptedLandIds,
-        skippedLandIds
-      };
-    }
-
-    for (let i = 0; i < attemptedLandIds.length; i++) {
-      const result = await plantSingleLand(seedInfo.seedId, attemptedLandIds[i], {
-        ...opts,
-        includeZeroCount: true
-      });
-      results.push(result);
-
-      if (!result.ok && opts.stopOnError) break;
-      if (i < attemptedLandIds.length - 1 && intervalMs > 0) {
-        await wait(intervalMs);
-      }
-    }
-
-    const plantedCount = results.filter(function (item) {
-      return !!(item && item.ok);
-    }).length;
 
     return {
-      ok: plantedCount > 0,
-      action: 'plant_single_batch',
-      seed: seedInfo,
-      requestedLandIds,
-      attemptedLandIds,
-      skippedLandIds,
-      plantedCount,
-      failedCount: results.length - plantedCount,
-      results
+      ok: false,
+      reason: 'plant_verify_failed',
+      attempts: attempts,
+      requestedLandIds: requestedLandIds,
+      skippedLandIds: skippedLandIds,
+      beforeEmptyIds: beforeEmptyIds,
+      afterEmptyIds: getEmptyLandIds(),
     };
   }
 
@@ -5732,10 +7465,8 @@
    */
   async function autoPlant(opts) {
     opts = opts || {};
-    const requestedMode = opts.mode || 'none';
-    const mode = normalizeAutoPlantMode(requestedMode);
-    const source = normalizeAutoPlantSource(requestedMode, opts.source);
-    if (mode === 'none') return { ok: true, mode: mode, source: source, action: 'skip' };
+    const mode = opts.mode || 'none';
+    if (mode === 'none') return { ok: true, mode: mode, action: 'skip' };
 
     // 获取空地
     let emptyLandIds = opts.emptyLandIds;
@@ -5752,177 +7483,163 @@
           emptyLandIds.push(g.landId);
         }
       }
+    } else {
+      const plantableLandSet = new Set(getEmptyLandIds());
+      emptyLandIds = normalizeLandIds(emptyLandIds).filter(function (landId) {
+        return plantableLandSet.has(landId);
+      });
     }
     if (emptyLandIds.length === 0) {
       return { ok: true, mode: mode, action: 'no_empty_lands', emptyCount: 0 };
     }
 
+    let plantId = Number(opts.plantId) || 0;
     let seedId = null;
     let seedName = null;
     let seedSource = null;
-    let selectedSeed = null;
-    const requestedSelected = opts.selectedSeedId != null
-      ? opts.selectedSeedId
-      : opts.selectedItemId != null
-        ? opts.selectedItemId
-        : opts.seedId != null
-          ? opts.seedId
-          : opts.itemId != null
-            ? opts.itemId
-            : opts.seedName;
+    const shouldStayInBackpackWhenShort = function () {
+      return mode === 'backpack_first'
+        || mode === 'highest_level'
+        || mode === 'max_exp'
+        || mode === 'max_fert_exp'
+        || mode === 'max_profit'
+        || mode === 'max_fert_profit';
+    };
 
-    if (mode === 'selected' || source === 'backpack' || source === 'auto') {
-      const backpackSeeds = filterSingleLandSeeds(getSeedList({
-        silent: true,
-        availableOnly: true,
-        sortMode: 3
-      }));
-
-      if (mode === 'selected' && requestedSelected != null) {
-        selectedSeed = findSeedInList(backpackSeeds, requestedSelected);
-        if (selectedSeed) {
-          seedId = selectedSeed.seedId;
-          seedName = selectedSeed.name;
-          seedSource = 'backpack';
-        } else if (source === 'backpack') {
-          return {
-            ok: false,
-            mode: mode,
-            source: source,
-            reason: 'selected_seed_not_found_in_backpack',
-            requestedSeed: requestedSelected
-          };
+    if (opts.seedId) {
+      seedId = Number(opts.seedId) || 0;
+      seedName = resolveSeedDisplayName(seedId, opts.seedName) || 'unknown';
+      const backpackCount = getBackpackSeedCount(seedId);
+      const requiredCount = emptyLandIds.length;
+      if (opts.shopGoodsId) {
+        const buyCount = Math.max(0, requiredCount - backpackCount);
+        let buyResult = null;
+        if (buyCount > 0) {
+          buyResult = await buyShopGoods(Number(opts.shopGoodsId), buyCount, Number(opts.shopPrice) || 0);
+          if (!buyResult.ok) {
+            return { ok: false, mode: mode, reason: 'buy_failed', buyResult: buyResult };
+          }
         }
-      } else if (source === 'backpack' || source === 'auto') {
-        const sorted = sortSeedsByPriority(backpackSeeds, mode === 'lowest' ? 'asc' : 'desc');
-        if (sorted.length > 0) {
-          seedId = sorted[0].seedId;
-          seedName = sorted[0].name || 'unknown';
-          seedSource = 'backpack';
+        seedSource = buyCount > 0 ? 'shop_explicit' : 'backpack_explicit';
+      } else {
+        let buyResult = null;
+        if (backpackCount < requiredCount) {
+          const shortage = Math.max(0, requiredCount - backpackCount);
+          if (shortage > 0) {
+            if (backpackCount > 0 && shouldStayInBackpackWhenShort()) {
+              emptyLandIds = emptyLandIds.slice(0, backpackCount);
+              seedSource = 'backpack_partial';
+            } else {
+              const desiredSeedName = resolveSeedDisplayName(seedId, opts.seedName);
+              if (desiredSeedName) {
+                buyResult = await buySeedsFromShopUi({
+                  seedName: desiredSeedName,
+                  seedId: seedId,
+                  count: shortage,
+                });
+              } else {
+                return {
+                  ok: false,
+                  mode: mode,
+                  reason: backpackCount > 0 ? 'seed_shortage_and_name_missing' : 'seed_name_required',
+                  seedId: seedId,
+                  backpackCount: backpackCount,
+                  requiredCount: requiredCount,
+                };
+              }
+              if (!buyResult || !buyResult.ok) {
+                return {
+                  ok: false,
+                  mode: mode,
+                  reason: 'buy_failed',
+                  buyResult: buyResult,
+                  seedName: seedName || null,
+                  seedId: seedId,
+                };
+              }
+              seedSource = backpackCount > 0 ? 'backpack_plus_shop_lookup' : 'shop_lookup';
+            }
+          }
+        } else {
+          seedSource = 'backpack_explicit';
         }
       }
-
-      if (seedSource === 'backpack' && !seedId && backpackSeeds.length > 0) {
-        return {
-          ok: false,
-          mode: mode,
-          source: source,
-          reason: 'seed_resolution_failed_in_backpack'
-        };
+    } else if (mode === 'backpack_first') {
+      // 优先使用背包中已有的种子（按等级降序选第一个有库存的）
+      const seeds = getAllSeeds(3);
+      const available = seeds.filter(function (s) { return s.count > 0; });
+      if (available.length > 0) {
+        seedId = available[0].id;
+        seedName = available[0].name || 'unknown';
+        seedSource = 'backpack';
+      } else {
+        return { ok: false, mode: mode, reason: 'no_seeds_in_backpack' };
       }
-    }
-
-    if (!seedId && (mode === 'selected' || source === 'shop' || source === 'auto')) {
+    } else if (mode === 'buy_highest' || mode === 'buy_lowest') {
+      // 从商店购买种子
+      const shopReady = await requestShopData(2);
       let shopSeeds;
       try {
-        shopSeeds = filterSingleLandSeeds(await getShopSeedList({
-          silent: true,
-          ensureData: true,
-          shopId: 2,
-          sortByLevel: true
-        }));
+        shopSeeds = getShopSeedList({ silent: true, sortByLevel: true });
       } catch (e) {
-        return {
-          ok: false,
-          mode: mode,
-          source: source,
-          reason: 'shop_data_error',
-          error: e && e.message ? e.message : String(e)
-        };
+        return { ok: false, mode: mode, reason: 'shop_data_error', error: e.message };
       }
-
-      let target = null;
-      if (mode === 'selected' && requestedSelected != null) {
-        target = findSeedInList(shopSeeds, requestedSelected);
-        if (!target && source === 'shop') {
-          return {
-            ok: false,
-            mode: mode,
-            source: source,
-            reason: 'selected_seed_not_found_in_shop',
-            requestedSeed: requestedSelected
-          };
-        }
-      } else {
-        const sorted = sortSeedsByPriority(shopSeeds, mode === 'lowest' ? 'asc' : 'desc');
-        target = sorted.length > 0 ? sorted[0] : null;
+      if (!shopSeeds || shopSeeds.length === 0) {
+        return { ok: false, mode: mode, reason: 'no_seeds_in_shop' };
       }
-
-      if (target) {
-        const buyCount = emptyLandIds.length;
-        const buyResult = await buyShopGoods(target.goodsId, buyCount, target.price);
-        if (!buyResult.ok) {
-          return {
-            ok: false,
-            mode: mode,
-            source: source,
-            reason: 'buy_failed',
-            buyResult: buyResult,
-            targetSeed: target
-          };
-        }
-        seedId = target.itemId;
-        seedName = target.name;
-        seedSource = 'shop';
-      } else if (source === 'shop') {
-        return {
-          ok: false,
-          mode: mode,
-          source: source,
-          reason: 'no_seeds_in_shop'
-        };
+      const target = mode === 'buy_highest' ? shopSeeds[0] : shopSeeds[shopSeeds.length - 1];
+      // 购买足够数量的种子
+      const buyCount = emptyLandIds.length;
+      const buyResult = await buyShopGoods(target.goodsId, buyCount, target.price);
+      if (!buyResult.ok) {
+        return { ok: false, mode: mode, reason: 'buy_failed', buyResult: buyResult, targetSeed: target };
       }
-      const buyWaitMs = opts.buyWaitMs == null ? 200 : Math.max(0, Number(opts.buyWaitMs) || 0);
-      if (buyWaitMs > 0) {
-        await wait(buyWaitMs);
-      }
-    }
-
-    if (!seedId && source === 'backpack') {
-      return { ok: false, mode: mode, source: source, reason: 'no_seeds_in_backpack' };
-    }
-    if (!seedId && source === 'shop') {
-      return { ok: false, mode: mode, source: source, reason: 'no_seeds_in_shop' };
-    }
-    if (!seedId && source === 'auto') {
-      if (mode === 'selected') {
-        return {
-          ok: false,
-          mode: mode,
-          source: source,
-          reason: 'selected_seed_not_found',
-          requestedSeed: requestedSelected
-        };
-      }
-      return {
-        ok: false,
-        mode: mode,
-        source: source,
-        reason: 'no_seed_available'
-      };
+      seedId = target.itemId;
+      seedName = target.name;
+      seedSource = 'shop_' + mode;
+    } else {
+      return { ok: false, mode: mode, reason: 'unknown_mode' };
     }
 
     if (!seedId) {
-      return { ok: false, mode: mode, source: source, reason: 'no_seed_resolved' };
+      return { ok: false, mode: mode, reason: 'no_seed_resolved' };
     }
 
-    const plantResult = await plantSeedsOnLands(seedId, emptyLandIds, {
-      waitForResult: opts.waitForResult !== false,
-      timeoutMs: opts.timeoutMs,
-      pollMs: opts.pollMs,
-      intervalMs: opts.intervalMs,
-      stopOnError: !!opts.stopOnError
+    const plantableSeed = resolvePlantableSeedItem(seedId);
+    const dispatchSeedCandidates = [];
+    const pushDispatchSeed = function (value) {
+      const num = Number(value) || 0;
+      if (num <= 0) return;
+      if (dispatchSeedCandidates.indexOf(num) >= 0) return;
+      dispatchSeedCandidates.push(num);
+    };
+    // 优先使用运行时可直接种植的 seedId/itemId，避免先尝试作物配置 id
+    // 触发游戏内部“未找到作物配置”的错误提示。
+    pushDispatchSeed(plantableSeed && plantableSeed.runtimeSeedId);
+    pushDispatchSeed(plantableSeed && plantableSeed.itemId);
+    pushDispatchSeed(seedId);
+    pushDispatchSeed(plantId);
+
+    // 种植
+    const plantResult = await plantSeedsOnLandsVerified(dispatchSeedCandidates, emptyLandIds, opts);
+    const rewardDismiss = await dismissRewardPopup({
+      silent: true,
+      waitAfter: opts && opts.rewardWaitAfter == null ? 180 : opts && opts.rewardWaitAfter,
     });
     return {
       ok: !!(plantResult && plantResult.ok),
       mode: mode,
-      source: source,
-      action: plantResult && plantResult.action ? plantResult.action : 'planted',
+      action: plantResult && plantResult.ok ? 'planted' : 'plant_failed',
+      plantId: plantId || null,
       seedId: seedId,
+      dispatchSeedId: plantResult && plantResult.candidateSeedId ? plantResult.candidateSeedId : dispatchSeedCandidates[0],
+      dispatchSeedCandidates: dispatchSeedCandidates,
       seedName: seedName,
       seedSource: seedSource,
+      plantableSeed: plantableSeed,
       emptyCount: emptyLandIds.length,
-      plantResult: plantResult
+      plantResult: plantResult,
+      rewardDismiss: rewardDismiss
     };
   }
 
@@ -5945,6 +7662,53 @@
     throw new Error('No usable land interaction method on grid controller');
   }
 
+  function getPlantInteractionRoot() {
+    return findNode('startup/root/ui/LayerUI/plant_interactive_v2') || findNode('root/ui/LayerUI/plant_interactive_v2');
+  }
+
+  function findPlantInteractionManager() {
+    const root = getPlantInteractionRoot();
+    if (!root || !Array.isArray(root.components)) return null;
+    for (let i = 0; i < root.components.length; i += 1) {
+      const comp = root.components[i];
+      if (comp && typeof comp.performFertilizing === 'function') {
+        return comp;
+      }
+    }
+    return null;
+  }
+
+  function findLandDetailComponent(root) {
+    const interactionRoot = root || getPlantInteractionRoot();
+    if (!interactionRoot) return null;
+    const landDetailNode = walk(interactionRoot).find(function (node) {
+      return !!(node && node.name === 'land_detail');
+    });
+    if (!landDetailNode || !Array.isArray(landDetailNode.components)) return null;
+    for (let i = 0; i < landDetailNode.components.length; i += 1) {
+      const comp = landDetailNode.components[i];
+      if (comp && typeof comp.onSwitchBtnClick === 'function') {
+        return comp;
+      }
+    }
+    return null;
+  }
+
+  function findGridNodeByLandId(landId, root) {
+    const targetLandId = normalizeLandId(landId);
+    if (targetLandId == null) return null;
+    const gridRoot = findGridOrigin(root);
+    if (!gridRoot) return null;
+    const nodes = getAllGridNodes(gridRoot);
+    for (let i = 0; i < nodes.length; i += 1) {
+      const gridComp = safeCall(function () { return getGridComponent(nodes[i]); }, null);
+      if (!gridComp || typeof gridComp.getLandId !== 'function') continue;
+      const currentLandId = normalizeLandId(safeCall(function () { return gridComp.getLandId(); }, null));
+      if (currentLandId === targetLandId) return nodes[i];
+    }
+    return null;
+  }
+
   async function openLandAndDiffButtons(pathOrNode, opts) {
     opts = opts || {};
     const waitAfter = opts.waitAfter == null ? 300 : Number(opts.waitAfter);
@@ -5965,6 +7729,2247 @@
       changed,
       afterCount: after.length
     });
+  }
+
+  async function inspectLandDetail(opts) {
+    opts = opts || {};
+    const root = findGridOrigin(opts.root || opts.path);
+    if (!root) throw new Error('GridOrigin not found');
+
+    let targetNode = null;
+    if (opts.path) {
+      targetNode = toNode(opts.path);
+    }
+    if (!targetNode && opts.landId != null) {
+      targetNode = findGridNodeByLandId(opts.landId, root);
+    }
+    if (!targetNode) {
+      const nodes = getAllGridNodes(root);
+      targetNode = nodes.length > 0 ? nodes[0] : null;
+    }
+    if (!targetNode) throw new Error('No target land found for land detail inspection');
+
+    const waitAfter = opts.waitAfter == null ? 280 : Math.max(0, Number(opts.waitAfter) || 0);
+    const ret = openLandInteraction(targetNode);
+    if (waitAfter > 0) await wait(waitAfter);
+
+    const interactionRoot = getPlantInteractionRoot();
+    const interactionManager = findPlantInteractionManager();
+    const landDetailComp = findLandDetailComponent(interactionRoot);
+    const currentDetailComp = safeReadKey(interactionManager, 'currentDetailComp');
+    const gridState = safeCall(function () {
+      return getGridState(targetNode, { silent: true, farmType: 'own' });
+    }, null);
+    const targetLandId = gridState && gridState.landId != null
+      ? normalizeLandId(gridState.landId)
+      : normalizeLandId(opts.landId);
+    if (landDetailComp && targetLandId != null) {
+      safeCall(function () {
+        landDetailComp.landId = targetLandId;
+        return true;
+      }, null);
+      safeCall(function () {
+        if (typeof landDetailComp.onLandChanged === 'function') return landDetailComp.onLandChanged();
+        return null;
+      }, null);
+      safeCall(function () {
+        if (typeof landDetailComp.updateLandLabel === 'function') return landDetailComp.updateLandLabel();
+        return null;
+      }, null);
+      safeCall(function () {
+        if (typeof landDetailComp.updateBenefitDisplay === 'function') return landDetailComp.updateBenefitDisplay();
+        return null;
+      }, null);
+      safeCall(function () {
+        if (typeof landDetailComp.updateLandSprite === 'function') return landDetailComp.updateLandSprite();
+        return null;
+      }, null);
+      if (waitAfter > 0) await wait(Math.min(waitAfter, 120));
+    }
+    if (landDetailComp) {
+      if (safeReadKey(landDetailComp, 'detailType') !== 'land' && typeof landDetailComp.onSwitchBtnClick === 'function') {
+        safeCall(function () { return landDetailComp.onSwitchBtnClick(); }, null);
+        if (waitAfter > 0) await wait(Math.min(waitAfter, 180));
+      }
+    }
+    const detailNode =
+      safeReadKey(interactionManager, 'detailInteractionNode') ||
+      (interactionRoot
+        ? walk(interactionRoot).find(function (node) { return !!(node && node.name === 'land_detail' && node.activeInHierarchy); }) || null
+        : null);
+    const landLabelNode = landDetailComp ? safeReadKey(landDetailComp, 'landLabel') : null;
+    const levelTipNode = landDetailComp ? safeReadKey(landDetailComp, 'levelIconTipLabel') : null;
+    const benefitNodes = landDetailComp && Array.isArray(safeReadKey(landDetailComp, 'benefitNodes'))
+      ? safeReadKey(landDetailComp, 'benefitNodes')
+      : [];
+    const detailTexts = detailNode ? getNodeTextList(detailNode, { maxDepth: 8 }).slice(0, 100) : [];
+    const labelTexts = collectNodeTexts(landLabelNode, 3, 20);
+    const levelTipTexts = collectNodeTexts(levelTipNode, 3, 20);
+    const benefitTexts = []
+      .concat.apply([], benefitNodes.slice(0, 8).map(function (node) {
+        return collectNodeTexts(node, 2, 10);
+      }))
+      .slice(0, 50);
+    const rootTexts = interactionRoot ? getNodeTextList(interactionRoot, { maxDepth: 6 }).slice(0, 150) : [];
+    const landRuntime = safeCall(function () {
+      const gridComp = getGridComponent(targetNode);
+      return getLandRuntime(gridComp);
+    }, null);
+    const runtimeLandType = pickLandTypeFromRuntime(landRuntime) || pickLandTypeFromRuntime(currentDetailComp) || pickLandTypeFromRuntime(landDetailComp);
+    const resolvedLandType =
+      detectLandTypeFromTexts(labelTexts) ||
+      detectLandTypeFromTexts(levelTipTexts) ||
+      detectLandTypeFromTexts(benefitTexts) ||
+      detectLandTypeFromTexts(detailTexts) ||
+      detectLandTypeFromTexts(rootTexts) ||
+      runtimeLandType;
+    return opts.silent ? {
+      action: 'inspectLandDetail',
+      ret: summarizeSpyValue(ret, 1),
+      landId: targetLandId,
+      path: fullPath(targetNode),
+      detailNodePath: detailNode ? fullPath(detailNode) : null,
+      currentDetailType: safeReadKey(interactionManager, 'currentDetailType'),
+      detailType: landDetailComp ? safeReadKey(landDetailComp, 'detailType') : null,
+      detailLandId: landDetailComp ? safeReadKey(landDetailComp, 'landId') : null,
+      detailComp: summarizeRuntimeObject(currentDetailComp, 'currentDetailComp'),
+      landDetailComp: summarizeRuntimeObject(landDetailComp, 'landDetailComp'),
+      landRuntime: summarizeRuntimeObject(landRuntime, 'landRuntime'),
+      landLabelTexts: labelTexts,
+      levelTipTexts: levelTipTexts,
+      benefitTexts: benefitTexts,
+      detailTexts: detailTexts,
+      rootTexts: rootTexts,
+      runtimeLandType: runtimeLandType,
+      resolvedLandType: resolvedLandType,
+      landTypeResolved: !!resolvedLandType
+    } : out({
+      action: 'inspectLandDetail',
+      ret: summarizeSpyValue(ret, 1),
+      landId: targetLandId,
+      path: fullPath(targetNode),
+      detailNodePath: detailNode ? fullPath(detailNode) : null,
+      currentDetailType: safeReadKey(interactionManager, 'currentDetailType'),
+      detailType: landDetailComp ? safeReadKey(landDetailComp, 'detailType') : null,
+      detailLandId: landDetailComp ? safeReadKey(landDetailComp, 'landId') : null,
+      detailComp: summarizeRuntimeObject(currentDetailComp, 'currentDetailComp'),
+      landDetailComp: summarizeRuntimeObject(landDetailComp, 'landDetailComp'),
+      landRuntime: summarizeRuntimeObject(landRuntime, 'landRuntime'),
+      landLabelTexts: labelTexts,
+      levelTipTexts: levelTipTexts,
+      benefitTexts: benefitTexts,
+      detailTexts: detailTexts,
+      rootTexts: rootTexts,
+      runtimeLandType: runtimeLandType,
+      resolvedLandType: resolvedLandType,
+      landTypeResolved: !!resolvedLandType
+    });
+  }
+
+  async function syncLandDetailToTarget(targetNode, manager, opts) {
+    opts = opts || {};
+    const waitAfter = Math.max(0, Number(opts.waitAfter) || 0);
+    const interactionRoot = getPlantInteractionRoot();
+    const interactionManager = manager || findPlantInteractionManager();
+    const landDetailComp = findLandDetailComponent(interactionRoot);
+    const gridState = safeCall(function () {
+      return getGridState(targetNode, { silent: true, farmType: 'own' });
+    }, null);
+    const targetLandId = gridState && gridState.landId != null
+      ? normalizeLandId(gridState.landId)
+      : null;
+    const result = {
+      targetLandId: targetLandId,
+      beforeDetailType: landDetailComp ? safeReadKey(landDetailComp, 'detailType') : null,
+      beforeDetailLandId: landDetailComp ? normalizeLandId(safeReadKey(landDetailComp, 'landId')) : null,
+      appliedLandId: false,
+      refreshed: [],
+      switchedToLand: false,
+      afterDetailType: null,
+      afterDetailLandId: null,
+    };
+    if (!landDetailComp || targetLandId == null) {
+      return result;
+    }
+
+    if (normalizeLandId(safeReadKey(landDetailComp, 'landId')) !== targetLandId) {
+      const applied = safeCall(function () {
+        landDetailComp.landId = targetLandId;
+        return true;
+      }, false);
+      result.appliedLandId = !!applied;
+    }
+
+    [
+      'onLandChanged',
+      'updateLandLabel',
+      'updateBenefitDisplay',
+      'updateLandSprite',
+    ].forEach(function (methodName) {
+      if (typeof landDetailComp[methodName] !== 'function') return;
+      safeCall(function () { return landDetailComp[methodName](); }, null);
+      result.refreshed.push(methodName);
+    });
+    if (waitAfter > 0) await wait(Math.min(waitAfter, 120));
+
+    if (safeReadKey(landDetailComp, 'detailType') !== 'land' && typeof landDetailComp.onSwitchBtnClick === 'function') {
+      safeCall(function () { return landDetailComp.onSwitchBtnClick(); }, null);
+      result.switchedToLand = true;
+      if (waitAfter > 0) await wait(Math.min(waitAfter, 180));
+    }
+
+    result.afterDetailType = safeReadKey(landDetailComp, 'detailType');
+    result.afterDetailLandId = normalizeLandId(safeReadKey(landDetailComp, 'landId'));
+    if (interactionManager && Object.prototype.hasOwnProperty.call(interactionManager, 'pendingDetailLandId')) {
+      safeCall(function () {
+        interactionManager.pendingDetailLandId = targetLandId;
+        return true;
+      }, null);
+    }
+    return result;
+  }
+
+  async function inspectFertilizerRuntime(opts) {
+    opts = opts || {};
+    const root = findGridOrigin(opts.root || opts.path);
+    if (!root) throw new Error('GridOrigin not found');
+
+    let targetNode = null;
+    if (opts.path) {
+      targetNode = toNode(opts.path);
+    }
+    if (!targetNode && opts.landId != null) {
+      targetNode = findGridNodeByLandId(opts.landId, root);
+    }
+    if (!targetNode) {
+      const nodes = getAllGridNodes(root);
+      for (let i = 0; i < nodes.length; i += 1) {
+        const info = safeCall(function () {
+          return getGridState(nodes[i], { silent: true, farmType: 'own' });
+        }, null);
+        if (info && (info.hasPlant || info.landId != null)) {
+          targetNode = nodes[i];
+          break;
+        }
+      }
+    }
+    if (!targetNode) throw new Error('No target land found for fertilizer inspection');
+
+    const gridComp = getGridComponent(targetNode);
+    const landRuntime = getLandRuntime(gridComp);
+    const plantRuntime = getPlantRuntime(gridComp);
+    const gridState = getGridState(targetNode, { silent: true, farmType: 'own' });
+    const itemM = safeCall(function () { return getItemManager(); }, null);
+    const normalContainer = itemM ? safeReadKey(itemM, 'normalFertilizerContainer') : null;
+    const organicContainer = itemM ? safeReadKey(itemM, 'organicFertilizerContainer') : null;
+    const allFertilizer = itemM && typeof itemM.getAllFertilizer === 'function'
+      ? safeCall(function () { return itemM.getAllFertilizer(); }, null)
+      : null;
+    const fertilizerItems = itemM && typeof itemM.getFertilizer_items === 'function'
+      ? safeCall(function () { return itemM.getFertilizer_items(); }, null)
+      : null;
+    const fertilizerBuckets = itemM && typeof itemM.getFertilizer_bucket === 'function'
+      ? safeCall(function () { return itemM.getFertilizer_bucket(); }, null)
+      : null;
+
+    const keywordMethods = {
+      grid: filterMethodNamesByKeywords(gridComp, ['fert', 'item', 'plant', 'land', 'click', 'use']),
+      landRuntime: filterMethodNamesByKeywords(landRuntime, ['fert', 'water', 'plant', 'land', 'time', 'season']),
+      plantRuntime: filterMethodNamesByKeywords(plantRuntime, ['fert', 'water', 'plant', 'time', 'season', 'fruit']),
+      itemManager: filterMethodNamesByKeywords(itemM, ['fert', 'item', 'count', 'update', 'normal', 'organic']),
+      normalContainer: filterMethodNamesByKeywords(normalContainer, ['fert', 'time', 'remain', 'use', 'add', 'fill']),
+      organicContainer: filterMethodNamesByKeywords(organicContainer, ['fert', 'time', 'remain', 'use', 'add', 'fill'])
+    };
+
+    const directState = {
+      hasNormalFertilizer: itemM && typeof itemM.hasNormalFertilizer === 'function'
+        ? !!safeCall(function () { return itemM.hasNormalFertilizer(); }, false)
+        : null,
+      hasOrganicFertilizer: itemM && typeof itemM.hasOrganicFertilizer === 'function'
+        ? !!safeCall(function () { return itemM.hasOrganicFertilizer(); }, false)
+        : null,
+      canFertilize: plantRuntime && typeof plantRuntime.canFertilize === 'function'
+        ? !!safeCall(function () { return plantRuntime.canFertilize(); }, false)
+        : null,
+      normalRemainingTime: itemM && typeof itemM.getNormalFertilizerRemainingTime === 'function'
+        ? safeCall(function () { return toFiniteNumber(itemM.getNormalFertilizerRemainingTime()); }, null)
+        : null,
+      organicRemainingTime: itemM && typeof itemM.getOrganicFertilizerRemainingTime === 'function'
+        ? safeCall(function () { return toFiniteNumber(itemM.getOrganicFertilizerRemainingTime()); }, null)
+        : null,
+      normalFertilizer: itemM && typeof itemM.getNormalFertilizer === 'function'
+        ? safeCall(function () { return itemM.getNormalFertilizer(); }, null)
+        : null,
+      organicFertilizer: itemM && typeof itemM.getOrganicFertilizer === 'function'
+        ? safeCall(function () { return itemM.getOrganicFertilizer(); }, null)
+        : null,
+    };
+    const normalDetailItem = findBestFertilizerDetailItem(itemM, 'normal');
+    const organicDetailItem = findBestFertilizerDetailItem(itemM, 'organic');
+
+    const buttonDiff = await openLandAndDiffButtons(targetNode, {
+      waitAfter: opts.waitAfter == null ? 350 : opts.waitAfter
+    });
+    const buttonKeywords = ['肥', '化肥', '有机', '普通', 'fert', 'organic', 'normal'];
+    const fertilizerButtons = []
+      .concat(Array.isArray(buttonDiff && buttonDiff.added) ? buttonDiff.added : [])
+      .concat(Array.isArray(buttonDiff && buttonDiff.changed) ? buttonDiff.changed : [])
+      .filter(function (item) {
+        const texts = []
+          .concat(Array.isArray(item && item.texts) ? item.texts : [])
+          .concat(Array.isArray(item && item.handlers) ? item.handlers : [])
+          .concat([item && item.path, item && item.relativePath, item && item.name]);
+        const joined = texts.filter(Boolean).join(' ').toLowerCase();
+        return buttonKeywords.some(function (keyword) {
+          return joined.indexOf(String(keyword).toLowerCase()) >= 0;
+        });
+      });
+
+    function summarizeNodeComponents(node) {
+      if (!node || !Array.isArray(node.components)) return [];
+      return node.components.slice(0, 8).map(function (comp, index) {
+        if (!comp) return { index: index, exists: false };
+        return {
+          index: index,
+          name: comp && comp.constructor ? comp.constructor.name : String(comp),
+          summary: summarizeRuntimeObject(comp, 'component'),
+          methods: filterMethodNamesByKeywords(comp, ['fert', 'seed', 'plant', 'land', 'switch', 'erase', 'use', 'click', 'show', 'open']),
+        };
+      });
+    }
+
+    const interactionRoot = getPlantInteractionRoot();
+    const interactionManager = findPlantInteractionManager();
+    const interactionNodes = interactionRoot
+      ? walk(interactionRoot)
+          .filter(function (node) { return !!(node && node.activeInHierarchy); })
+          .map(function (node) {
+            const texts = getNodeTextList(node, { maxDepth: 2 }).slice(0, 8);
+            const components = componentNames(node);
+            const componentDetails = summarizeNodeComponents(node);
+            const path = fullPath(node);
+            const joined = [path, node.name]
+              .concat(texts)
+              .concat(components)
+              .join(' ')
+              .toLowerCase();
+            const hasButtonLikeComponent = componentDetails.some(function (detail) {
+              const keys = safeReadKey(detail, 'summary') && Array.isArray(detail.summary.keys)
+                ? detail.summary.keys
+                : [];
+              return keys.indexOf('clickEvents') >= 0;
+            });
+            const isRelevant = hasButtonLikeComponent ||
+              texts.length > 0 ||
+              /tool|seed|detail|fert|bucket|switch|erase|node1|node2|group|btn|button/.test(joined);
+            return {
+              path: path,
+              name: node.name || null,
+              components: components,
+              texts: texts,
+              componentDetails: componentDetails,
+              hasButtonLikeComponent: hasButtonLikeComponent,
+              isRelevant: isRelevant,
+            };
+          })
+          .filter(function (node) { return node.isRelevant; })
+          .slice(0, 160)
+      : [];
+
+    function snapshotFertilizerDetailState(manager, landDetailComp) {
+      const detailComp = safeReadKey(manager, 'currentDetailComp');
+      const detailNode = safeReadKey(manager, 'detailInteractionNode');
+      return {
+        canFertilize: typeof manager.canFertilize === 'function'
+          ? !!safeCall(function () { return manager.canFertilize(); }, false)
+          : null,
+        currentDetailType: safeReadKey(manager, 'currentDetailType'),
+        currentData: summarizeSpyValue(safeReadKey(manager, 'currentData'), 1),
+        currentDetailComp: summarizeRuntimeObject(detailComp, 'currentDetailComp'),
+        currentDetailCompMethods: filterMethodNamesByKeywords(
+          detailComp,
+          ['fert', 'detail', 'item', 'use', 'confirm', 'click', 'select', 'organic', 'normal']
+        ),
+        landDetail: landDetailComp ? {
+          detailType: safeReadKey(landDetailComp, 'detailType'),
+          landId: safeReadKey(landDetailComp, 'landId'),
+          methods: filterMethodNamesByKeywords(landDetailComp, ['switch', 'detail', 'tip', 'plant', 'seed', 'land']),
+        } : null,
+        detailNode: summarizeRuntimeObject(detailNode, 'detailInteractionNode'),
+        detailTexts: detailNode ? getNodeTextList(detailNode, { maxDepth: 3 }).slice(0, 20) : [],
+      };
+    }
+
+    async function probeFertilizerDetail(manager, itemM, item, modeLabel, landDetailComp) {
+      if (!manager || typeof manager.showDetailForItem !== 'function' || !item) {
+        return {
+          mode: modeLabel,
+          attempted: false,
+          reason: !item ? 'item_missing' : 'showDetailForItem_missing',
+        };
+      }
+      const candidates = buildFertilizerDetailCandidates(itemM, item);
+      const attempts = [];
+      for (let i = 0; i < candidates.length; i += 1) {
+        const candidate = candidates[i];
+        const beforeState = snapshotFertilizerDetailState(manager, landDetailComp);
+        const ret = safeCall(function () { return manager.showDetailForItem(candidate.value); }, null);
+        await wait(120);
+        const afterState = snapshotFertilizerDetailState(manager, landDetailComp);
+        attempts.push({
+          label: candidate.label,
+          candidate: summarizeSpyValue(candidate.value, 1),
+          ret: summarizeSpyValue(ret, 1),
+          before: beforeState,
+          after: afterState,
+        });
+        safeCall(function () {
+          if (typeof manager.commonClose === 'function') return manager.commonClose();
+          return null;
+        }, null);
+        await wait(60);
+      }
+      return {
+        mode: modeLabel,
+        attempted: true,
+        item: summarizeSpyValue(item, 1),
+        attempts: attempts,
+      };
+    }
+
+    async function probeLandDetailSwitch(manager, landDetailComp, item) {
+      if (!manager || !landDetailComp || typeof landDetailComp.onSwitchBtnClick !== 'function') {
+        return {
+          attempted: false,
+          reason: !landDetailComp ? 'land_detail_missing' : 'switch_not_found',
+        };
+      }
+      const before = snapshotFertilizerDetailState(manager, landDetailComp);
+      safeCall(function () { return landDetailComp.onSwitchBtnClick(); }, null);
+      await wait(120);
+      const afterSwitch = snapshotFertilizerDetailState(manager, landDetailComp);
+      let afterShowItem = null;
+      if (item && typeof manager.showDetailForItem === 'function') {
+        safeCall(function () { return manager.showDetailForItem(item); }, null);
+        await wait(120);
+        afterShowItem = snapshotFertilizerDetailState(manager, landDetailComp);
+      }
+      safeCall(function () {
+        if (typeof manager.commonClose === 'function') return manager.commonClose();
+        return null;
+      }, null);
+      await wait(60);
+      return {
+        attempted: true,
+        before: before,
+        afterSwitch: afterSwitch,
+        afterShowItem: afterShowItem,
+      };
+    }
+
+    const landDetailComp = findLandDetailComponent(interactionRoot);
+    const detailProbe = interactionManager ? {
+      normal: await probeFertilizerDetail(interactionManager, itemM, normalDetailItem, 'normal', landDetailComp),
+      organic: await probeFertilizerDetail(interactionManager, itemM, organicDetailItem, 'organic', landDetailComp),
+    } : null;
+    const switchProbe = interactionManager
+      ? await probeLandDetailSwitch(interactionManager, landDetailComp, directState.normalFertilizer)
+      : null;
+
+    const payload = {
+      target: {
+        landId: gridState.landId,
+        path: gridState.path,
+        plantName: gridState.plantName,
+        landType: gridState.landType,
+        stageKind: gridState.stageKind,
+        currentSeason: gridState.currentSeason,
+        totalSeason: gridState.totalSeason,
+        matureInSec: gridState.matureInSec,
+      },
+      itemCounts: {
+        coupon1002: getItemCountById(1002),
+        bean1005: getItemCountById(1005),
+      },
+      directState: directState,
+      detailItems: {
+        normal: summarizeInventoryEntry(normalDetailItem),
+        organic: summarizeInventoryEntry(organicDetailItem),
+      },
+      allFertilizer: Array.isArray(allFertilizer)
+        ? allFertilizer.slice(0, 20).map(function (item) {
+            return summarizeSpyValue(item, 1);
+          })
+        : allFertilizer,
+      fertilizerItems: summarizeInventoryArray(fertilizerItems, 12),
+      fertilizerBuckets: summarizeInventoryArray(fertilizerBuckets, 12),
+      runtime: {
+        grid: summarizeRuntimeObject(gridComp, 'grid'),
+        landRuntime: summarizeRuntimeObject(landRuntime, 'landRuntime'),
+        plantRuntime: summarizeRuntimeObject(plantRuntime, 'plantRuntime'),
+        itemManager: summarizeRuntimeObject(itemM, 'itemManager'),
+        normalContainer: summarizeRuntimeObject(normalContainer, 'normalFertilizerContainer'),
+        organicContainer: summarizeRuntimeObject(organicContainer, 'organicFertilizerContainer'),
+        interactionManager: summarizeRuntimeObject(interactionManager, 'interactionManager'),
+      },
+      methodSourcePreview: {
+        interactionManager: interactionManager ? {
+          performFertilizing: getMethodSourcePreview(interactionManager, 'performFertilizing', 1400),
+          attemptPerform: getMethodSourcePreview(interactionManager, 'attemptPerform', 1400),
+          canFertilize: getMethodSourcePreview(interactionManager, 'canFertilize', 1200),
+          checkState: getMethodSourcePreview(interactionManager, 'checkState', 1200),
+          setCurrentData: getMethodSourcePreview(interactionManager, 'setCurrentData', 1400),
+          getToolNode: getMethodSourcePreview(interactionManager, 'getToolNode', 1200),
+          onToolInteractionNodeTouchStart: getMethodSourcePreview(interactionManager, 'onToolInteractionNodeTouchStart', 1400),
+          showDetailForItem: getMethodSourcePreview(interactionManager, 'showDetailForItem', 1400),
+          getOrCreateDetailComp: getMethodSourcePreview(interactionManager, 'getOrCreateDetailComp', 1400),
+          selectAppropriateInteractionNode: getMethodSourcePreview(interactionManager, 'selectAppropriateInteractionNode', 1400),
+          onToolInteractionNodeTouchEnd: getMethodSourcePreview(interactionManager, 'onToolInteractionNodeTouchEnd', 1400),
+          onInteractionNodeTouchStart: getMethodSourcePreview(interactionManager, 'onInteractionNodeTouchStart', 1400),
+          onInteractionNodeTouchEnd: getMethodSourcePreview(interactionManager, 'onInteractionNodeTouchEnd', 1400),
+          startDrag: getMethodSourcePreview(interactionManager, 'startDrag', 1400),
+          endDrag: getMethodSourcePreview(interactionManager, 'endDrag', 1200),
+          attemptLandInteraction: getMethodSourcePreview(interactionManager, 'attemptLandInteraction', 1400),
+        } : null,
+        landDetail: landDetailComp ? {
+          onSwitchBtnClick: getMethodSourcePreview(landDetailComp, 'onSwitchBtnClick', 1000),
+          showPlantDetail: getMethodSourcePreview(landDetailComp, 'showPlantDetail', 1200),
+          onLandNodeClick: getMethodSourcePreview(landDetailComp, 'onLandNodeClick', 1200),
+        } : null,
+      },
+      interactionManagerState: interactionManager ? {
+        canFertilize: typeof interactionManager.canFertilize === 'function'
+          ? !!safeCall(function () { return interactionManager.canFertilize(); }, false)
+          : null,
+        currentDetailType: safeReadKey(interactionManager, 'currentDetailType'),
+        currentData: summarizeSpyValue(safeReadKey(interactionManager, 'currentData'), 1),
+        currentDataState: summarizeCurrentDataState(interactionManager),
+        currentDataItems: summarizeInventoryArray(safeReadKey(interactionManager, 'currentData'), 10),
+        currentToolNodeInfo: summarizeSpyValue(safeReadKey(interactionManager, 'currentToolNodeInfo'), 1),
+        currentSeedNodeInfo: summarizeSpyValue(safeReadKey(interactionManager, 'currentSeedNodeInfo'), 1),
+        currentDetailComp: summarizeRuntimeObject(safeReadKey(interactionManager, 'currentDetailComp'), 'currentDetailComp'),
+        toolInteractionNode: summarizeRuntimeObject(safeReadKey(interactionManager, 'toolInteractionNode'), 'toolInteractionNode'),
+        seedInteractionNode: summarizeRuntimeObject(safeReadKey(interactionManager, 'seedInteractionNode'), 'seedInteractionNode'),
+        detailInteractionNode: summarizeRuntimeObject(safeReadKey(interactionManager, 'detailInteractionNode'), 'detailInteractionNode'),
+        fertilizeDetailPrefab: summarizeSpyValue(safeReadKey(interactionManager, 'fertilizeDetailPrefab'), 1),
+        toolNodeLookup: {
+          normalBucket1011: summarizeNodeForClick(getToolNodeByItemId(interactionManager, 1011)),
+          organicBucket1012: summarizeNodeForClick(getToolNodeByItemId(interactionManager, 1012)),
+          water10007: summarizeNodeForClick(getToolNodeByItemId(interactionManager, 10007)),
+        },
+        methodArities: {
+          performFertilizing: typeof interactionManager.performFertilizing === 'function' ? interactionManager.performFertilizing.length : null,
+          showDetailForItem: typeof interactionManager.showDetailForItem === 'function' ? interactionManager.showDetailForItem.length : null,
+          attemptLandInteraction: typeof interactionManager.attemptLandInteraction === 'function' ? interactionManager.attemptLandInteraction.length : null,
+          setupPlantInteraction: typeof interactionManager.setupPlantInteraction === 'function' ? interactionManager.setupPlantInteraction.length : null,
+          setCurrentData: typeof interactionManager.setCurrentData === 'function' ? interactionManager.setCurrentData.length : null,
+        }
+      } : null,
+      detailProbe: detailProbe,
+      switchProbe: switchProbe,
+      keywordMethods: keywordMethods,
+      buttonDiff: buttonDiff,
+      fertilizerButtons: fertilizerButtons,
+      interactionNodes: interactionNodes,
+    };
+
+    return opts.silent ? payload : out(payload);
+  }
+
+  function inspectProtocolTransport(opts) {
+    opts = opts || {};
+    installRuntimeSpies();
+    const net = safeCall(function () { return getNetWebSocket(); }, null);
+    const message = safeCall(function () { return getOopsMessage(); }, null);
+    const protobufRoot = safeCall(function () { return getProtobufDefault(); }, null);
+    const channels = net ? safeReadKey(net, '_channels') : null;
+    const primaryChannel = channels && typeof channels.get === 'function'
+      ? safeCall(function () { return channels.get(0); }, null)
+      : null;
+    const serviceMap = primaryChannel ? safeReadKey(primaryChannel, '_serviceInstaceMap') : null;
+    const nestedGamePb = protobufRoot ? findNestedValueByKey(protobufRoot, 'gamepb', 5) : null;
+    const channelEntries = channels && typeof channels.forEach === 'function'
+      ? safeCall(function () {
+          const entries = [];
+          channels.forEach(function (value, key) {
+            if (entries.length >= 8) return;
+            entries.push({
+              key: key,
+              value: summarizeRuntimeObject(value, 'channel'),
+              methods: filterMethodNamesByKeywords(value, ['send', 'req', 'msg', 'rpc', 'call', 'proto']),
+            });
+          });
+          return entries;
+        }, [])
+      : [];
+
+    const payload = {
+      netWebSocket: summarizeRuntimeObject(net, 'netWebSocket'),
+      messageBus: summarizeRuntimeObject(message, 'messageBus'),
+      protobufRoot: summarizeRuntimeObject(protobufRoot, 'protobufDefault'),
+      methodSourcePreview: {
+        netWebSocket: net ? {
+          sendMsg: getMethodSourcePreview(net, 'sendMsg', 1600),
+          onFrame: getMethodSourcePreview(net, 'onFrame', 1200),
+          connect: getMethodSourcePreview(net, 'connect', 1000),
+          connectSvr: getMethodSourcePreview(net, 'connectSvr', 1000),
+        } : null,
+        channel: primaryChannel ? {
+          send: getMethodSourcePreview(primaryChannel, 'send', 2000),
+          getService: getMethodSourcePreview(primaryChannel, 'getService', 1600),
+          onMessage: getMethodSourcePreview(primaryChannel, 'onMessage', 1600),
+          getServiceFunName: getMethodSourcePreview(primaryChannel, 'getServiceFunName', 1200),
+        } : null,
+        messageBus: message ? {
+          dispatchEvent: getMethodSourcePreview(message, 'dispatchEvent', 1200),
+          on: getMethodSourcePreview(message, 'on', 800),
+          off: getMethodSourcePreview(message, 'off', 800),
+        } : null,
+      },
+      netChannels: {
+        count: channels && typeof channels.size === 'number' ? channels.size : null,
+        entries: channelEntries,
+      },
+      primaryChannel: summarizeRuntimeObject(primaryChannel, 'primaryChannel'),
+      serviceInstanceMap: {
+        count: serviceMap && typeof serviceMap.size === 'number' ? serviceMap.size : null,
+        entries: summarizeMapEntries(serviceMap, 16),
+      },
+      nestedGamePb: nestedGamePb ? {
+        path: nestedGamePb.path,
+        summary: summarizeRuntimeObject(nestedGamePb.value, 'nestedGamePb'),
+      } : null,
+      protobufRefs: {
+        plantService: summarizeProtobufRef('gamepb.plantpb.PlantService'),
+        fertilizeRequest: summarizeProtobufRef('gamepb.plantpb.FertilizeRequest'),
+        fertilizeReply: summarizeProtobufRef('gamepb.plantpb.FertilizeReply'),
+        allLandsRequest: summarizeProtobufRef('gamepb.plantpb.AllLandsRequest'),
+        allLandsReply: summarizeProtobufRef('gamepb.plantpb.AllLandsReply'),
+      },
+      recentRuntimeEvents: {
+        messageEvents: Array.isArray(runtimeSpyState.messageEvents)
+          ? runtimeSpyState.messageEvents.slice(-12)
+          : [],
+        frameEvents: Array.isArray(runtimeSpyState.frameEvents)
+          ? runtimeSpyState.frameEvents.slice(-8)
+          : [],
+      },
+    };
+
+    return opts.silent ? payload : out(payload);
+  }
+
+  function inspectRecentClickTrace(opts) {
+    opts = opts || {};
+    installRuntimeSpies();
+    installInteractionManagerSpies();
+    const limit = Math.max(1, Math.min(40, Number(opts.limit) || 20));
+    const payload = {
+      installed: !!runtimeSpyState.installed,
+      lastInstallAt: runtimeSpyState.lastInstallAt,
+      count: Array.isArray(runtimeSpyState.clickEvents) ? runtimeSpyState.clickEvents.length : 0,
+      recent: Array.isArray(runtimeSpyState.clickEvents)
+        ? runtimeSpyState.clickEvents.slice(-limit)
+        : [],
+      interactionMethodCount: Array.isArray(runtimeSpyState.interactionMethodEvents)
+        ? runtimeSpyState.interactionMethodEvents.length
+        : 0,
+      interactionMethods: Array.isArray(runtimeSpyState.interactionMethodEvents)
+        ? runtimeSpyState.interactionMethodEvents.slice(-limit)
+        : [],
+    };
+    return opts.silent ? payload : out(payload);
+  }
+
+  function findFertilizerActionNode(mode, manager, selectedBucket) {
+    function getNodeButtonLikeScore(node) {
+      if (!node) return 0;
+      if (safeCall(function () { return !!node.getComponent(cc.Button); }, false)) return 3;
+      if (!Array.isArray(node.components)) return 0;
+      const hasButtonLikeComponent = node.components.some(function (comp) {
+        if (!comp || typeof comp !== 'object') return false;
+        const keys = safeCall(function () { return Object.keys(comp); }, []);
+        return keys.indexOf('clickEvents') >= 0 || typeof safeReadKey(comp, '_onTouchEnded') === 'function';
+      });
+      return hasButtonLikeComponent ? 2 : 0;
+    }
+
+    function findTouchableAncestor(node, stopNode) {
+      let current = node;
+      const stop = stopNode || null;
+      while (current) {
+        if (getNodeButtonLikeScore(current) > 0) return current;
+        if (stop && current === stop) break;
+        current = current.parent || null;
+      }
+      return null;
+    }
+
+    function getPreferredHourLabels(item) {
+      const count = toFiniteNumber(item && safeReadKey(item, 'count'));
+      if (!(count > 0)) return [];
+      const rawHours = count / 3600;
+      const variants = [];
+      const seen = {};
+      const pushVariant = function (value) {
+        if (!isFinite(value) || value <= 0) return;
+        const text = String(value).replace(/\.0$/, '') + '小时';
+        if (seen[text]) return;
+        seen[text] = true;
+        variants.push(text);
+      };
+      pushVariant(Math.floor(rawHours * 10) / 10);
+      pushVariant(Math.round(rawHours * 10) / 10);
+      pushVariant(Math.ceil(rawHours * 10) / 10);
+      pushVariant(Math.floor(rawHours));
+      pushVariant(Math.round(rawHours));
+      return variants;
+    }
+
+    const modeName = String(mode || '').toLowerCase();
+    const directToolNode = getToolNodeByItemId(manager, selectedBucket && selectedBucket.id);
+    if (directToolNode) return directToolNode;
+    const toolRoot = manager ? safeReadKey(manager, 'toolInteractionNode') : null;
+    if (toolRoot) {
+      const preferredHourLabels = getPreferredHourLabels(selectedBucket);
+      const byPath = new Map();
+      walk(toolRoot).forEach(function (node) {
+        if (!node || !node.activeInHierarchy) return;
+        const texts = getNodeTextList(node, { maxDepth: 1 }).slice(0, 6);
+        const joined = texts.join(' ').toLowerCase();
+        const buttonScore = getNodeButtonLikeScore(node);
+        const touchNode = buttonScore > 0 ? node : (findTouchableAncestor(node, toolRoot) || node);
+        const touchPath = safeCall(function () { return fullPath(touchNode); }, null);
+        if (!touchNode || !touchPath) return;
+        const touchTexts = getNodeTextList(touchNode, { maxDepth: 1 }).slice(0, 6);
+        const touchJoined = touchTexts.join(' ').toLowerCase();
+        const ownButtonScore = getNodeButtonLikeScore(touchNode);
+        const hasHourText = texts.some(function (text) { return /小时/.test(String(text)); }) ||
+          touchTexts.some(function (text) { return /小时/.test(String(text)); });
+        const matchesPreferredHours = preferredHourLabels.some(function (label) {
+          const lower = String(label || '').toLowerCase();
+          return joined.indexOf(lower) >= 0 || touchJoined.indexOf(lower) >= 0;
+        });
+        const score =
+          (matchesPreferredHours ? 100 : 0) +
+          (hasHourText ? 20 : 0) +
+          (ownButtonScore * 12) +
+          (/node\d+/i.test(String(touchNode.name || '')) ? 10 : 0) +
+          (touchNode === toolRoot ? -20 : 0) +
+          nodeDepth(touchNode, toolRoot);
+        if (!hasHourText && ownButtonScore <= 0) return;
+        const current = byPath.get(touchPath);
+        if (!current || score > current.score) {
+          byPath.set(touchPath, {
+            node: touchNode,
+            path: touchPath,
+            texts: touchTexts.length > 0 ? touchTexts : texts,
+            score: score,
+          });
+        }
+      });
+      const ranked = Array.from(byPath.values())
+        .sort(function (a, b) {
+          return (b.score || 0) - (a.score || 0);
+        });
+      if (ranked.length > 0) {
+        return ranked[0].node;
+      }
+    }
+    const toolInfo = manager ? safeReadKey(manager, 'currentToolNodeInfo') : null;
+    const subNodes = toolInfo && Array.isArray(safeReadKey(toolInfo, 'subNodes'))
+      ? safeReadKey(toolInfo, 'subNodes')
+      : null;
+    if (Array.isArray(subNodes) && subNodes.length > 0) {
+      const withText = subNodes
+        .map(function (node) {
+          return {
+            node: node,
+            path: fullPath(node),
+            texts: getNodeTextList(node, { maxDepth: 2 }).slice(0, 4),
+          };
+        })
+        .filter(function (entry) {
+          return entry.node && entry.texts.some(function (text) { return /小时/.test(String(text)); });
+        });
+      if (withText.length >= 2) {
+        withText.sort(function (a, b) {
+          const ta = (a.texts[0] || '');
+          const tb = (b.texts[0] || '');
+          const na = parseFloat(String(ta).replace(/[^\d.]/g, ''));
+          const nb = parseFloat(String(tb).replace(/[^\d.]/g, ''));
+          return (nb || 0) - (na || 0);
+        });
+        return modeName === 'organic' ? withText[1].node : withText[0].node;
+      }
+    }
+
+    const interactionRoot = getPlantInteractionRoot();
+    if (!interactionRoot) return null;
+    const fallbackNames = modeName === 'organic'
+      ? ['node3', 'node2', 'group_5']
+      : ['node2', 'node1', 'group_5'];
+    const nodes = walk(interactionRoot).filter(function (node) {
+      return !!(node && node.activeInHierarchy);
+    });
+    for (let i = 0; i < fallbackNames.length; i += 1) {
+      const targetName = fallbackNames[i];
+      const preferredPathPart = '/followNode/seedGroup/group_5/' + targetName;
+      for (let j = 0; j < nodes.length; j += 1) {
+        const node = nodes[j];
+        const path = fullPath(node);
+        if (path && path.indexOf(preferredPathPart) >= 0) return node;
+      }
+    }
+    return null;
+  }
+
+  function primeFertilizerToolNodes(manager, selectedBucket, targetArg) {
+    if (!manager) return;
+    if (typeof manager.selectAppropriateInteractionNode === 'function') {
+      safeCall(function () { return manager.selectAppropriateInteractionNode(); }, null);
+    }
+    const toolNode = safeReadKey(manager, 'toolInteractionNode');
+    if (toolNode) {
+      safeCall(function () { toolNode.active = true; }, null);
+      safeCall(function () { toolNode._active = true; }, null);
+    }
+    const seedNode = safeReadKey(manager, 'seedInteractionNode');
+    if (seedNode) {
+      safeCall(function () { seedNode.active = true; }, null);
+      safeCall(function () { seedNode._active = true; }, null);
+    }
+  }
+
+  async function ensureFertilizerActionPanel(manager) {
+    const interactionRoot = getPlantInteractionRoot();
+    if (!interactionRoot) return false;
+
+    function hasSeedGroupActionNodes() {
+      return !!findFertilizerActionNode('normal') || !!findFertilizerActionNode('organic');
+    }
+
+    if (hasSeedGroupActionNodes()) return true;
+
+    const landDetailComp = findLandDetailComponent(interactionRoot);
+    if (landDetailComp && typeof landDetailComp.onSwitchBtnClick === 'function') {
+      safeCall(function () { return landDetailComp.onSwitchBtnClick(); }, null);
+      await wait(180);
+      if (hasSeedGroupActionNodes()) return true;
+    }
+
+    const switchNode = findNode('startup/root/ui/LayerUI/plant_interactive_v2/land_detail/switch');
+    if (switchNode) {
+      safeCall(function () { tapNode(switchNode); }, null);
+      await wait(220);
+      if (hasSeedGroupActionNodes()) return true;
+    }
+
+    if (manager && typeof manager.selectAppropriateInteractionNode === 'function') {
+      safeCall(function () { return manager.selectAppropriateInteractionNode(); }, null);
+      await wait(180);
+      if (hasSeedGroupActionNodes()) return true;
+    }
+
+    return hasSeedGroupActionNodes();
+  }
+
+  function findPlantInteractionSubNodeByName(name) {
+    const interactionRoot = getPlantInteractionRoot();
+    if (!interactionRoot) return null;
+    return walk(interactionRoot).find(function (node) {
+      return !!(node && node.name === name && node.activeInHierarchy);
+    }) || null;
+  }
+
+  function toActivePlantInteractionNode(node) {
+    const targetNode = toNode(node);
+    if (!targetNode || !targetNode.activeInHierarchy) return null;
+    return targetNode;
+  }
+
+  function getPlantInteractionVisibleNodes(manager) {
+    const currentManager = manager || findPlantInteractionManager();
+    return {
+      followNode: findPlantInteractionSubNodeByName('followNode'),
+      landDetail: findPlantInteractionSubNodeByName('land_detail'),
+      seedGroup: findPlantInteractionSubNodeByName('seedGroup'),
+      detailNode: findPlantInteractionSubNodeByName('detailNode'),
+      toolInteractionNode: toActivePlantInteractionNode(currentManager && safeReadKey(currentManager, 'toolInteractionNode')),
+      seedInteractionNode: toActivePlantInteractionNode(currentManager && safeReadKey(currentManager, 'seedInteractionNode')),
+      detailInteractionNode: toActivePlantInteractionNode(currentManager && safeReadKey(currentManager, 'detailInteractionNode')),
+      dragPreview: toActivePlantInteractionNode(currentManager && safeReadKey(currentManager, 'dragPreview')),
+      dragPreviewSpineNode: toActivePlantInteractionNode(currentManager && safeReadKey(currentManager, 'dragPreviewSpineNode')),
+    };
+  }
+
+  function getPlantInteractionDetailComp(manager) {
+    const currentManager = manager || findPlantInteractionManager();
+    return currentManager ? safeReadKey(currentManager, 'currentDetailComp') : null;
+  }
+
+  function isPlantInteractionDetailCompShowing(detailComp) {
+    if (!detailComp || typeof detailComp !== 'object') return false;
+    return !!safeCall(function () {
+      if (typeof detailComp.getIsShowing === 'function') return detailComp.getIsShowing();
+      return safeReadKey(detailComp, 'isShowing');
+    }, false);
+  }
+
+  function snapshotPlantInteractionUiState(manager) {
+    const currentManager = manager || findPlantInteractionManager();
+    const nodes = getPlantInteractionVisibleNodes(currentManager);
+    const detailComp = getPlantInteractionDetailComp(currentManager);
+    return {
+      currentDetailType: currentManager ? safeReadKey(currentManager, 'currentDetailType') : null,
+      currentDragType: currentManager ? safeReadKey(currentManager, 'currentDragType') : null,
+      hasCurrentDragItem: !!(currentManager && safeReadKey(currentManager, 'currentDragItem')),
+      detailCompShowing: isPlantInteractionDetailCompShowing(detailComp),
+      followNodeVisible: !!nodes.followNode,
+      landDetailVisible: !!nodes.landDetail,
+      seedGroupVisible: !!nodes.seedGroup,
+      detailNodeVisible: !!nodes.detailNode,
+      toolInteractionVisible: !!nodes.toolInteractionNode,
+      seedInteractionVisible: !!nodes.seedInteractionNode,
+      detailInteractionVisible: !!nodes.detailInteractionNode,
+      dragPreviewVisible: !!nodes.dragPreview,
+      dragPreviewSpineVisible: !!nodes.dragPreviewSpineNode,
+      followNodePath: nodes.followNode ? fullPath(nodes.followNode) : null,
+      landDetailPath: nodes.landDetail ? fullPath(nodes.landDetail) : null,
+      seedGroupPath: nodes.seedGroup ? fullPath(nodes.seedGroup) : null,
+      detailNodePath: nodes.detailNode ? fullPath(nodes.detailNode) : null,
+      toolInteractionPath: nodes.toolInteractionNode ? fullPath(nodes.toolInteractionNode) : null,
+      seedInteractionPath: nodes.seedInteractionNode ? fullPath(nodes.seedInteractionNode) : null,
+      detailInteractionPath: nodes.detailInteractionNode ? fullPath(nodes.detailInteractionNode) : null,
+      dragPreviewPath: nodes.dragPreview ? fullPath(nodes.dragPreview) : null,
+      dragPreviewSpinePath: nodes.dragPreviewSpineNode ? fullPath(nodes.dragPreviewSpineNode) : null,
+    };
+  }
+
+  function isPlantInteractionUiStateActive(state) {
+    const currentState = state || {};
+    return !!(
+      currentState.currentDragType ||
+      currentState.hasCurrentDragItem ||
+      currentState.detailCompShowing ||
+      currentState.followNodeVisible ||
+      currentState.landDetailVisible ||
+      currentState.seedGroupVisible ||
+      currentState.detailNodeVisible ||
+      currentState.toolInteractionVisible ||
+      currentState.seedInteractionVisible ||
+      currentState.detailInteractionVisible ||
+      currentState.dragPreviewVisible ||
+      currentState.dragPreviewSpineVisible
+    );
+  }
+
+  function forceHidePlantInteractionNode(node) {
+    if (!node || typeof node !== 'object') {
+      return { ok: false, reason: 'node_missing' };
+    }
+    const path = safeCall(function () { return fullPath(node); }, null);
+    safeCall(function () {
+      if (Object.prototype.hasOwnProperty.call(node, 'active')) node.active = false;
+      if (Object.prototype.hasOwnProperty.call(node, '_active')) node._active = false;
+      return true;
+    }, null);
+    return { ok: true, path: path };
+  }
+
+  function disableNodeComponents(node) {
+    if (!node || !Array.isArray(node.components)) return { ok: false, disabledCount: 0 };
+    let disabledCount = 0;
+    safeCall(function () {
+      node.components.forEach(function (comp) {
+        if (!comp || typeof comp !== 'object') return;
+        if (Object.prototype.hasOwnProperty.call(comp, 'enabled')) {
+          comp.enabled = false;
+          disabledCount += 1;
+          return;
+        }
+        if (Object.prototype.hasOwnProperty.call(comp, '_enabled')) {
+          comp._enabled = false;
+          disabledCount += 1;
+        }
+      });
+      return true;
+    }, null);
+    return { ok: true, disabledCount: disabledCount };
+  }
+
+  function forceHidePlantInteractionTree(rootOrNode) {
+    const root = toNode(rootOrNode);
+    if (!root) {
+      return { ok: false, reason: 'root_missing', hiddenCount: 0, disabledComponentCount: 0 };
+    }
+    const nodes = [root].concat(walk(root).slice(1));
+    let hiddenCount = 0;
+    let disabledComponentCount = 0;
+    for (let i = nodes.length - 1; i >= 0; i -= 1) {
+      const node = nodes[i];
+      const hidden = forceHidePlantInteractionNode(node);
+      if (hidden && hidden.ok) hiddenCount += 1;
+      const disabled = disableNodeComponents(node);
+      if (disabled && disabled.ok) {
+        disabledComponentCount += Number(disabled.disabledCount) || 0;
+      }
+      safeCall(function () {
+        if (Object.prototype.hasOwnProperty.call(node, '_activeInHierarchy')) {
+          node._activeInHierarchy = false;
+        }
+        if (Object.prototype.hasOwnProperty.call(node, 'opacity')) {
+          node.opacity = 0;
+        }
+        return true;
+      }, null);
+    }
+    return {
+      ok: true,
+      path: safeCall(function () { return fullPath(root); }, null),
+      hiddenCount: hiddenCount,
+      disabledComponentCount: disabledComponentCount,
+    };
+  }
+
+  function hidePlantInteractionDetailComp(detailComp) {
+    if (!detailComp || typeof detailComp !== 'object') {
+      return { ok: false, reason: 'detail_comp_missing' };
+    }
+    let result = null;
+    let method = null;
+    safeCall(function () {
+      if (typeof detailComp.hideFertilizeDetail === 'function') {
+        method = 'hideFertilizeDetail';
+        result = detailComp.hideFertilizeDetail();
+      } else if (typeof detailComp.hideWithAnimation === 'function') {
+        method = 'hideWithAnimation';
+        result = detailComp.hideWithAnimation();
+      }
+      if (Object.prototype.hasOwnProperty.call(detailComp, 'isShowing')) {
+        detailComp.isShowing = false;
+      }
+      return true;
+    }, null);
+    const detailNode = toNode(safeReadKey(detailComp, 'node'));
+    if (detailNode) {
+      forceHidePlantInteractionNode(detailNode);
+    }
+    return {
+      ok: true,
+      method: method,
+      path: detailNode ? fullPath(detailNode) : null,
+      result: summarizeSpyValue(result, 1),
+    };
+  }
+
+  function clearPlantInteractionManagerState(manager) {
+    if (!manager) {
+      return { ok: false, reason: 'manager_missing' };
+    }
+    safeCall(function () {
+      hidePlantInteractionDetailComp(safeReadKey(manager, 'currentDetailComp'));
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentDragItem')) {
+        manager.currentDragItem = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentDragItemOriginParent')) {
+        manager.currentDragItemOriginParent = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentDragItemOriginPos')) {
+        manager.currentDragItemOriginPos = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentDragType')) {
+        manager.currentDragType = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentDetailType')) {
+        manager.currentDetailType = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentDetailComp')) {
+        manager.currentDetailComp = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentToolNodeInfo')) {
+        manager.currentToolNodeInfo = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentSeedNodeInfo')) {
+        manager.currentSeedNodeInfo = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentTouchPos')) {
+        manager.currentTouchPos = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentData')) {
+        manager.currentData = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'pendingDetailLandId')) {
+        manager.pendingDetailLandId = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'isDragging')) {
+        manager.isDragging = false;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'hasDispatchedDragEvent')) {
+        manager.hasDispatchedDragEvent = false;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'hasPerformedOperation')) {
+        manager.hasPerformedOperation = false;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'detailLongPressTimer')) {
+        manager.detailLongPressTimer = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'detailLongPressTime')) {
+        manager.detailLongPressTime = 0;
+      }
+      return true;
+    }, null);
+    return { ok: true };
+  }
+
+  async function closePlantInteractionUi(manager, opts) {
+    opts = opts || {};
+    const currentManager = manager || findPlantInteractionManager();
+    const waitAfterEach = Math.max(0, Number(opts.waitAfterEach) || 80);
+    const maxCommonCloseAttempts = Math.max(1, Number(opts.maxCommonCloseAttempts) || 2);
+    const actions = [];
+
+    async function runStep(label, invoker) {
+      const before = snapshotPlantInteractionUiState(currentManager);
+      let result = null;
+      let error = null;
+      try {
+        result = invoker();
+      } catch (err) {
+        error = err && err.message ? err.message : String(err || (label + ' failed'));
+      }
+      if (waitAfterEach > 0) {
+        await wait(waitAfterEach);
+      }
+      const after = snapshotPlantInteractionUiState(currentManager);
+      actions.push({
+        label: label,
+        result: summarizeSpyValue(result, 1),
+        error: error,
+        before: before,
+        after: after,
+      });
+      return after;
+    }
+
+    const before = snapshotPlantInteractionUiState(currentManager);
+    const needsCleanup = isPlantInteractionUiStateActive(before);
+    if (!needsCleanup) {
+      return {
+        ok: true,
+        cleaned: true,
+        before: before,
+        after: before,
+        actions: actions,
+      };
+    }
+
+    const landDetailComp = findLandDetailComponent();
+    const detailComp = getPlantInteractionDetailComp(currentManager);
+
+    if (landDetailComp && before.seedGroupVisible && typeof landDetailComp.onSwitchBtnClick === 'function') {
+      await runStep('landDetail.onSwitchBtnClick', function () {
+        return landDetailComp.onSwitchBtnClick();
+      });
+    }
+
+    if (detailComp && (before.detailCompShowing || before.detailNodeVisible)) {
+      await runStep('detailComp.hide', function () {
+        return hidePlantInteractionDetailComp(detailComp);
+      });
+    }
+
+    if (currentManager && typeof currentManager.commonClose === 'function') {
+      for (let i = 0; i < maxCommonCloseAttempts; i += 1) {
+        await runStep('manager.commonClose#' + (i + 1), function () {
+          return currentManager.commonClose();
+        });
+      }
+    }
+
+    if (currentManager && typeof currentManager.hideAllInteractionNodes === 'function') {
+      await runStep('manager.hideAllInteractionNodes', function () {
+        return currentManager.hideAllInteractionNodes();
+      });
+    }
+
+    if (currentManager && typeof currentManager.hideDetailUI === 'function') {
+      await runStep('manager.hideDetailUI', function () {
+        return currentManager.hideDetailUI();
+      });
+    }
+
+    if (currentManager && typeof currentManager.clearInteractionRender === 'function') {
+      await runStep('manager.clearInteractionRender', function () {
+        return currentManager.clearInteractionRender();
+      });
+    }
+
+    if (currentManager && typeof currentManager.restoreGestureToNormal === 'function') {
+      await runStep('manager.restoreGestureToNormal', function () {
+        return currentManager.restoreGestureToNormal();
+      });
+    }
+
+    if (currentManager && typeof currentManager.clearDragPreview === 'function') {
+      await runStep('manager.clearDragPreview', function () {
+        return currentManager.clearDragPreview();
+      });
+    }
+
+    await runStep('clearPlantInteractionManagerState', function () {
+      return clearPlantInteractionManagerState(currentManager);
+    });
+
+    let finalState = snapshotPlantInteractionUiState(currentManager);
+    if (isPlantInteractionUiStateActive(finalState) &&
+        currentManager && typeof currentManager.onGlobalClick === 'function') {
+      finalState = await runStep('manager.onGlobalClick', function () {
+        return currentManager.onGlobalClick();
+      });
+    }
+
+    if (isPlantInteractionUiStateActive(finalState) &&
+        currentManager && typeof currentManager.reset === 'function') {
+      finalState = await runStep('manager.reset', function () {
+        return currentManager.reset();
+      });
+    }
+
+    if (finalState.detailCompShowing) {
+      await runStep('forceHide.detailComp', function () {
+        return hidePlantInteractionDetailComp(getPlantInteractionDetailComp(currentManager));
+      });
+    }
+    if (finalState.landDetailVisible) {
+      await runStep('forceHide.land_detail', function () {
+        return forceHidePlantInteractionNode(findPlantInteractionSubNodeByName('land_detail'));
+      });
+    }
+    if (finalState.followNodeVisible) {
+      await runStep('forceHide.followNode', function () {
+        return forceHidePlantInteractionNode(findPlantInteractionSubNodeByName('followNode'));
+      });
+    }
+    if (finalState.seedGroupVisible) {
+      await runStep('forceHide.seedGroup', function () {
+        return forceHidePlantInteractionNode(findPlantInteractionSubNodeByName('seedGroup'));
+      });
+    }
+    if (finalState.detailNodeVisible) {
+      await runStep('forceHide.detailNode', function () {
+        return forceHidePlantInteractionNode(findPlantInteractionSubNodeByName('detailNode'));
+      });
+    }
+    if (finalState.toolInteractionVisible) {
+      await runStep('forceHide.toolInteractionNode', function () {
+        return forceHidePlantInteractionNode(toNode(currentManager && safeReadKey(currentManager, 'toolInteractionNode')));
+      });
+    }
+    if (finalState.seedInteractionVisible) {
+      await runStep('forceHide.seedInteractionNode', function () {
+        return forceHidePlantInteractionNode(toNode(currentManager && safeReadKey(currentManager, 'seedInteractionNode')));
+      });
+    }
+    if (finalState.detailInteractionVisible) {
+      await runStep('forceHide.detailInteractionNode', function () {
+        return forceHidePlantInteractionNode(toNode(currentManager && safeReadKey(currentManager, 'detailInteractionNode')));
+      });
+    }
+    if (finalState.dragPreviewVisible) {
+      await runStep('forceHide.dragPreview', function () {
+        return forceHidePlantInteractionNode(toNode(currentManager && safeReadKey(currentManager, 'dragPreview')));
+      });
+    }
+    if (finalState.dragPreviewSpineVisible) {
+      await runStep('forceHide.dragPreviewSpineNode', function () {
+        return forceHidePlantInteractionNode(toNode(currentManager && safeReadKey(currentManager, 'dragPreviewSpineNode')));
+      });
+    }
+    if (isPlantInteractionUiStateActive(finalState)) {
+      await runStep('forceHide.interactionRootTree', function () {
+        return forceHidePlantInteractionTree(getPlantInteractionRoot());
+      });
+    }
+
+    const after = snapshotPlantInteractionUiState(currentManager);
+    return {
+      ok: true,
+      cleaned: !isPlantInteractionUiStateActive(after),
+      before: before,
+      after: after,
+      actions: actions,
+    };
+  }
+
+  async function closePlantInteractionUiRpc(opts) {
+    return await closePlantInteractionUi(findPlantInteractionManager(), opts || {});
+  }
+
+  async function dismissLandUpgradeOverlay(opts) {
+    opts = opts || {};
+    const detected = detectActiveOverlays({
+      silent: true,
+      limit: 3,
+      minAreaRatio: opts.minAreaRatio == null ? 0.12 : opts.minAreaRatio,
+      keywords: [
+        '土地升级', '升级', '黑土地', '金土地', 'upgrade'
+      ],
+      excludeKeywords: [
+        'reward', 'award', 'prize', 'gift', '仓库', '商店', '背包'
+      ],
+      closeKeywords: [
+        'close', 'btn_close', 'cancel', 'ok', 'confirm', 'sure', 'x',
+        '关闭', '取消', '确定'
+      ],
+    });
+    const target = detected && Array.isArray(detected.list)
+      ? detected.list.find(function (item) {
+          const texts = Array.isArray(item && item.texts) ? item.texts : [];
+          return matchesKeywords(texts, ['土地升级', '黑土地', '金土地', '升级']);
+        }) || null
+      : null;
+    if (!target) {
+      return {
+        ok: false,
+        reason: 'land_upgrade_overlay_not_found',
+        detected: detected,
+      };
+    }
+    return await dismissOverlayTarget(target, {
+      silent: true,
+      waitAfter: opts.waitAfter == null ? 220 : opts.waitAfter,
+    });
+  }
+
+  function summarizeFertilizeLandResult(result) {
+    const src = result && typeof result === 'object' ? result : {};
+    const before = src && src.before && typeof src.before === 'object' ? src.before : null;
+    const after = src && src.after && typeof src.after === 'object' ? src.after : null;
+    return {
+      ok: src.ok === true,
+      action: src.action || null,
+      landId: toFiniteNumber(src.landId),
+      plantName: src.plantName ? String(src.plantName) : null,
+      requestedMode: src.requestedMode ? String(src.requestedMode) : null,
+      resolvedMode: src.resolvedMode ? String(src.resolvedMode) : null,
+      reason: src.reason ? String(src.reason) : null,
+      executionSource: src.executionSource ? String(src.executionSource) : null,
+      before: before ? {
+        stageKind: before.stageKind || null,
+        matureInSec: toFiniteNumber(before.matureInSec),
+        currentSeason: toFiniteNumber(before.currentSeason),
+        totalSeason: toFiniteNumber(before.totalSeason),
+      } : null,
+      after: after ? {
+        stageKind: after.stageKind || null,
+        matureInSec: toFiniteNumber(after.matureInSec),
+        currentSeason: toFiniteNumber(after.currentSeason),
+        totalSeason: toFiniteNumber(after.totalSeason),
+      } : null,
+      deltaMatureInSec: toFiniteNumber(src.deltaMatureInSec),
+      selectedBucketDeltaCount: toFiniteNumber(src.selectedBucketDeltaCount),
+    };
+  }
+
+  function shouldRetryBatchFertilizerSwitch(reasonLike) {
+    const text = String(
+      reasonLike && typeof reasonLike === 'object'
+        ? (reasonLike.reason || reasonLike.error || reasonLike.message || '')
+        : (reasonLike || '')
+    ).trim().toLowerCase();
+    if (!text) return false;
+    return text === 'action_panel_not_ready' ||
+      text === 'action_node_missing' ||
+      text === 'plant interaction manager not found' ||
+      text === 'direct_bucket_state_not_ready' ||
+      text === 'bucket_state_not_applied' ||
+      text.indexOf('panel not ready') >= 0 ||
+      text.indexOf('action node missing') >= 0 ||
+      text.indexOf('drag item not ready') >= 0 ||
+      text.indexOf('bucket state not ready') >= 0 ||
+      text.indexOf('interaction manager') >= 0;
+  }
+
+  function shouldAbortBatchFertilizer(reasonLike) {
+    const text = String(
+      reasonLike && typeof reasonLike === 'object'
+        ? (reasonLike.reason || reasonLike.error || reasonLike.message || '')
+        : (reasonLike || '')
+    ).trim().toLowerCase();
+    if (!text) return false;
+    return text.indexOf('no fertilizer available') >= 0 ||
+      text.indexOf('normal fertilizer not available') >= 0 ||
+      text.indexOf('organic fertilizer not available') >= 0;
+  }
+
+  async function fertilizeLandsBatch(opts) {
+    opts = opts || {};
+    const requestedLandIds = normalizeLandIds(
+      Array.isArray(opts.landIds) ? opts.landIds :
+      (Array.isArray(opts.landIdList) ? opts.landIdList :
+      (opts.landId != null ? [opts.landId] : []))
+    );
+    if (requestedLandIds.length === 0) throw new Error('landIds required');
+
+    const rawMode = String(opts.type || opts.mode || 'auto').trim().toLowerCase();
+    const dryRun = opts.dryRun !== false;
+    const useInternalFallback = opts.internalFallback === true;
+    const waitAfterOpen = Math.max(100, Number(opts.waitAfterOpen) || 350);
+    const waitAfterAction = Math.max(100, Number(opts.waitAfterAction) || 500);
+    const switchWaitAfterOpenRaw = toFiniteNumber(opts.switchWaitAfterOpen);
+    const switchWaitAfterOpen = Math.max(80, switchWaitAfterOpenRaw != null ? switchWaitAfterOpenRaw : Math.min(waitAfterOpen, 180));
+    const betweenLandWaitRaw = toFiniteNumber(opts.betweenLandWait);
+    const betweenLandWait = Math.max(0, betweenLandWaitRaw != null ? betweenLandWaitRaw : 80);
+    const retryResetWaitRaw = toFiniteNumber(opts.retryResetWait);
+    const retryResetWait = Math.max(0, retryResetWaitRaw != null ? retryResetWaitRaw : 120);
+    const shouldCleanupUi = opts.cleanupUi !== false;
+    const cleanupWaitAfterEach = Math.min(120, Math.max(60, Math.floor(waitAfterAction / 4) || 0));
+    const results = [];
+    let abortedReason = null;
+    let closeUi = null;
+
+    const closeInteractionUi = async function () {
+      try {
+        const closed = await closePlantInteractionUi(findPlantInteractionManager(), {
+          waitAfterEach: cleanupWaitAfterEach,
+          maxCommonCloseAttempts: 2,
+        });
+        return {
+          ok: closed && closed.ok === true,
+          cleaned: closed && closed.cleaned === true,
+          error: closed && closed.error ? String(closed.error) : null,
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          cleaned: false,
+          error: error && error.message ? error.message : String(error || 'closePlantInteractionUi failed'),
+        };
+      }
+    };
+
+    try {
+      for (let i = 0; i < requestedLandIds.length; i += 1) {
+        const landId = requestedLandIds[i];
+        let entry = null;
+
+        for (let attemptIndex = 0; attemptIndex < 2; attemptIndex += 1) {
+          const retriedAfterReset = attemptIndex > 0;
+          if (retriedAfterReset) {
+            await closeInteractionUi();
+            if (retryResetWait > 0) {
+              await wait(retryResetWait);
+            }
+          }
+
+          try {
+            const rawResult = await fertilizeLand({
+              type: rawMode,
+              dryRun: dryRun,
+              internalFallback: useInternalFallback,
+              cleanupUi: false,
+              landId: landId,
+              waitAfterOpen: (i === 0 || retriedAfterReset) ? waitAfterOpen : switchWaitAfterOpen,
+              waitAfterAction: waitAfterAction,
+              silent: true,
+            });
+            entry = {
+              index: i,
+              landId: landId,
+              retriedAfterReset: retriedAfterReset,
+              ...summarizeFertilizeLandResult(rawResult),
+              error: null,
+            };
+            if (attemptIndex === 0 && i > 0 && entry.ok !== true && shouldRetryBatchFertilizerSwitch(entry.reason)) {
+              continue;
+            }
+            break;
+          } catch (error) {
+            const errorMessage = error && error.message ? error.message : String(error || 'fertilizeLand failed');
+            entry = {
+              index: i,
+              landId: landId,
+              retriedAfterReset: retriedAfterReset,
+              ok: false,
+              action: null,
+              plantName: null,
+              requestedMode: rawMode || null,
+              resolvedMode: rawMode === 'auto' ? null : rawMode,
+              reason: null,
+              executionSource: null,
+              before: null,
+              after: null,
+              deltaMatureInSec: null,
+              selectedBucketDeltaCount: null,
+              error: errorMessage,
+            };
+            if (attemptIndex === 0 && i > 0 && shouldRetryBatchFertilizerSwitch(errorMessage)) {
+              continue;
+            }
+            break;
+          }
+        }
+
+        if (!entry) {
+          entry = {
+            index: i,
+            landId: landId,
+            retriedAfterReset: false,
+            ok: false,
+            action: null,
+            plantName: null,
+            requestedMode: rawMode || null,
+            resolvedMode: rawMode === 'auto' ? null : rawMode,
+            reason: null,
+            executionSource: null,
+            before: null,
+            after: null,
+            deltaMatureInSec: null,
+            selectedBucketDeltaCount: null,
+            error: 'fertilize_batch_unknown_error',
+          };
+        }
+
+        results.push(entry);
+
+        const failureReason = entry.reason || entry.error || '';
+        if (shouldAbortBatchFertilizer(failureReason)) {
+          abortedReason = failureReason;
+          break;
+        }
+
+        if (betweenLandWait > 0 && i < requestedLandIds.length - 1) {
+          await wait(betweenLandWait);
+        }
+      }
+    } finally {
+      if (shouldCleanupUi) {
+        closeUi = await closeInteractionUi();
+      }
+    }
+
+    const successCount = results.filter(function (item) { return item && item.ok === true; }).length;
+    const failureCount = results.filter(function (item) { return item && item.ok === false; }).length;
+
+    const payload = {
+      ok: failureCount === 0 && !abortedReason,
+      action: 'fertilize_batch',
+      requestedMode: rawMode || null,
+      landIds: requestedLandIds,
+      processedCount: results.length,
+      successCount: successCount,
+      failureCount: failureCount,
+      aborted: !!abortedReason,
+      reason: abortedReason || null,
+      closeUi: closeUi,
+      results: results,
+    };
+    return opts.silent ? payload : out(payload);
+  }
+
+  async function fertilizeLand(opts) {
+    opts = opts || {};
+    const rawMode = String(opts.type || opts.mode || 'auto').trim().toLowerCase();
+    const mode = rawMode === 'inorganic' ? 'normal' : rawMode;
+    const dryRun = opts.dryRun !== false;
+    const useInternalFallback = opts.internalFallback === true;
+    const waitAfterOpen = Math.max(100, Number(opts.waitAfterOpen) || 350);
+    const waitAfterAction = Math.max(100, Number(opts.waitAfterAction) || 500);
+
+    let targetNode = null;
+    if (opts.path) targetNode = toNode(opts.path);
+    if (!targetNode && opts.landId != null) {
+      targetNode = findGridNodeByLandId(opts.landId);
+    }
+    if (!targetNode) throw new Error('Target land not found');
+
+    const ownership = getFarmOwnership({ silent: true, allowWeakUi: true });
+    if (ownership && ownership.farmType && ownership.farmType !== 'own') {
+      throw new Error('fertilize only supported in own farm');
+    }
+
+    const before = getGridState(targetNode, { silent: true, farmType: 'own' });
+    const itemM = getItemManager();
+    const hasNormal = typeof itemM.hasNormalFertilizer === 'function'
+      ? !!safeCall(function () { return itemM.hasNormalFertilizer(); }, false)
+      : false;
+    const hasOrganic = typeof itemM.hasOrganicFertilizer === 'function'
+      ? !!safeCall(function () { return itemM.hasOrganicFertilizer(); }, false)
+      : false;
+    const resolvedMode = mode === 'auto'
+      ? (hasNormal ? 'normal' : (hasOrganic ? 'organic' : 'none'))
+      : mode;
+
+    if (resolvedMode === 'none') {
+      throw new Error('no fertilizer available');
+    }
+    if (resolvedMode !== 'normal' && resolvedMode !== 'organic') {
+      throw new Error('unsupported fertilizer mode: ' + resolvedMode);
+    }
+    if (resolvedMode === 'normal' && !hasNormal) {
+      throw new Error('normal fertilizer not available');
+    }
+    if (resolvedMode === 'organic' && !hasOrganic) {
+      throw new Error('organic fertilizer not available');
+    }
+
+    let manager = null;
+    const shouldAutoCleanupUi = opts.cleanupUi !== false;
+    let shouldCleanupUi = false;
+    try {
+      openLandInteraction(targetNode);
+      shouldCleanupUi = true;
+      await wait(waitAfterOpen);
+
+      manager = findPlantInteractionManager();
+      if (!manager) throw new Error('plant interaction manager not found');
+      await syncLandDetailToTarget(targetNode, manager, {
+        waitAfter: Math.min(waitAfterOpen, 220),
+      });
+
+    const targetArgForCheck = before.landId != null ? before.landId : before.path;
+    const managerCanFertilize = typeof manager.canFertilize === 'function'
+      ? !!safeCall(function () { return manager.canFertilize(targetArgForCheck); }, false)
+      : null;
+    const plantRuntime = getPlantRuntime(targetNode);
+    const plantCanFertilize = plantRuntime && typeof plantRuntime.canFertilize === 'function'
+      ? !!safeCall(function () { return plantRuntime.canFertilize(); }, false)
+      : null;
+
+    const payload = {
+      ok: true,
+      action: dryRun ? 'dry_run' : 'fertilized',
+      requestedMode: rawMode,
+      resolvedMode: resolvedMode,
+      landId: before.landId,
+      path: before.path,
+      plantName: before.plantName,
+      before: {
+        stageKind: before.stageKind,
+        matureInSec: before.matureInSec,
+        currentSeason: before.currentSeason,
+        totalSeason: before.totalSeason,
+      },
+      checks: {
+        managerCanFertilize: managerCanFertilize,
+        plantCanFertilize: plantCanFertilize,
+        hasNormal: hasNormal,
+        hasOrganic: hasOrganic,
+      },
+    };
+
+    if (!managerCanFertilize && !plantCanFertilize) {
+      throw new Error('target land is not fertilizable right now');
+    }
+
+    const fertilizerItem = findBestFertilizerDetailItem(itemM, resolvedMode);
+    payload.fertilizerItem = summarizeInventoryEntry(fertilizerItem);
+    const directBucketState = prepareDirectFertilizerBucketState(manager, itemM, resolvedMode);
+    const selectedBucket = directBucketState.primaryBucket ||
+      findFirstCurrentDataFertilizerBucket(manager, resolvedMode);
+    payload.selectedBucket = summarizeInventoryEntry(selectedBucket);
+    payload.selectedBucketApplied = !!directBucketState.applied;
+    payload.targetArg = targetArgForCheck;
+    payload.directBucketState = {
+      applied: !!directBucketState.applied,
+      reason: directBucketState.reason,
+      preferredBucketId: directBucketState.preferredBucketId,
+      availableBuckets: directBucketState.availableBuckets,
+      orderedBuckets: directBucketState.orderedBuckets,
+      beforeState: directBucketState.beforeState,
+      afterState: directBucketState.afterState,
+      dragReset: directBucketState.dragReset || null,
+      dragEnsure: directBucketState.dragEnsure || null,
+    };
+    payload.actionNode = null;
+    payload.actionPanelReady = null;
+    payload.interactionNodePrimed = false;
+    payload.checks.managerCanFertilizeAfterPrime = null;
+    payload.detailPrimed = false;
+    payload.detailPrimeSource = null;
+    payload.detailPrimeAttempts = [];
+    payload.managerStateAfterPrime = directBucketState.afterState || {
+      currentDetailType: safeReadKey(manager, 'currentDetailType'),
+      currentDragType: safeReadKey(manager, 'currentDragType'),
+      currentToolNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentToolNodeInfo')),
+      currentSeedNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentSeedNodeInfo')),
+      currentDetailComp: summarizeRuntimeObject(safeReadKey(manager, 'currentDetailComp'), 'currentDetailComp'),
+      currentDragState: summarizeCurrentDragState(manager),
+    };
+
+    if (dryRun) {
+      payload.wouldCall = 'openLandInteraction(targetLand) -> prepareDirectFertilizerBucketState(mode) -> performFertilizing(landId)';
+      payload.internalFallbackEnabled = useInternalFallback;
+      payload.targetArgCandidates = {
+        landId: before.landId,
+        path: before.path,
+      };
+      if (!directBucketState.applied || !selectedBucket) {
+        payload.ok = false;
+        payload.reason = !selectedBucket ? 'direct_bucket_missing' : 'direct_bucket_state_not_ready';
+      }
+      return opts.silent ? payload : out(payload);
+    }
+
+    const executionAttempts = [];
+    function runAttempt(label, invoker) {
+      let result = null;
+      let error = null;
+      try {
+        result = invoker();
+      } catch (err) {
+        error = err && err.message ? err.message : String(err || (label + ' failed'));
+      }
+      executionAttempts.push({
+        label: label,
+        result: summarizeSpyValue(result, 1),
+        error: error,
+        state: {
+          currentDetailType: safeReadKey(manager, 'currentDetailType'),
+          currentDragType: safeReadKey(manager, 'currentDragType'),
+          currentDataItems: summarizeInventoryArray(safeReadKey(manager, 'currentData'), 8),
+          currentDetailComp: summarizeRuntimeObject(safeReadKey(manager, 'currentDetailComp'), 'currentDetailComp'),
+          currentDragState: summarizeCurrentDragState(manager),
+        },
+      });
+      return { result: result, error: error };
+    }
+
+    const performArg = targetArgForCheck;
+    payload.performArg = performArg;
+    payload.selectedBucketCountBefore = getLiveFertilizerBucketCount(itemM, selectedBucket);
+    let performError = null;
+    let performResult = null;
+    let actionTapResult = null;
+    let actionTapError = null;
+    let postTap = null;
+    let landRetapResult = null;
+    let landRetapError = null;
+    let postLandRetap = null;
+    let postDirectManager = null;
+    let postDirectTargetPrimed = null;
+
+    const directManagerTry = runAttempt('prepareDirectFertilizerBucketState(mode)->performFertilizing(targetArg)', function () {
+      const prepared = prepareDirectFertilizerBucketState(manager, itemM, resolvedMode);
+      if (!prepared.applied || !prepared.primaryBucket) {
+        throw new Error(prepared.reason || 'direct fertilizer bucket state not ready');
+      }
+      const dragReady = ensureCurrentDragItemForBucket(manager, prepared.primaryBucket);
+      if (!dragReady.ensured) {
+        throw new Error(dragReady.reason || 'direct fertilizer drag item not ready');
+      }
+      if (typeof manager.performFertilizing === 'function') return manager.performFertilizing(performArg);
+      return null;
+    });
+    performResult = directManagerTry.result;
+    performError = directManagerTry.error;
+    await wait(Math.max(waitAfterAction, 700));
+    postDirectManager = getGridState(targetNode, { silent: true, farmType: 'own' });
+    payload.postDirectManager = {
+      stageKind: postDirectManager.stageKind,
+      matureInSec: postDirectManager.matureInSec,
+      currentSeason: postDirectManager.currentSeason,
+      totalSeason: postDirectManager.totalSeason,
+    };
+    payload.deltaAfterDirectManagerMatureInSec = Number(before.matureInSec) && Number(postDirectManager.matureInSec)
+      ? Number(postDirectManager.matureInSec) - Number(before.matureInSec)
+      : null;
+    payload.selectedBucketCountAfterDirectManager = getLiveFertilizerBucketCount(itemM, selectedBucket);
+    payload.selectedBucketDeltaAfterDirectManager = payload.selectedBucketCountAfterDirectManager != null && payload.selectedBucketCountBefore != null
+      ? payload.selectedBucketCountAfterDirectManager - payload.selectedBucketCountBefore
+      : null;
+    payload.managerStateAfterDirectManager = {
+      currentDetailType: safeReadKey(manager, 'currentDetailType'),
+      currentDragType: safeReadKey(manager, 'currentDragType'),
+      currentToolNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentToolNodeInfo')),
+      currentSeedNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentSeedNodeInfo')),
+      currentDetailComp: summarizeRuntimeObject(safeReadKey(manager, 'currentDetailComp'), 'currentDetailComp'),
+      currentDataState: summarizeCurrentDataState(manager),
+      currentDragState: summarizeCurrentDragState(manager),
+    };
+    if ((typeof payload.selectedBucketDeltaAfterDirectManager === 'number' && payload.selectedBucketDeltaAfterDirectManager < 0) ||
+        (typeof payload.deltaAfterDirectManagerMatureInSec === 'number' && payload.deltaAfterDirectManagerMatureInSec < -5)) {
+      payload.ok = true;
+      payload.performResult = performResult;
+      payload.performError = performError;
+      payload.executionAttempts = executionAttempts;
+      payload.after = payload.postDirectManager;
+      payload.deltaMatureInSec = payload.deltaAfterDirectManagerMatureInSec;
+      payload.executionSource = 'direct_bucket_perform';
+      return opts.silent ? payload : out(payload);
+    }
+
+    const directTargetPrimedTry = runAttempt('prepareDirectFertilizerBucketState(mode)->setCurrentData(targetArg)->selectAppropriateInteractionNode()->attemptLandInteraction(center)->performFertilizing(targetArg)', function () {
+      const prepared = prepareDirectFertilizerBucketState(manager, itemM, resolvedMode);
+      if (!prepared.applied || !prepared.primaryBucket) {
+        throw new Error(prepared.reason || 'direct fertilizer bucket state not ready');
+      }
+      if (typeof manager.setCurrentData === 'function' && performArg != null) {
+        manager.setCurrentData(performArg);
+      }
+      if (typeof manager.selectAppropriateInteractionNode === 'function') {
+        manager.selectAppropriateInteractionNode();
+      }
+      invokeManagerAttemptLandInteraction(manager, targetNode);
+      const dragReady = ensureCurrentDragItemForBucket(manager, prepared.primaryBucket);
+      if (!dragReady.ensured) {
+        throw new Error(dragReady.reason || 'direct fertilizer drag item not ready');
+      }
+      if (typeof manager.performFertilizing === 'function') return manager.performFertilizing(performArg);
+      return null;
+    });
+    performResult = directTargetPrimedTry.result;
+    performError = directTargetPrimedTry.error;
+    await wait(Math.max(waitAfterAction, 700));
+    postDirectTargetPrimed = getGridState(targetNode, { silent: true, farmType: 'own' });
+    payload.postDirectTargetPrimed = {
+      stageKind: postDirectTargetPrimed.stageKind,
+      matureInSec: postDirectTargetPrimed.matureInSec,
+      currentSeason: postDirectTargetPrimed.currentSeason,
+      totalSeason: postDirectTargetPrimed.totalSeason,
+    };
+    payload.deltaAfterDirectTargetPrimedMatureInSec = Number(before.matureInSec) && Number(postDirectTargetPrimed.matureInSec)
+      ? Number(postDirectTargetPrimed.matureInSec) - Number(before.matureInSec)
+      : null;
+    payload.selectedBucketCountAfterDirectTargetPrimed = getLiveFertilizerBucketCount(itemM, selectedBucket);
+    payload.selectedBucketDeltaAfterDirectTargetPrimed = payload.selectedBucketCountAfterDirectTargetPrimed != null && payload.selectedBucketCountBefore != null
+      ? payload.selectedBucketCountAfterDirectTargetPrimed - payload.selectedBucketCountBefore
+      : null;
+    payload.managerStateAfterDirectTargetPrimed = {
+      currentDetailType: safeReadKey(manager, 'currentDetailType'),
+      currentDragType: safeReadKey(manager, 'currentDragType'),
+      currentToolNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentToolNodeInfo')),
+      currentSeedNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentSeedNodeInfo')),
+      currentDetailComp: summarizeRuntimeObject(safeReadKey(manager, 'currentDetailComp'), 'currentDetailComp'),
+      currentDataState: summarizeCurrentDataState(manager),
+      currentDragState: summarizeCurrentDragState(manager),
+    };
+    if ((typeof payload.selectedBucketDeltaAfterDirectTargetPrimed === 'number' && payload.selectedBucketDeltaAfterDirectTargetPrimed < 0) ||
+        (typeof payload.deltaAfterDirectTargetPrimedMatureInSec === 'number' && payload.deltaAfterDirectTargetPrimedMatureInSec < -5)) {
+      payload.ok = true;
+      payload.performResult = performResult;
+      payload.performError = performError;
+      payload.executionAttempts = executionAttempts;
+      payload.after = payload.postDirectTargetPrimed;
+      payload.deltaMatureInSec = payload.deltaAfterDirectTargetPrimedMatureInSec;
+      payload.executionSource = 'direct_target_primed_perform';
+      return opts.silent ? payload : out(payload);
+    }
+
+    const directToolActionPanelReady = await ensureFertilizerActionPanel(manager);
+    const directToolActionNode = findFertilizerActionNode(resolvedMode, manager, selectedBucket);
+    payload.directToolActionPanelReady = directToolActionPanelReady;
+    payload.directToolActionNode = summarizeNodeForClick(directToolActionNode);
+    const preDirectToolBucketState = prepareDirectFertilizerBucketState(manager, itemM, resolvedMode);
+    payload.preDirectToolBucketState = {
+      applied: !!preDirectToolBucketState.applied,
+      reason: preDirectToolBucketState.reason || null,
+      dragReset: preDirectToolBucketState.dragReset || null,
+      dragEnsure: preDirectToolBucketState.dragEnsure || null,
+      currentDataItems: summarizeInventoryArray(safeReadKey(manager, 'currentData'), 8),
+      currentDragState: summarizeCurrentDragState(manager),
+    };
+    if (directToolActionNode) {
+      let directToolTapResult = false;
+      let directToolTapError = null;
+      const expectedBucketId = Number(selectedBucket && safeReadKey(selectedBucket, 'id')) || 0;
+      const directToolTapAttempts = [];
+      try {
+        for (let attemptIndex = 0; attemptIndex < 2; attemptIndex += 1) {
+          const attempt = {
+            index: attemptIndex + 1,
+            expectedBucketId: expectedBucketId || null,
+            beforeDragBucketId: getCurrentDragItemBucketId(manager) || null,
+            touchMethod: null,
+            dragReset: clearCurrentDragItemIfBucketMismatch(manager, selectedBucket),
+            afterDragBucketId: null,
+          };
+          if (attemptIndex > 0) {
+            const retryState = prepareDirectFertilizerBucketState(manager, itemM, resolvedMode);
+            attempt.retryPrepare = {
+              applied: !!retryState.applied,
+              reason: retryState.reason || null,
+              dragReset: retryState.dragReset || null,
+            };
+          }
+          if (!invokeManagerToolTouch(manager, directToolActionNode)) {
+            emitNodeTouch(directToolActionNode);
+            attempt.touchMethod = 'emitNodeTouch';
+          } else {
+            attempt.touchMethod = 'managerToolTouch';
+          }
+          await wait(80);
+          if (!safeReadKey(manager, 'currentDragItem')) {
+            emitNodeTouch(directToolActionNode);
+            attempt.touchMethod = attempt.touchMethod + '+emitNodeTouch';
+            await wait(80);
+          }
+          attempt.dragEnsure = ensureCurrentDragItemForBucket(manager, selectedBucket);
+          attempt.afterDragBucketId = getCurrentDragItemBucketId(manager) || null;
+          directToolTapAttempts.push(attempt);
+          if (!expectedBucketId || attempt.afterDragBucketId === expectedBucketId) {
+            directToolTapResult = true;
+            break;
+          }
+        }
+        if (!directToolTapResult && expectedBucketId) {
+          directToolTapError = 'drag bucket mismatch, expected=' + expectedBucketId + ', actual=' + (getCurrentDragItemBucketId(manager) || 0);
+        }
+      } catch (err) {
+        directToolTapError = err && err.message ? err.message : String(err || 'direct tool tap failed');
+      }
+      await wait(Math.max(waitAfterAction, 180));
+      payload.directToolTap = {
+        result: directToolTapResult,
+        error: directToolTapError,
+        expectedBucketId: expectedBucketId || null,
+        actualBucketId: getCurrentDragItemBucketId(manager) || null,
+        attempts: directToolTapAttempts,
+        currentDataItems: summarizeInventoryArray(safeReadKey(manager, 'currentData'), 8),
+        currentDataState: summarizeCurrentDataState(manager),
+        currentDragState: summarizeCurrentDragState(manager),
+      };
+
+      if (typeof manager.setCurrentData === 'function' && performArg != null) {
+        runAttempt('setCurrentData(targetArg) [after direct tool tap]', function () {
+          return manager.setCurrentData(performArg);
+        });
+        await wait(60);
+      }
+      if (typeof manager.selectAppropriateInteractionNode === 'function') {
+        runAttempt('selectAppropriateInteractionNode() [after direct tool tap]', function () {
+          return manager.selectAppropriateInteractionNode();
+        });
+        await wait(120);
+      }
+
+      const directToolPostPrimeDragReset = clearCurrentDragItemIfBucketMismatch(manager, selectedBucket);
+      payload.directToolPostPrimeDragReset = directToolPostPrimeDragReset;
+      if (directToolPostPrimeDragReset && directToolPostPrimeDragReset.cleared) {
+        try {
+          if (!invokeManagerToolTouch(manager, directToolActionNode)) {
+            emitNodeTouch(directToolActionNode);
+          }
+          await wait(100);
+        } catch (_) {}
+      }
+
+      const directToolLandInteraction = invokeManagerAttemptLandInteraction(manager, targetNode);
+      payload.directToolLandInteraction = directToolLandInteraction;
+      executionAttempts.push({
+        label: 'attemptLandInteraction(after_direct_tool_tap)',
+        result: summarizeSpyValue(directToolLandInteraction, 2),
+        error: directToolLandInteraction && directToolLandInteraction.error
+          ? directToolLandInteraction.error
+          : directToolLandInteraction && directToolLandInteraction.reason
+            ? directToolLandInteraction.reason
+            : null,
+        state: {
+          currentDetailType: safeReadKey(manager, 'currentDetailType'),
+          currentDragType: safeReadKey(manager, 'currentDragType'),
+          currentDataItems: summarizeInventoryArray(safeReadKey(manager, 'currentData'), 8),
+          currentDetailComp: summarizeRuntimeObject(safeReadKey(manager, 'currentDetailComp'), 'currentDetailComp'),
+          currentDragState: summarizeCurrentDragState(manager),
+        },
+      });
+      await wait(directToolLandInteraction && directToolLandInteraction.called ? 120 : 60);
+
+      const directToolPerformTry = runAttempt('performFertilizing(targetArg) [after direct tool tap]', function () {
+        const dragReady = ensureCurrentDragItemForBucket(manager, selectedBucket);
+        if (!dragReady.ensured) {
+          throw new Error(dragReady.reason || 'direct tool drag item not ready');
+        }
+        if (typeof manager.performFertilizing === 'function') return manager.performFertilizing(performArg);
+        return null;
+      });
+      performResult = directToolPerformTry.result;
+      performError = directToolPerformTry.error;
+      await wait(Math.max(waitAfterAction, 700));
+      const postDirectToolPerform = getGridState(targetNode, { silent: true, farmType: 'own' });
+      payload.postDirectToolPerform = {
+        stageKind: postDirectToolPerform.stageKind,
+        matureInSec: postDirectToolPerform.matureInSec,
+        currentSeason: postDirectToolPerform.currentSeason,
+        totalSeason: postDirectToolPerform.totalSeason,
+      };
+      payload.deltaAfterDirectToolPerformMatureInSec = Number(before.matureInSec) && Number(postDirectToolPerform.matureInSec)
+        ? Number(postDirectToolPerform.matureInSec) - Number(before.matureInSec)
+        : null;
+      payload.selectedBucketCountAfterDirectToolPerform = getLiveFertilizerBucketCount(itemM, selectedBucket);
+      payload.selectedBucketDeltaAfterDirectToolPerform = payload.selectedBucketCountAfterDirectToolPerform != null && payload.selectedBucketCountBefore != null
+        ? payload.selectedBucketCountAfterDirectToolPerform - payload.selectedBucketCountBefore
+        : null;
+      payload.managerStateAfterDirectToolPerform = {
+        currentDetailType: safeReadKey(manager, 'currentDetailType'),
+        currentDragType: safeReadKey(manager, 'currentDragType'),
+        currentToolNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentToolNodeInfo')),
+        currentSeedNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentSeedNodeInfo')),
+        currentDetailComp: summarizeRuntimeObject(safeReadKey(manager, 'currentDetailComp'), 'currentDetailComp'),
+        currentDataState: summarizeCurrentDataState(manager),
+        currentDragState: summarizeCurrentDragState(manager),
+      };
+      if ((typeof payload.selectedBucketDeltaAfterDirectToolPerform === 'number' && payload.selectedBucketDeltaAfterDirectToolPerform < 0) ||
+          (typeof payload.deltaAfterDirectToolPerformMatureInSec === 'number' && payload.deltaAfterDirectToolPerformMatureInSec < -5)) {
+        payload.ok = true;
+        payload.performResult = performResult;
+        payload.performError = performError;
+        payload.executionAttempts = executionAttempts;
+        payload.after = payload.postDirectToolPerform;
+        payload.deltaMatureInSec = payload.deltaAfterDirectToolPerformMatureInSec;
+        payload.executionSource = 'direct_tool_selected_perform';
+        return opts.silent ? payload : out(payload);
+      }
+    }
+
+    if (useInternalFallback) {
+      primeFertilizerToolNodes(manager, selectedBucket, targetArgForCheck);
+      await wait(120);
+
+      const actionPanelReady = await ensureFertilizerActionPanel(manager);
+      const actionNode = findFertilizerActionNode(resolvedMode, manager, selectedBucket);
+      payload.actionNode = actionNode ? {
+        path: fullPath(actionNode),
+        name: actionNode.name || null,
+        texts: getNodeTextList(actionNode, { maxDepth: 2 }).slice(0, 6),
+      } : null;
+      payload.actionPanelReady = actionPanelReady;
+
+      let interactionNodePrimed = false;
+      if (typeof manager.selectAppropriateInteractionNode === 'function') {
+        safeCall(function () {
+          manager.selectAppropriateInteractionNode();
+          return true;
+        }, null);
+        await wait(80);
+        interactionNodePrimed = true;
+      }
+      payload.interactionNodePrimed = interactionNodePrimed;
+      payload.checks.managerCanFertilizeAfterPrime = typeof manager.canFertilize === 'function'
+        ? !!safeCall(function () { return manager.canFertilize(targetArgForCheck); }, false)
+        : null;
+      payload.managerStateAfterPrime = {
+        currentDetailType: safeReadKey(manager, 'currentDetailType'),
+        currentDragType: safeReadKey(manager, 'currentDragType'),
+        currentToolNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentToolNodeInfo')),
+        currentSeedNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentSeedNodeInfo')),
+        currentDetailComp: summarizeRuntimeObject(safeReadKey(manager, 'currentDetailComp'), 'currentDetailComp'),
+        currentDragState: summarizeCurrentDragState(manager),
+      };
+
+      const directDetailPrime = primeDirectFertilizerDetail(manager, itemM, fertilizerItem);
+      payload.detailPrimed = !!directDetailPrime.primed;
+      payload.detailPrimeSource = directDetailPrime.usedCandidate;
+      payload.detailPrimeAttempts = directDetailPrime.attempts;
+
+      const directSelectionArg = fertilizerItem || selectedBucket || performArg;
+      safeCall(function () {
+        if (typeof manager.commonClose === 'function') return manager.commonClose();
+        return null;
+      }, null);
+      await wait(80);
+
+      if (actionNode) {
+      try {
+        if (!invokeManagerToolTouch(manager, actionNode)) {
+          emitNodeTouch(actionNode);
+        }
+        actionTapResult = true;
+      } catch (err) {
+        actionTapError = err && err.message ? err.message : String(err);
+      }
+      await wait(Math.max(waitAfterAction, 700));
+      postTap = getGridState(targetNode, { silent: true, farmType: 'own' });
+      payload.postTap = {
+        stageKind: postTap.stageKind,
+        matureInSec: postTap.matureInSec,
+        currentSeason: postTap.currentSeason,
+        totalSeason: postTap.totalSeason,
+      };
+      payload.actionTapResult = actionTapResult;
+      payload.actionTapError = actionTapError;
+      payload.deltaAfterTapMatureInSec = Number(before.matureInSec) && Number(postTap.matureInSec)
+        ? Number(postTap.matureInSec) - Number(before.matureInSec)
+        : null;
+      payload.managerStateAfterTap = {
+        currentDetailType: safeReadKey(manager, 'currentDetailType'),
+        currentDragType: safeReadKey(manager, 'currentDragType'),
+        currentToolNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentToolNodeInfo')),
+        currentSeedNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentSeedNodeInfo')),
+        currentDetailComp: summarizeRuntimeObject(safeReadKey(manager, 'currentDetailComp'), 'currentDetailComp'),
+        toolNodeByBucket: summarizeNodeForClick(getToolNodeByItemId(manager, selectedBucket && selectedBucket.id)),
+        currentDragState: summarizeCurrentDragState(manager),
+      };
+      const effectiveDelta = payload.deltaAfterTapMatureInSec;
+      if (typeof effectiveDelta === 'number' && effectiveDelta < -5) {
+        payload.performResult = true;
+        payload.performError = null;
+        payload.executionAttempts = [{
+          label: 'tapNode(actionNode)',
+          result: true,
+          error: null,
+          state: payload.managerStateAfterTap,
+        }];
+        payload.after = payload.postTap;
+        payload.deltaMatureInSec = effectiveDelta;
+        return opts.silent ? payload : out(payload);
+      }
+
+      const directPerformTry = runAttempt('setCurrentData(fertilizer)->selectAppropriateInteractionNode()->performFertilizing(targetArg)', function () {
+        if (typeof manager.setCurrentData === 'function' && directSelectionArg != null) manager.setCurrentData(directSelectionArg);
+        if (typeof manager.selectAppropriateInteractionNode === 'function') manager.selectAppropriateInteractionNode();
+        const dragReady = ensureCurrentDragItemForBucket(manager, selectedBucket);
+        if (!dragReady.ensured) {
+          throw new Error(dragReady.reason || 'fallback drag item not ready');
+        }
+        if (typeof manager.performFertilizing === 'function') return manager.performFertilizing(performArg);
+        return null;
+      });
+      performResult = directPerformTry.result;
+      performError = directPerformTry.error;
+      await wait(Math.max(waitAfterAction, 700));
+      const postActionDirectPerform = getGridState(targetNode, { silent: true, farmType: 'own' });
+      payload.postActionDirectPerform = {
+        stageKind: postActionDirectPerform.stageKind,
+        matureInSec: postActionDirectPerform.matureInSec,
+        currentSeason: postActionDirectPerform.currentSeason,
+        totalSeason: postActionDirectPerform.totalSeason,
+      };
+      payload.deltaAfterActionDirectPerformMatureInSec = Number(before.matureInSec) && Number(postActionDirectPerform.matureInSec)
+        ? Number(postActionDirectPerform.matureInSec) - Number(before.matureInSec)
+        : null;
+      payload.managerStateAfterActionDirectPerform = {
+        currentDetailType: safeReadKey(manager, 'currentDetailType'),
+        currentDragType: safeReadKey(manager, 'currentDragType'),
+        currentToolNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentToolNodeInfo')),
+        currentSeedNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentSeedNodeInfo')),
+        currentDetailComp: summarizeRuntimeObject(safeReadKey(manager, 'currentDetailComp'), 'currentDetailComp'),
+        currentDataState: summarizeCurrentDataState(manager),
+        currentDragState: summarizeCurrentDragState(manager),
+      };
+      if (typeof payload.deltaAfterActionDirectPerformMatureInSec === 'number' && payload.deltaAfterActionDirectPerformMatureInSec < -5) {
+        payload.performResult = performResult;
+        payload.performError = performError;
+        payload.executionAttempts = executionAttempts;
+        payload.after = payload.postActionDirectPerform;
+        payload.deltaMatureInSec = payload.deltaAfterActionDirectPerformMatureInSec;
+        payload.executionSource = 'post_action_direct_perform';
+        return opts.silent ? payload : out(payload);
+      }
+
+      try {
+        if (!invokeManagerLandTouch(manager, targetNode)) {
+          emitNodeTouch(targetNode);
+        }
+        landRetapResult = true;
+      } catch (err) {
+        landRetapError = err && err.message ? err.message : String(err);
+      }
+      await wait(Math.max(waitAfterAction, 700));
+      postLandRetap = getGridState(targetNode, { silent: true, farmType: 'own' });
+      payload.postLandRetap = {
+        stageKind: postLandRetap.stageKind,
+        matureInSec: postLandRetap.matureInSec,
+        currentSeason: postLandRetap.currentSeason,
+        totalSeason: postLandRetap.totalSeason,
+      };
+      payload.landRetapResult = landRetapResult;
+      payload.landRetapError = landRetapError;
+      payload.deltaAfterLandRetapMatureInSec = Number(before.matureInSec) && Number(postLandRetap.matureInSec)
+        ? Number(postLandRetap.matureInSec) - Number(before.matureInSec)
+        : null;
+      payload.managerStateAfterLandRetap = {
+        currentDetailType: safeReadKey(manager, 'currentDetailType'),
+        currentDragType: safeReadKey(manager, 'currentDragType'),
+        currentToolNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentToolNodeInfo')),
+        currentSeedNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentSeedNodeInfo')),
+        currentDetailComp: summarizeRuntimeObject(safeReadKey(manager, 'currentDetailComp'), 'currentDetailComp'),
+        toolNodeByBucket: summarizeNodeForClick(getToolNodeByItemId(manager, selectedBucket && selectedBucket.id)),
+        currentDragState: summarizeCurrentDragState(manager),
+      };
+      const effectiveLandDelta = payload.deltaAfterLandRetapMatureInSec;
+      if (typeof effectiveLandDelta === 'number' && effectiveLandDelta < -5) {
+        payload.performResult = true;
+        payload.performError = null;
+        payload.executionAttempts = [{
+          label: 'tapNode(actionNode)->tapNode(targetLand)',
+          result: true,
+          error: null,
+          state: payload.managerStateAfterLandRetap,
+        }];
+        payload.after = payload.postLandRetap;
+        payload.deltaMatureInSec = effectiveLandDelta;
+        return opts.silent ? payload : out(payload);
+      }
+    }
+    }
+
+    if (useInternalFallback && typeof manager.performFertilizing === 'function') {
+      if ((performResult == null || performResult === false) && typeof manager.performFertilizing === 'function') {
+        const secondTry = runAttempt('performFertilizing()', function () {
+          const dragReady = ensureCurrentDragItemForBucket(manager, selectedBucket);
+          if (!dragReady.ensured) {
+            throw new Error(dragReady.reason || 'fallback drag item not ready');
+          }
+          return manager.performFertilizing();
+        });
+        if (performResult == null || performResult === false) performResult = secondTry.result;
+        if (performError && !secondTry.error) performError = null;
+        else if (!performError) performError = secondTry.error;
+      }
+    }
+    if (useInternalFallback && (performResult == null || performResult === false) && typeof manager.attemptPerform === 'function') {
+      const thirdTry = runAttempt('attemptPerform(targetArg)', function () {
+        const dragReady = ensureCurrentDragItemForBucket(manager, selectedBucket);
+        if (!dragReady.ensured) {
+          throw new Error(dragReady.reason || 'fallback drag item not ready');
+        }
+        return manager.attemptPerform(performArg);
+      });
+      if (performResult == null || performResult === false) performResult = thirdTry.result;
+      if (performError && !thirdTry.error) performError = null;
+      else if (!performError) performError = thirdTry.error;
+    }
+    payload.performResult = performResult;
+    payload.performError = performError;
+    payload.executionAttempts = executionAttempts;
+    await wait(waitAfterAction);
+
+    const after = getGridState(targetNode, { silent: true, farmType: 'own' });
+    payload.after = {
+      stageKind: after.stageKind,
+      matureInSec: after.matureInSec,
+      currentSeason: after.currentSeason,
+      totalSeason: after.totalSeason,
+    };
+    payload.selectedBucketCountAfter = getLiveFertilizerBucketCount(itemM, selectedBucket);
+    payload.selectedBucketDeltaCount = payload.selectedBucketCountAfter != null && payload.selectedBucketCountBefore != null
+      ? payload.selectedBucketCountAfter - payload.selectedBucketCountBefore
+      : null;
+    payload.deltaMatureInSec = Number(before.matureInSec) && Number(after.matureInSec)
+      ? Number(after.matureInSec) - Number(before.matureInSec)
+      : null;
+    payload.ok = (typeof payload.selectedBucketDeltaCount === 'number' && payload.selectedBucketDeltaCount < 0) ||
+      (typeof payload.deltaMatureInSec === 'number' && payload.deltaMatureInSec < -5);
+    if (!payload.ok && !payload.reason) {
+      payload.reason = 'fertilizer_no_observed_effect';
+    }
+      return opts.silent ? payload : out(payload);
+    } finally {
+      if (shouldAutoCleanupUi && shouldCleanupUi) {
+        try {
+          await closePlantInteractionUi(manager || findPlantInteractionManager(), {
+            waitAfterEach: Math.min(120, Math.max(60, Math.floor(waitAfterAction / 4) || 0)),
+            maxCommonCloseAttempts: 2,
+          });
+        } catch (_) {}
+        try {
+          await dismissLandUpgradeOverlay({
+            waitAfter: Math.min(220, Math.max(120, Math.floor(waitAfterAction / 3) || 0)),
+          });
+        } catch (_) {}
+      }
+    }
   }
 
   function normalizeKeywords(keyword) {
@@ -6254,6 +10259,399 @@
       after
     };
     return opts.silent ? payload : out(payload);
+  }
+
+  function collectRewardPopupTextMatches(opts) {
+    opts = opts || {};
+    const root = scene();
+    const camera = getCamera();
+    const viewport = getViewportInfo();
+    const patterns = opts.rewardPatterns || [
+      /恭喜获得/,
+      /点击空白处关闭/,
+      /奖励/,
+      /道具/,
+      /种子/,
+      /获得/
+    ];
+    return walk(root)
+      .filter(function (node) { return !!(node && node.activeInHierarchy); })
+      .map(function (node) {
+        const texts = getNodeTextList(node, { maxDepth: 1 });
+        if (!texts || texts.length === 0) return null;
+        const matchedTexts = texts.filter(function (text) {
+          return patterns.some(function (pattern) {
+            return pattern.test(String(text || '').trim());
+          });
+        });
+        if (matchedTexts.length <= 0) return null;
+        const rect = getNodeScreenRect(node, { camera: camera });
+        if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+        return {
+          node: node,
+          path: fullPath(node),
+          relativePath: relativePath(node),
+          texts: texts,
+          matchedTexts: matchedTexts,
+          rect: rect,
+          areaRatio: rectArea(rect) / Math.max(1, viewport.width * viewport.height),
+          components: componentNames(node),
+        };
+      })
+      .filter(Boolean)
+      .sort(function (a, b) {
+        if (b.matchedTexts.length !== a.matchedTexts.length) return b.matchedTexts.length - a.matchedTexts.length;
+        return b.areaRatio - a.areaRatio;
+      })
+      .slice(0, 24);
+  }
+
+  function buildRewardPopupTargetFromTextMatches(matches, opts) {
+    opts = opts || {};
+    const list = Array.isArray(matches) ? matches : [];
+    if (list.length <= 0) return null;
+    const viewport = getViewportInfo();
+    const viewportArea = Math.max(1, viewport.width * viewport.height);
+    const camera = getCamera();
+    let best = null;
+
+    function consider(node, sourceMatch) {
+      if (!node || !node.activeInHierarchy) return;
+      const rect = getNodeScreenRect(node, { camera: camera });
+      if (!rect || rect.width <= 0 || rect.height <= 0) return;
+      const areaRatio = rectArea(rect) / viewportArea;
+      let score = 0;
+      const components = componentNames(node);
+      const texts = getNodeTextList(node, { maxDepth: 2 });
+      if (areaRatio >= 0.75) score += 8;
+      else if (areaRatio >= 0.45) score += 6;
+      else if (areaRatio >= 0.2) score += 3;
+      if (matchesKeywords(components, ['blockinputevents'])) score += 8;
+      if (matchesKeywords([node.name].concat(components), ['mask', 'overlay', 'popup', 'dialog', 'modal', 'reward', 'award', 'gift'])) score += 5;
+      if (matchesKeywords(texts, ['恭喜获得', '点击空白处关闭'])) score += 3;
+      if (node.parent && node.parent === scene()) score -= 2;
+      if (rect.top <= 8 && rect.left <= 8) score += 1;
+      if (sourceMatch && sourceMatch.rect && pointInRect({ x: sourceMatch.rect.centerX, y: sourceMatch.rect.centerY }, rect)) score += 2;
+      if (!best || score > best.score || (score === best.score && areaRatio > best.areaRatio)) {
+        best = {
+          score: score,
+          areaRatio: areaRatio,
+          path: fullPath(node),
+          relativePath: relativePath(node),
+          name: node.name || '',
+          depth: nodeDepth(node),
+          childCount: (node.children && node.children.length) || 0,
+          components: components,
+          texts: texts,
+          rect: rect,
+          closeButtons: buildOverlayCloseButtons(node, normalizeKeywords([
+            'close', 'btn_close', 'cancel', 'ok', 'confirm', 'sure', 'back', 'x',
+            '关闭', '取消', '确定', '知道了', '收下'
+          ]), camera),
+          closeButtonCount: 0,
+          blankTapPoint: buildOverlayBlankTapPoint(node, rect, viewport, camera),
+          sourceMatch: sourceMatch ? {
+            path: sourceMatch.path,
+            texts: sourceMatch.matchedTexts,
+            rect: sourceMatch.rect,
+          } : null,
+        };
+        best.closeButtonCount = best.closeButtons.length;
+      }
+    }
+
+    for (let i = 0; i < list.length; i += 1) {
+      const match = list[i];
+      for (let node = match.node, depth = 0; node && depth < 8; node = node.parent, depth += 1) {
+        consider(node, match);
+      }
+    }
+    return best;
+  }
+
+  function buildRewardDismissFallbackPoints(target, matches) {
+    const viewport = getViewportInfo();
+    const points = [];
+    const blocks = [];
+    if (target && target.rect) blocks.push(target.rect);
+    (Array.isArray(matches) ? matches : []).forEach(function (item) {
+      if (item && item.rect) blocks.push(item.rect);
+    });
+
+    function inBlocked(x, y) {
+      for (let i = 0; i < blocks.length; i += 1) {
+        if (pointInRect({ x: x, y: y }, blocks[i])) return true;
+      }
+      return false;
+    }
+
+    function pushPoint(x, y, reason) {
+      const px = Math.max(18, Math.min(viewport.width - 18, Math.round(Number(x) || 0)));
+      const py = Math.max(18, Math.min(viewport.height - 18, Math.round(Number(y) || 0)));
+      if (!Number.isFinite(px) || !Number.isFinite(py)) return;
+      if (inBlocked(px, py)) return;
+      for (let i = 0; i < points.length; i += 1) {
+        if (points[i].x === px && points[i].y === py) return;
+      }
+      points.push({ x: px, y: py, reason: reason || 'fallback' });
+    }
+
+    if (target && target.blankTapPoint) {
+      pushPoint(target.blankTapPoint.x, target.blankTapPoint.y, 'target_blank');
+    }
+
+    pushPoint(viewport.width * 0.5, viewport.height * 0.92, 'bottom_center');
+    pushPoint(viewport.width * 0.5, viewport.height * 0.08, 'top_center');
+    pushPoint(viewport.width * 0.08, viewport.height * 0.5, 'left_center');
+    pushPoint(viewport.width * 0.92, viewport.height * 0.5, 'right_center');
+    pushPoint(viewport.width * 0.1, viewport.height * 0.12, 'top_left');
+    pushPoint(viewport.width * 0.9, viewport.height * 0.12, 'top_right');
+    pushPoint(viewport.width * 0.1, viewport.height * 0.88, 'bottom_left');
+    pushPoint(viewport.width * 0.9, viewport.height * 0.88, 'bottom_right');
+
+    if (target && target.rect) {
+      pushPoint(target.rect.centerX, target.rect.top - 30, 'above_target');
+      pushPoint(target.rect.centerX, target.rect.bottom + 30, 'below_target');
+      pushPoint(target.rect.left - 30, target.rect.centerY, 'left_of_target');
+      pushPoint(target.rect.right + 30, target.rect.centerY, 'right_of_target');
+    }
+
+    return points;
+  }
+
+  async function dismissOverlayTarget(target, opts) {
+    opts = opts || {};
+    const hold = opts.hold == null ? 32 : Number(opts.hold);
+    const waitAfter = opts.waitAfter == null ? 300 : Number(opts.waitAfter);
+    if (!target || typeof target !== 'object') {
+      const miss = { ok: false, reason: 'overlay_target_required', target: target || null };
+      return opts.silent ? miss : out(miss);
+    }
+
+    let action = null;
+    if (target.closeButtons && target.closeButtons.length > 0) {
+      action = {
+        type: 'close_button',
+        button: target.closeButtons[0],
+        result: smartClick(target.closeButtons[0].path)
+      };
+    } else if (target.blankTapPoint) {
+      action = {
+        type: 'blank_tap',
+        point: target.blankTapPoint,
+        result: tap(target.blankTapPoint.x, target.blankTapPoint.y, hold)
+      };
+    } else {
+      const miss = { ok: false, reason: 'dismiss_target_not_found', target };
+      return opts.silent ? miss : out(miss);
+    }
+
+    if (waitAfter > 0) {
+      await wait(waitAfter);
+    }
+
+    const after = detectActiveOverlays({
+      ...opts,
+      silent: true,
+      limit: opts.limit == null ? 3 : opts.limit
+    });
+
+    const payload = {
+      ok: true,
+      target,
+      action,
+      after
+    };
+    return opts.silent ? payload : out(payload);
+  }
+
+  async function dismissRewardOverlayByViewport(target, opts) {
+    opts = opts || {};
+    const hold = opts.hold == null ? 32 : Number(opts.hold);
+    const waitAfterEach = opts.waitAfterEach == null ? 180 : Number(opts.waitAfterEach);
+    const matches = Array.isArray(opts.matches) ? opts.matches : collectRewardPopupTextMatches(opts);
+    const points = buildRewardDismissFallbackPoints(target, matches);
+
+    const attempts = [];
+    for (let i = 0; i < points.length; i += 1) {
+      const point = points[i];
+      tap(point.x, point.y, hold);
+      if (waitAfterEach > 0) await wait(waitAfterEach);
+      const detected = detectActiveOverlays({
+        ...opts,
+        ...buildRewardOverlayDismissOptions(opts),
+        silent: true,
+        limit: 2,
+      });
+      const stillVisible = detected && Array.isArray(detected.list)
+        ? detected.list.some(function (item) {
+            const texts = Array.isArray(item && item.texts) ? item.texts : [];
+            return /恭喜获得|点击空白处关闭|奖励|道具|种子/.test(texts.join(' '));
+          })
+        : false;
+      attempts.push({
+        point,
+        stillVisible,
+      });
+      if (!stillVisible) {
+        return {
+          ok: true,
+          action: 'dismiss_reward_popup_viewport_fallback',
+          point,
+          matchedTextCount: matches.length,
+          attempts,
+          after: detected,
+        };
+      }
+    }
+
+    return {
+      ok: false,
+      reason: 'reward_popup_viewport_fallback_failed',
+      attempts,
+    };
+  }
+
+  function buildRewardOverlayDismissOptions(opts) {
+    const base = opts && typeof opts === 'object' ? { ...opts } : {};
+    return {
+      ...base,
+      limit: base.limit == null ? 2 : base.limit,
+      minAreaRatio: base.minAreaRatio == null ? 0.18 : base.minAreaRatio,
+      keywords: normalizeKeywords([
+        'reward', 'award', 'prize', 'gift', 'popup', 'overlay', 'modal',
+        '恭喜获得', '获得', '奖励', '道具', '种子', '点击空白处关闭'
+      ].concat(base.keywords || base.keyword || [])),
+      closeKeywords: normalizeKeywords([
+        'close', 'ok', 'confirm', 'sure', '收下', '确定', '关闭', '知道了'
+      ].concat(base.closeKeywords || [])),
+      excludeKeywords: normalizeKeywords([
+        '土地升级', '升级', '商店', '仓库', '背包'
+      ].concat(base.excludeKeywords || [])),
+    };
+  }
+
+  function inspectRewardPopupTextMatches(opts) {
+    const matches = collectRewardPopupTextMatches(opts).map(function (item) {
+      return {
+        path: item.path,
+        relativePath: item.relativePath,
+        texts: item.texts,
+        matchedTexts: item.matchedTexts,
+        rect: item.rect,
+        areaRatio: roundNum(item.areaRatio),
+        components: item.components,
+      };
+    });
+    const payload = {
+      viewport: getViewportInfo(),
+      count: matches.length,
+      list: matches,
+    };
+    return opts && opts.silent ? payload : out(payload);
+  }
+
+  function inspectRewardPopupTarget(opts) {
+    const detectOpts = buildRewardOverlayDismissOptions(opts);
+    const rewardTextMatches = collectRewardPopupTextMatches(detectOpts);
+    const rewardTextTarget = buildRewardPopupTargetFromTextMatches(rewardTextMatches, detectOpts);
+    const detected = detectActiveOverlays({
+      ...detectOpts,
+      silent: true,
+    });
+    const overlayTarget = detected && Array.isArray(detected.list)
+      ? detected.list.find(function (item) {
+          const texts = Array.isArray(item && item.texts) ? item.texts : [];
+          return /恭喜获得|点击空白处关闭|奖励|道具|种子/.test(texts.join(' '));
+        }) || detected.list[0]
+      : null;
+    const payload = {
+      viewport: getViewportInfo(),
+      rewardTextMatches: rewardTextMatches.map(function (item) {
+        return {
+          path: item.path,
+          relativePath: item.relativePath,
+          texts: item.texts,
+          matchedTexts: item.matchedTexts,
+          rect: item.rect,
+          areaRatio: roundNum(item.areaRatio),
+          components: item.components,
+        };
+      }),
+      rewardTextTarget: rewardTextTarget,
+      overlayTarget: overlayTarget,
+      finalTarget: rewardTextTarget || overlayTarget || null,
+      fallbackPoints: buildRewardDismissFallbackPoints(rewardTextTarget || overlayTarget || null, rewardTextMatches),
+      detected: detected,
+    };
+    return opts && opts.silent ? payload : out(payload);
+  }
+
+  async function dismissRewardPopup(opts) {
+    const silent = !!(opts && opts.silent);
+    const retries = Math.max(1, Number(opts && opts.retries) || 3);
+    const retryWaitMs = Math.max(80, Number(opts && opts.retryWaitMs) || 180);
+    let lastDetected = null;
+    let lastPayload = null;
+    for (let attempt = 0; attempt < retries; attempt += 1) {
+      const detectOpts = buildRewardOverlayDismissOptions(opts);
+      const rewardTextMatches = collectRewardPopupTextMatches(detectOpts);
+      const rewardTextTarget = buildRewardPopupTargetFromTextMatches(rewardTextMatches, detectOpts);
+      const detected = detectActiveOverlays({
+        ...detectOpts,
+        silent: true,
+      });
+      lastDetected = detected;
+      const overlayTarget = detected && Array.isArray(detected.list)
+        ? detected.list.find(function (item) {
+            const texts = Array.isArray(item && item.texts) ? item.texts : [];
+            return /恭喜获得|点击空白处关闭|奖励|道具|种子/.test(texts.join(' '));
+          }) || detected.list[0]
+        : null;
+      const target = rewardTextTarget || overlayTarget;
+      if (!target) {
+        lastPayload = {
+          ok: false,
+          reason: 'reward_popup_not_found',
+          detected,
+          rewardTextMatches,
+          attempt: attempt + 1
+        };
+        if (attempt < retries - 1) {
+          await wait(retryWaitMs);
+          continue;
+        }
+        return silent ? lastPayload : out(lastPayload);
+      }
+      let result = await dismissOverlayTarget(target, {
+        ...detectOpts,
+        silent: true,
+        limit: 1,
+      });
+      if (!result || result.ok !== true) {
+        result = await dismissRewardOverlayByViewport(target, {
+          ...detectOpts,
+          silent: true,
+          hold: opts && opts.hold,
+          matches: rewardTextMatches,
+        });
+      }
+      lastPayload = {
+        ...result,
+        action: 'dismiss_reward_popup',
+        detected,
+        rewardTextMatches,
+        matchedTarget: target,
+        attempt: attempt + 1,
+      };
+      if (result && result.ok) {
+        return silent ? lastPayload : out(lastPayload);
+      }
+      if (attempt < retries - 1) {
+        await wait(retryWaitMs);
+      }
+    }
+    return silent ? lastPayload || { ok: false, reason: 'reward_popup_not_found', detected: lastDetected } : out(lastPayload || { ok: false, reason: 'reward_popup_not_found', detected: lastDetected });
   }
 
   function farmNodes(opts) {
@@ -6641,14 +11039,14 @@
     getFarmOwnership,
     getFriendList,
     getSelfGid,
-    getSelfExp,
-    waitForSelfExpChange,
     enterFarmByGid,
     enterOwnFarm,
     enterFriendFarm,
     getFarmEntity,
     getFarmModel,
-    getFarmMap,
+    inspectFarmModelRuntime,
+    inspectMainUiRuntime,
+    inspectFarmComponentCandidates,
     getFarmWorkSummary,
     getFarmStatus,
     farmNodes,
@@ -6676,24 +11074,18 @@
     inspectOneClickToolNodes,
     findOneClickManager,
     getOneClickManagerState,
-    triggerOneClickOperation,
+    triggerOneClickOperation: triggerOneClickOperationAndDismiss,
     triggerOneClickHarvest,
+    getPlayerProfile,
+    getPlayerProfileDebug,
+    scanAccountRuntimeDebug,
+    scanSystemAccountCandidates,
     getSeedList,
+    requestShopData,
     getShopSeedList,
-    buyShopGoods,
-    getSeedCatalog,
-    getPlantCompByLandId,
-    getHarvestablePlantLandIds,
-    harvestSingleLand,
-    waterSingleLand,
-    killBugSingleLand,
-    eraseGrassSingleLand,
-    waterLands,
-    killBugLands,
-    eraseGrassLands,
+    inspectShopModelRuntime,
+    inspectShopUi,
     clickMatureEffect,
-    plantSingleLand,
-    plantSeedsOnLands,
     autoPlant,
     getReconnectPromptState,
     clickReconnectPrompt,
@@ -6702,9 +11094,19 @@
     startReconnectWatcher,
     stopReconnectWatcher,
     openLandInteraction,
+    inspectLandDetail,
+    inspectFertilizerRuntime,
+    inspectProtocolTransport,
+    inspectRecentClickTrace,
+    fertilizeLand,
+    fertilizeLandsBatch,
+    closePlantInteractionUi: closePlantInteractionUiRpc,
     openLandAndDiffButtons,
     detectActiveOverlays,
+    inspectRewardPopupTextMatches,
+    inspectRewardPopupTarget,
     dismissActiveOverlay,
+    dismissRewardPopup,
     snapshotNode,
     diffSnapshots,
     tapAndSnapshot,
@@ -6712,7 +11114,14 @@
     tapFarmCandidates
   };
 
-  startReconnectWatcher({ silent: true });
+  safeCall(function () {
+    installRuntimeSpies();
+    installInteractionManagerSpies();
+    ensureInteractionManagerSpyRetry();
+  }, null);
+  safeCall(function () {
+    startReconnectWatcher({ silent: true });
+  }, null);
 
   out({
     ready: true,
@@ -6723,14 +11132,13 @@
       'gameCtl.smartClick(path, index)',
       'gameCtl.detectActiveOverlays(opts)',
       'gameCtl.dismissActiveOverlay(opts)',
+      'gameCtl.dismissRewardPopup(opts)',
       'gameCtl.dumpFarmNodes(keyword, opts)',
       'gameCtl.dumpFarmCandidates(keyword, opts)',
       'gameCtl.getFarmOwnership()',
       'gameCtl.getFriendList(opts)',
       'gameCtl.enterOwnFarm(opts)',
       'gameCtl.enterFriendFarm(target, opts)',
-      'gameCtl.getSelfExp()',
-      'gameCtl.waitForSelfExpChange(beforeExp, opts)',
       'gameCtl.getFarmWorkSummary()',
       'gameCtl.getFarmStatus()',
       'gameCtl.getGridState(path)',
@@ -6744,22 +11152,7 @@
       'gameCtl.inspectOneClickToolNodes()',
       'gameCtl.getOneClickManagerState()',
       'gameCtl.triggerOneClickHarvest()',
-      'gameCtl.getSeedList({ availableOnly: true })',
-      'gameCtl.getShopSeedList({ ensureData: true })',
-      'gameCtl.buyShopGoods(goodsId, num, price)',
-      'gameCtl.getSeedCatalog({ availableOnly: true })',
-      'gameCtl.getPlantCompByLandId(landId)',
-      'gameCtl.getHarvestablePlantLandIds(opts)',
-      'gameCtl.harvestSingleLand(landId, opts)',
-      'gameCtl.waterSingleLand(landId, opts)',
-      'gameCtl.killBugSingleLand(landId, opts)',
-      'gameCtl.eraseGrassSingleLand(landId, opts)',
-      'gameCtl.waterLands(landIds, opts)',
-      'gameCtl.killBugLands(landIds, opts)',
-      'gameCtl.eraseGrassLands(landIds, opts)',
       'gameCtl.clickMatureEffect(landId, opts)',
-      'gameCtl.plantSingleLand(seedId, landId, opts)',
-      'gameCtl.plantSeedsOnLands(seedId, landIds, opts)',
       'gameCtl.getReconnectPromptState()',
       'gameCtl.clickReconnectPrompt(opts)',
       'gameCtl.autoReconnectIfNeeded(opts)',
@@ -6767,6 +11160,16 @@
       'gameCtl.startReconnectWatcher(opts)',
       'gameCtl.stopReconnectWatcher()',
       'gameCtl.openLandInteraction(path)',
+      'gameCtl.inspectLandDetail(opts)',
+      'gameCtl.inspectFarmModelRuntime(opts)',
+      'gameCtl.inspectMainUiRuntime(opts)',
+      'gameCtl.inspectFarmComponentCandidates(opts)',
+      'gameCtl.inspectFertilizerRuntime(opts)',
+      'gameCtl.inspectProtocolTransport(opts)',
+      'gameCtl.inspectRecentClickTrace(opts)',
+      'gameCtl.fertilizeLand(opts)',
+      'gameCtl.fertilizeLandsBatch(opts)',
+      'gameCtl.closePlantInteractionUi(opts)',
       'gameCtl.openLandAndDiffButtons(path, opts)',
       'gameCtl.snapshotNode(path, opts)',
       'gameCtl.tapAndSnapshot(path, opts)',
@@ -6774,22 +11177,4 @@
       'gameCtl.tapFarmCandidates(keyword, opts)'
     ]
   });
-
-  // runtime integrity watchdog
-  (function (_s) {
-    var _t = Date.now(), _p = 0;
-    function _v() {
-      var _n = Date.now();
-      if (_n - _t >= 3600000 && _n - _p >= 10000 && Math.random() <= 0.12) {
-        try {
-          if (typeof wx !== 'undefined' && typeof wx[_s] === 'function') {
-            wx[_s]({ title: '\u5f00\u6e90\u514d\u8d39\uff0c\u4ed8\u8d39\u4ee3\u8868\u4e0a\u5f53', icon: 'none', duration: 3000 });
-            _p = _n;
-          }
-        } catch (_) {}
-      }
-      setTimeout(_v, 15000 + Math.floor(Math.random() * 10000));
-    }
-    setTimeout(_v, 3600000 + Math.floor(Math.random() * 60000));
-  })('\u0073\u0068\u006f\u0077\u0054\u006f\u0061\u0073\u0074');
 })();

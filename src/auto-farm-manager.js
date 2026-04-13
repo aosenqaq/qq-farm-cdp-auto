@@ -3,10 +3,108 @@
 const { ensureGameCtl, callGameCtl } = require("./game-ctl-utils");
 const { runAutoFarmCycle } = require("./auto-farm-executor");
 const {
-  normalizeAutoPlantMode,
-  normalizeAutoPlantSource,
-  readAutoPlantSelectedSeedKey,
-} = require("./auto-farm-plant-config");
+  addFriendHelpExp,
+  markFriendHelpExpLimitReached: applyFriendHelpExpLimitReached,
+  normalizeFriendHelpExpState,
+  serializeFriendHelpExpState,
+} = require("./friend-help-exp-cache");
+
+const AUTO_FARM_RECENT_EVENT_LIMIT = 400;
+const AUTO_FERTILIZER_STATE_VERSION = 2;
+
+function toPositiveInt(value) {
+  const n = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function toNonNegativeInt(value) {
+  const n = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+function toFiniteNumberOrNull(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeAutoFertilizerAppliedType(value) {
+  const type = String(value == null ? "" : value).trim().toLowerCase();
+  if (type === "inorganic") return "normal";
+  return type === "organic" ? "organic" : "normal";
+}
+
+function normalizeAutoFertilizerEvidence(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const source = String(raw.source || "").trim().toLowerCase();
+  const at = raw.at ? String(raw.at) : null;
+  const beforeMatureInSec = toFiniteNumberOrNull(raw.beforeMatureInSec);
+  const afterMatureInSec = toFiniteNumberOrNull(raw.afterMatureInSec);
+  const deltaMatureInSec = toFiniteNumberOrNull(raw.deltaMatureInSec);
+  if (!source && !at && beforeMatureInSec == null && afterMatureInSec == null && deltaMatureInSec == null) {
+    return null;
+  }
+  return {
+    source: source || null,
+    at,
+    beforeMatureInSec,
+    afterMatureInSec,
+    deltaMatureInSec,
+  };
+}
+
+function normalizeAutoFertilizerState(raw) {
+  const src = raw && typeof raw === "object" ? raw : {};
+  const markSource = src.landMarks && typeof src.landMarks === "object" ? src.landMarks : {};
+  const normalizedMarks = Object.create(null);
+  const keys = Object.keys(markSource).sort((a, b) => {
+    const diff = toPositiveInt(a) - toPositiveInt(b);
+    return diff !== 0 ? diff : String(a).localeCompare(String(b));
+  });
+  for (let i = 0; i < keys.length; i += 1) {
+    const item = markSource[keys[i]];
+    if (!item || typeof item !== "object") continue;
+    const landId = toPositiveInt(item.landId || keys[i]);
+    const plantId = toPositiveInt(item.plantId);
+    const currentSeason = toPositiveInt(item.currentSeason);
+    const totalSeason = Math.max(1, toPositiveInt(item.totalSeason) || currentSeason || 1);
+    if (landId <= 0 || plantId <= 0 || currentSeason <= 0) continue;
+    normalizedMarks[String(landId)] = {
+      landId,
+      seasonKey: String(item.seasonKey || `${landId}:${plantId}:${currentSeason}`),
+      plantId,
+      currentSeason,
+      totalSeason,
+      normalApplied: item.normalApplied === true,
+      organicApplied: item.organicApplied === true,
+      normalBlocked: item.normalBlocked === true,
+      organicBlocked: item.organicBlocked === true,
+      normalNoEffectCount: toNonNegativeInt(item.normalNoEffectCount),
+      organicNoEffectCount: toNonNegativeInt(item.organicNoEffectCount),
+      normalBlockedReason: item.normalBlockedReason ? String(item.normalBlockedReason) : null,
+      organicBlockedReason: item.organicBlockedReason ? String(item.organicBlockedReason) : null,
+      normalEvidence: normalizeAutoFertilizerEvidence(item.normalEvidence),
+      organicEvidence: normalizeAutoFertilizerEvidence(item.organicEvidence),
+      updatedAt: item.updatedAt ? String(item.updatedAt) : null,
+    };
+  }
+  return {
+    version: AUTO_FERTILIZER_STATE_VERSION,
+    updatedAt: src.updatedAt ? String(src.updatedAt) : null,
+    landMarks: normalizedMarks,
+  };
+}
+
+function cloneAutoFertilizerStateForSave(state) {
+  return normalizeAutoFertilizerState(state);
+}
+
+function serializeAutoFertilizerState(state) {
+  const normalized = normalizeAutoFertilizerState(state);
+  return {
+    version: normalized.version,
+    landMarks: normalized.landMarks,
+  };
+}
 
 function toBool(value, defaultValue) {
   if (value == null) return defaultValue;
@@ -25,28 +123,127 @@ function toInt(value, defaultValue, min, max) {
   return Math.min(max, Math.max(min, fallback));
 }
 
-function getLocalDateKey(dateLike = Date.now()) {
-  const date = dateLike instanceof Date ? dateLike : new Date(dateLike);
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+function toErrorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
 }
 
-function formatCareActionLabel(key) {
-  if (key === "water") return "浇水";
-  if (key === "eraseGrass") return "除草";
-  if (key === "killBug") return "杀虫";
-  return key ? String(key) : "打理";
+function isAutomationStoppedError(error) {
+  return !!(error && (error.code === "AUTOMATION_STOPPED" || error.message === "automation_stopped"));
+}
+
+function toPlantMode(value, defaultValue) {
+  const mode = String(value == null ? "" : value).trim().toLowerCase();
+  if (!mode) return defaultValue;
+  if (mode === "max_level") return "highest_level";
+  if ([
+    "none",
+    "backpack_first",
+    "specified_seed",
+    "highest_level",
+    "max_exp",
+    "max_fert_exp",
+    "max_profit",
+    "max_fert_profit",
+  ].includes(mode)) {
+    return mode;
+  }
+  return defaultValue;
+}
+
+function toFertilizerMode(value, defaultValue) {
+  const mode = String(value == null ? "" : value).trim().toLowerCase();
+  if (!mode) return defaultValue;
+  if (mode === "inorganic") return "normal";
+  if (["none", "normal", "organic", "both"].includes(mode)) {
+    return mode;
+  }
+  return defaultValue;
+}
+
+function toFertilizerBuyType(value, defaultValue) {
+  const mode = String(value == null ? "" : value).trim().toLowerCase();
+  if (!mode) return defaultValue;
+  if (mode === "inorganic") return "normal";
+  if (["organic", "normal", "both"].includes(mode)) {
+    return mode;
+  }
+  return defaultValue;
+}
+
+function toFertilizerBuyMode(value, defaultValue) {
+  const mode = String(value == null ? "" : value).trim().toLowerCase();
+  if (!mode) return defaultValue;
+  if (["threshold", "unlimited"].includes(mode)) {
+    return mode;
+  }
+  return defaultValue;
+}
+
+function normalizeStringList(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item == null ? "" : item).trim())
+      .filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value
+      .split(/[\r\n,，;；]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function normalizePositiveIntList(value) {
+  const source = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(/[\r\n,，;；]+/)
+      : [];
+  const next = [];
+  for (const item of source) {
+    const num = Number.parseInt(String(item == null ? "" : item).trim(), 10);
+    if (!Number.isFinite(num) || num <= 0 || next.includes(num)) continue;
+    next.push(num);
+  }
+  return next;
+}
+
+function normalizeFertilizerLandTypes(value) {
+  const allLandTypes = ["gold", "black", "red", "normal"];
+  const source = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(/[\r\n,，;；]+/)
+      : allLandTypes;
+  const next = [];
+  for (const item of source) {
+    const text = String(item == null ? "" : item).trim().toLowerCase();
+    if (!text || !allLandTypes.includes(text) || next.includes(text)) continue;
+    next.push(text);
+  }
+  return next.length ? next : [...allLandTypes];
+}
+
+function normalizeClockText(value, defaultValue) {
+  const text = String(value == null ? "" : value).trim();
+  if (!text) return defaultValue;
+  const match = /^(\d{1,2}):(\d{1,2})$/.exec(text);
+  if (!match) return defaultValue;
+  const hours = Number.parseInt(match[1], 10);
+  const minutes = Number.parseInt(match[2], 10);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return defaultValue;
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return defaultValue;
+  return String(hours).padStart(2, "0") + ":" + String(minutes).padStart(2, "0");
 }
 
 function normalizeAutoFarmConfig(raw) {
   const src = raw && typeof raw === "object" ? raw : {};
-  const autoFarmPlantMode = normalizeAutoPlantMode(src.autoFarmPlantMode);
-  const autoFarmPlantSource = normalizeAutoPlantSource(src.autoFarmPlantSource, src.autoFarmPlantMode);
   return {
     autoFarmOwnEnabled: toBool(src.autoFarmOwnEnabled, true),
     autoFarmFriendEnabled: toBool(src.autoFarmFriendEnabled, false),
+    autoFarmFriendHelpEnabled: toBool(src.autoFarmFriendHelpEnabled, false),
+    autoFarmFriendHelpStopOnExpLimit: toBool(src.autoFarmFriendHelpStopOnExpLimit, true),
     autoFarmOwnIntervalSec: toInt(src.autoFarmOwnIntervalSec, 30, 5, 3600),
     autoFarmFriendIntervalSec: toInt(src.autoFarmFriendIntervalSec, 90, 10, 3600),
     autoFarmMaxFriends: toInt(src.autoFarmMaxFriends, 5, 1, 50),
@@ -55,11 +252,817 @@ function normalizeAutoFarmConfig(raw) {
     autoFarmRefreshFriendList: toBool(src.autoFarmRefreshFriendList, true),
     autoFarmReturnHome: toBool(src.autoFarmReturnHome, true),
     autoFarmStopOnError: toBool(src.autoFarmStopOnError, false),
-    autoFarmStopCareWhenNoExp: toBool(src.autoFarmStopCareWhenNoExp, false),
-    autoFarmPlantMode,
-    autoFarmPlantSource,
-    autoFarmPlantSelectedSeedKey: readAutoPlantSelectedSeedKey(src),
+    autoFarmPlantMode: toPlantMode(src.autoFarmPlantMode, "none"),
+    autoFarmPlantPrimaryMode: toPlantMode(src.autoFarmPlantPrimaryMode ?? src.autoFarmPlantMode, "none"),
+    autoFarmPlantSecondaryMode: toPlantMode(src.autoFarmPlantSecondaryMode, "none"),
+    autoFarmPlantSeedId: toInt(src.autoFarmPlantSeedId, 0, 0, 99999999),
+    autoFarmPlantMaxLevel: toInt(src.autoFarmPlantMaxLevel, 0, 0, 999),
+    autoFarmFertilizerEnabled: toBool(src.autoFarmFertilizerEnabled, false),
+    autoFarmFertilizerMode: toFertilizerMode(src.autoFarmFertilizerMode, "none"),
+    autoFarmFertilizerMultiSeason: toBool(src.autoFarmFertilizerMultiSeason, false),
+    autoFarmFertilizerLandTypes: normalizeFertilizerLandTypes(src.autoFarmFertilizerLandTypes),
+    autoFarmFertilizerGift: toBool(src.autoFarmFertilizerGift, false),
+    autoFarmFertilizerBuy: toBool(src.autoFarmFertilizerBuy, false),
+    autoFarmFertilizerBuyType: toFertilizerBuyType(src.autoFarmFertilizerBuyType, "organic"),
+    autoFarmFertilizerBuyMax: toInt(src.autoFarmFertilizerBuyMax, 10, 1, 10),
+    autoFarmFertilizerBuyMode: toFertilizerBuyMode(src.autoFarmFertilizerBuyMode, "threshold"),
+    autoFarmFertilizerBuyThreshold: toInt(src.autoFarmFertilizerBuyThreshold, 100, 0, 999999),
+    autoFarmFertilizerRushThresholdSec: toInt(src.autoFarmFertilizerRushThresholdSec, 300, 0, 999999),
+    autoFarmFriendQuietHoursEnabled: toBool(src.autoFarmFriendQuietHoursEnabled, false),
+    autoFarmFriendQuietHoursStart: normalizeClockText(src.autoFarmFriendQuietHoursStart, "23:00"),
+    autoFarmFriendQuietHoursEnd: normalizeClockText(src.autoFarmFriendQuietHoursEnd, "07:00"),
+    autoFarmFriendBlockMaskedStealers: toBool(src.autoFarmFriendBlockMaskedStealers, true),
+    autoFarmFriendBlacklist: normalizeStringList(src.autoFarmFriendBlacklist),
+    autoFarmFriendStealPlantBlacklistEnabled: toBool(src.autoFarmFriendStealPlantBlacklistEnabled, false),
+    autoFarmFriendStealPlantBlacklistStrategy: toInt(src.autoFarmFriendStealPlantBlacklistStrategy, 1, 1, 2),
+    autoFarmFriendStealPlantBlacklist: normalizePositiveIntList(src.autoFarmFriendStealPlantBlacklist),
   };
+}
+
+function getTodayKey(now) {
+  const date = now instanceof Date ? now : new Date(now || Date.now());
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function createEmptyTodayStats(dateKey) {
+  return {
+    dateKey: dateKey || getTodayKey(),
+    collect: 0,
+    water: 0,
+    eraseGrass: 0,
+    killBug: 0,
+    fertilize: 0,
+    plant: 0,
+    steal: 0,
+    helpWater: 0,
+    helpEraseGrass: 0,
+    helpKillBug: 0,
+    task: 0,
+    sell: 0,
+    runs: 0,
+    ownRuns: 0,
+    friendRuns: 0,
+  };
+}
+
+function normalizeDelta(before, after) {
+  const beforeNum = Number(before);
+  const afterNum = Number(after);
+  if (!Number.isFinite(beforeNum) || !Number.isFinite(afterNum)) return 0;
+  return Math.max(0, beforeNum - afterNum);
+}
+
+function normalizeHelpCounts(value) {
+  const src = value && typeof value === "object" ? value : {};
+  return {
+    water: Math.max(0, Number(src.water) || 0),
+    eraseGrass: Math.max(0, Number(src.eraseGrass) || 0),
+    killBug: Math.max(0, Number(src.killBug) || 0),
+  };
+}
+
+function getHelpProgressFromVisit(visit) {
+  const before = normalizeHelpCounts(visit && visit.helpBeforeCounts);
+  const after = normalizeHelpCounts(visit && visit.helpAfterCounts);
+  return {
+    water: normalizeDelta(before.water, after.water),
+    eraseGrass: normalizeDelta(before.eraseGrass, after.eraseGrass),
+    killBug: normalizeDelta(before.killBug, after.killBug),
+  };
+}
+
+function mergeCycleResultIntoTodayStats(stats, cycle) {
+  const target = stats && typeof stats === "object"
+    ? stats
+    : createEmptyTodayStats();
+  const result = cycle && cycle.result && typeof cycle.result === "object" ? cycle.result : cycle;
+  if (!result || typeof result !== "object") return target;
+
+  target.runs += 1;
+  if (result.ownFarmEnabled) target.ownRuns += 1;
+  if (result.friendStealEnabled) target.friendRuns += 1;
+
+  const ownFarm = result.ownFarm && typeof result.ownFarm === "object" ? result.ownFarm : null;
+  const tasks = ownFarm && ownFarm.tasks && typeof ownFarm.tasks === "object" ? ownFarm.tasks : null;
+  const actions = Array.isArray(tasks && tasks.actions) ? tasks.actions : [];
+  actions.forEach((action) => {
+    if (!action || action.ok !== true) return;
+    const delta = normalizeDelta(action.beforeCount, action.afterCount);
+    if (action.key === "collect") target.collect += delta;
+    if (action.key === "water") target.water += delta;
+    if (action.key === "eraseGrass") target.eraseGrass += delta;
+    if (action.key === "killBug") target.killBug += delta;
+  });
+
+  const specialCollect = tasks && tasks.specialCollect && typeof tasks.specialCollect === "object"
+    ? tasks.specialCollect
+    : null;
+  if (specialCollect && specialCollect.ok === true && Number(specialCollect.candidateCount) > 0) {
+    target.collect += Number(specialCollect.candidateCount) || 0;
+  }
+
+  const plantResult = ownFarm && ownFarm.plantResult && typeof ownFarm.plantResult === "object"
+    ? ownFarm.plantResult
+    : null;
+  if (plantResult && plantResult.ok === true && plantResult.action === "planted") {
+    const plantedCount = Number(
+      plantResult.plantResult && plantResult.plantResult.plantedCount != null
+        ? plantResult.plantResult.plantedCount
+        : plantResult.emptyCount
+    ) || 0;
+    target.plant += Math.max(0, plantedCount);
+  }
+
+  const fertilizerResult = ownFarm && ownFarm.fertilizerResult && typeof ownFarm.fertilizerResult === "object"
+    ? ownFarm.fertilizerResult
+    : null;
+  if (fertilizerResult && fertilizerResult.skipped !== true) {
+    target.fertilize += Math.max(0, Number(fertilizerResult.successCount) || 0);
+  }
+
+  const friendSteal = result.friendSteal && typeof result.friendSteal === "object" ? result.friendSteal : null;
+  const visits = Array.isArray(friendSteal && friendSteal.visits) ? friendSteal.visits : [];
+  visits.forEach((visit) => {
+    if (!visit || visit.ok !== true) return;
+    target.steal += normalizeDelta(visit.collectBefore, visit.collectAfter);
+    const helpProgress = getHelpProgressFromVisit(visit);
+    target.helpWater += helpProgress.water;
+    target.helpEraseGrass += helpProgress.eraseGrass;
+    target.helpKillBug += helpProgress.killBug;
+  });
+
+  return target;
+}
+
+const FRIEND_VISIT_COOLDOWN_MS = 5 * 60 * 1000;
+const FRIEND_BLACKLIST_ONLY_COOLDOWN_MS = 10 * 60 * 1000;
+
+function shouldApplyFriendCooldown(visit) {
+  if (!visit || typeof visit !== "object") return null;
+  if (visit.reason === "no_collectable_after_enter") {
+    return { ms: FRIEND_VISIT_COOLDOWN_MS, reason: "no_collectable_after_enter" };
+  }
+  if (visit.reason === "no_actionable_after_enter") {
+    return { ms: FRIEND_VISIT_COOLDOWN_MS, reason: "no_actionable_after_enter" };
+  }
+  if (visit.reason === "all_collectable_blacklisted") {
+    return { ms: FRIEND_BLACKLIST_ONLY_COOLDOWN_MS, reason: "all_collectable_blacklisted" };
+  }
+  if (visit.reason === "blacklist_strategy_skip_whole_farm") {
+    return { ms: FRIEND_BLACKLIST_ONLY_COOLDOWN_MS, reason: "blacklist_strategy_skip_whole_farm" };
+  }
+  const helpProgress = getHelpProgressFromVisit(visit);
+  const totalHelpProgress = helpProgress.water + helpProgress.eraseGrass + helpProgress.killBug;
+  if (
+    visit.ok === true
+    && Number(visit.collectBefore) > 0
+    && Number(visit.collectAfter) >= Number(visit.collectBefore)
+    && totalHelpProgress <= 0
+  ) {
+    return { ms: FRIEND_VISIT_COOLDOWN_MS, reason: "no_progress_after_visit" };
+  }
+  if (visit.ok === true && Number(visit.collectBefore) <= 0 && totalHelpProgress <= 0) {
+    const helpBefore = normalizeHelpCounts(visit.helpBeforeCounts);
+    if ((helpBefore.water + helpBefore.eraseGrass + helpBefore.killBug) > 0) {
+      return { ms: FRIEND_VISIT_COOLDOWN_MS, reason: "no_help_progress_after_visit" };
+    }
+  }
+  const errorText = String(visit.error || "").toLowerCase();
+  if (visit.ok === false && errorText) {
+    if (
+      errorText.includes("被偷走")
+      || errorText.includes("already")
+      || errorText.includes("stolen")
+      || errorText.includes("no_collectable")
+    ) {
+      return { ms: FRIEND_VISIT_COOLDOWN_MS, reason: "collect_race_or_stale_state" };
+    }
+  }
+  return null;
+}
+
+function formatAutoFarmActionLabel(key) {
+  if (key === "collect") return "一键收获";
+  if (key === "water") return "一键浇水";
+  if (key === "eraseGrass") return "一键除草";
+  if (key === "killBug") return "一键杀虫";
+  return key ? String(key) : "未知动作";
+}
+
+function formatAutoFarmPlantModeLabel(mode) {
+  if (mode === "backpack_first") return "背包优先";
+  if (mode === "specified_seed") return "指定作物";
+  if (mode === "highest_level") return "最大等级";
+  if (mode === "max_exp") return "最大经验";
+  if (mode === "max_fert_exp") return "施肥最大经验";
+  if (mode === "max_profit") return "最大收益";
+  if (mode === "max_fert_profit") return "施肥最大收益";
+  if (mode === "none") return "关闭";
+  return mode ? String(mode) : "未知策略";
+}
+
+function formatAutoFarmSeedSourceLabel(source) {
+  const text = String(source || "").trim().toLowerCase();
+  if (!text) return "未知来源";
+  if (text === "backpack") return "背包";
+  if (text === "backpack_explicit") return "背包指定";
+  if (text === "backpack_partial") return "背包部分种植";
+  if (text === "backpack_plus_shop_lookup") return "背包 + 商店补购";
+  if (text === "shop") return "商店";
+  if (text === "shop_lookup") return "商店查找购买";
+  if (text === "shop_explicit") return "商店指定";
+  if (text === "shop_lookup_deferred") return "商店延后确认";
+  if (text === "shop_buy_highest") return "商店最高级";
+  if (text === "shop_buy_lowest") return "商店最低级";
+  if (text === "unavailable") return "当前不可用";
+  return String(source);
+}
+
+function formatAutoFarmDecisionReason(reason) {
+  const text = String(reason || "").trim().toLowerCase();
+  if (!text) return "未说明原因";
+  const map = {
+    backpack_seed_available: "背包中有可用种子",
+    no_seeds_in_backpack: "背包里没有可用种子",
+    seed_id_required: "尚未配置指定种子",
+    specified_seed_in_backpack: "指定种子在背包中",
+    specified_seed_in_shop: "指定种子可在商店购买",
+    specified_seed_shop_lookup_deferred: "商店查询延后确认",
+    seed_not_available: "当前背包和商店都不可用",
+    no_plant_candidates: "当前等级下没有候选作物",
+    strategy_seed_in_backpack: "排行候选在背包中",
+    strategy_seed_in_shop: "排行候选可在商店购买",
+    strategy_shop_lookup_deferred: "商店查询延后确认",
+    buy_failed: "购买失败",
+    plant_verify_failed: "种植后校验失败",
+  };
+  return map[text] || String(reason);
+}
+
+function formatAutoFarmLevelSourceLabel(source) {
+  const text = String(source || "").trim().toLowerCase();
+  if (text === "config") return "手动等级上限";
+  if (text === "profile") return "账号等级";
+  if (text === "profile_plant_level") return "可种等级";
+  if (text === "none") return "未识别等级";
+  return source ? String(source) : "未知来源";
+}
+
+function formatAutoFarmStageCounts(stageCounts) {
+  const src = stageCounts && typeof stageCounts === "object" ? stageCounts : {};
+  const defs = [
+    ["mature", "成熟"],
+    ["growing", "生长中"],
+    ["empty", "空地"],
+    ["dead", "枯萎"],
+    ["other", "其他"],
+    ["unknown", "未知"],
+    ["error", "异常"],
+  ];
+  const parts = [];
+  defs.forEach(([key, label]) => {
+    const value = Number(src[key]) || 0;
+    if (value > 0) parts.push(label + value);
+  });
+  return parts.join("，");
+}
+
+function formatAutoFarmWorkCounts(workCounts) {
+  const src = workCounts && typeof workCounts === "object" ? workCounts : {};
+  const defs = [
+    ["collect", "可收"],
+    ["water", "待浇水"],
+    ["eraseGrass", "待除草"],
+    ["killBug", "待杀虫"],
+    ["eraseDead", "待清理枯萎"],
+  ];
+  const parts = [];
+  defs.forEach(([key, label]) => {
+    const value = Number(src[key]) || 0;
+    if (value > 0) parts.push(label + value);
+  });
+  return parts.join("，");
+}
+
+function formatAutoFarmSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return "无状态信息";
+  const parts = [];
+  if (snapshot.farmType) parts.push("农场=" + snapshot.farmType);
+  if (snapshot.totalGrids != null) parts.push("地块 " + snapshot.totalGrids);
+  const stageText = formatAutoFarmStageCounts(snapshot.stageCounts);
+  const workText = formatAutoFarmWorkCounts(snapshot.workCounts);
+  if (stageText) parts.push("阶段 " + stageText);
+  if (workText) parts.push("待处理 " + workText);
+  return parts.join(" · ") || "无状态信息";
+}
+
+function formatAutoFarmFriendName(friend) {
+  if (!friend || typeof friend !== "object") return "未知好友";
+  const name = friend.displayName || friend.name || friend.remark || (friend.gid != null ? "gid=" + friend.gid : "未知好友");
+  return friend.gid != null ? `${name} (gid=${friend.gid})` : String(name);
+}
+
+function formatFriendHelpExpStateSummary(state) {
+  const src = state && typeof state === "object" ? state : null;
+  if (!src) return "帮忙经验 --";
+  const earnedExp = Math.max(0, Number(src.earnedExp) || 0);
+  const dailyLimit = Math.max(0, Number(src.dailyLimit) || 0);
+  if (dailyLimit > 0) return `帮忙经验 ${earnedExp}/${dailyLimit}`;
+  return `帮忙经验 ${earnedExp}`;
+}
+
+function formatAutoFarmIdList(list, limit) {
+  const rows = Array.isArray(list) ? list : [];
+  const max = Math.max(1, Number(limit) || 6);
+  const ids = rows
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  if (ids.length <= max) return ids.join(",");
+  return ids.slice(0, max).join(",") + ` 等${ids.length}块`;
+}
+
+function normalizeAutoFarmIdArray(list) {
+  const source = Array.isArray(list) ? list : [];
+  const next = [];
+  for (let i = 0; i < source.length; i += 1) {
+    const value = Number(source[i]);
+    if (!Number.isFinite(value) || value <= 0 || next.includes(value)) continue;
+    next.push(value);
+  }
+  return next;
+}
+
+function buildAutoFarmLandDetailParts(beforeLandIds, afterLandIds) {
+  const parts = [];
+  const targetIds = normalizeAutoFarmIdArray(beforeLandIds);
+  const remainingIds = normalizeAutoFarmIdArray(afterLandIds);
+  if (targetIds.length > 0) parts.push("目标地块 " + formatAutoFarmIdList(targetIds, 12));
+  if (remainingIds.length > 0) parts.push("剩余地块 " + formatAutoFarmIdList(remainingIds, 12));
+  return parts;
+}
+
+function formatAutoFarmFertilizerTypeLabel(type) {
+  return String(type || "").trim().toLowerCase() === "organic" ? "有机" : "无机";
+}
+
+function formatAutoFarmFertilizerPhaseLabel(phase) {
+  const text = String(phase || "").trim().toLowerCase();
+  if (text === "season_start") return "首轮";
+  if (text === "rush_organic") return "催熟轮";
+  return text ? text : null;
+}
+
+function formatAutoFarmFertilizerReason(action) {
+  if (!action || typeof action !== "object") return "unknown";
+  if (action.displayReason) return String(action.displayReason);
+  const text = String(action.reason || action.error || "").trim();
+  if (!text) return "unknown";
+  if (text === "same_fertilizer_type_already_used") return "该化肥对同一作物仅能使用1次";
+  return text;
+}
+
+function formatAutoFarmFertilizerBatchReason(reason) {
+  const text = String(reason || "").trim();
+  if (!text) return "unknown";
+  if (text === "runtime_missing_gameCtl.fertilizeLandsBatch") {
+    return "当前小程序运行时未加载批量施肥接口";
+  }
+  return text;
+}
+
+function formatAutoFarmMatureSecLabel(value) {
+  const seconds = Number(value);
+  return Number.isFinite(seconds) ? `${seconds}s` : null;
+}
+
+function pushAutoFarmPlantAttemptMessages(messages, attempts) {
+  const rows = Array.isArray(attempts) ? attempts : [];
+  rows.forEach((attempt, index) => {
+    if (!attempt) return;
+    const parts = [`第${index + 1}次`, `候选 ${attempt.candidateSeedId || "unknown"}`];
+    const requestedLandIds = normalizeAutoFarmIdArray(attempt.requestedLandIds);
+    const skippedLandIds = normalizeAutoFarmIdArray(attempt.skippedLandIds);
+    if (requestedLandIds.length > 0) parts.push("目标地块 " + formatAutoFarmIdList(requestedLandIds, 12));
+    if (skippedLandIds.length > 0) parts.push("跳过地块 " + formatAutoFarmIdList(skippedLandIds, 12));
+    parts.push("已种 " + (Number(attempt.plantedCount) || 0));
+    if (attempt.dispatchError) parts.push("失败 " + attempt.dispatchError);
+    messages.push({
+      level: attempt.ok ? "info" : "warn",
+      message: `自动农场 / 自己农场 / 自动种植尝试：${parts.join(" · ")}`,
+    });
+  });
+}
+
+function buildAutoFarmCycleLogMessages({ due, injectState, result, cooldownApplied }) {
+  const messages = [];
+  const ownEnabled = !!(due && due.ownDue);
+  const friendEnabled = !!(due && due.friendDue);
+  const ownFarm = result && result.ownFarm && typeof result.ownFarm === "object" ? result.ownFarm : null;
+  const friendSteal = result && result.friendSteal && typeof result.friendSteal === "object" ? result.friendSteal : null;
+
+  messages.push({
+    level: "info",
+    message: `自动农场 / 开始调度：自己农场=${ownEnabled ? "执行" : "跳过"}，好友巡检=${friendEnabled ? "执行" : "跳过"}${injectState && injectState.injected ? "，已自动注入脚本" : ""}`,
+  });
+
+  if (ownEnabled) {
+    if (ownFarm && ownFarm.enterOwn) {
+      messages.push({
+        level: ownFarm.enterOwn.ok ? "info" : "warn",
+        message: `自动农场 / 自己农场 / 进场：${ownFarm.enterOwn.ok ? "已回到自己农场" : ("失败 " + (ownFarm.enterOwn.error || "unknown"))}`,
+      });
+    }
+
+    if (ownFarm && ownFarm.tasks) {
+      messages.push({
+        level: "info",
+        message: `自动农场 / 自己农场 / 巡检前：${formatAutoFarmSnapshot(ownFarm.tasks.before)}`,
+      });
+
+      const actions = Array.isArray(ownFarm.tasks.actions) ? ownFarm.tasks.actions : [];
+      if (actions.length === 0) {
+        messages.push({
+          level: "info",
+          message: "自动农场 / 自己农场 / 一键动作：无待处理项",
+        });
+      }
+      actions.forEach((action) => {
+        if (!action) return;
+        const label = formatAutoFarmActionLabel(action.key);
+        const landParts = buildAutoFarmLandDetailParts(action.beforeLandIds, action.afterLandIds);
+        if (action.ok) {
+          messages.push({
+            level: "info",
+            message: `自动农场 / 自己农场 / ${label}：${Number(action.beforeCount) || 0} → ${Number(action.afterCount) || 0}${landParts.length > 0 ? (" · " + landParts.join(" · ")) : ""}`,
+          });
+        } else {
+          messages.push({
+            level: "warn",
+            message: `自动农场 / 自己农场 / ${label}：失败 ${action.error || action.reason || "unknown"}${landParts.length > 0 ? (" · " + landParts.join(" · ")) : ""}`,
+          });
+        }
+      });
+
+      const specialCollect = ownFarm.tasks.specialCollect;
+      if (specialCollect && (specialCollect.candidateCount > 0 || specialCollect.ok === false)) {
+        if (specialCollect.ok === false) {
+          const candidateLandIds = normalizeAutoFarmIdArray(specialCollect.candidateLandIds);
+          messages.push({
+            level: "warn",
+            message: `自动农场 / 自己农场 / 补充逐块收取：失败 ${specialCollect.error || "unknown"}${candidateLandIds.length > 0 ? (" · 候选地块 " + formatAutoFarmIdList(candidateLandIds, 12)) : ""}`,
+          });
+        } else {
+          const successActions = Array.isArray(specialCollect.actions)
+            ? specialCollect.actions.filter((item) => item && item.ok === true)
+            : [];
+          const failedActions = Array.isArray(specialCollect.actions)
+            ? specialCollect.actions.filter((item) => item && item.ok !== true)
+            : [];
+          const candidateLandIds = normalizeAutoFarmIdArray(specialCollect.candidateLandIds);
+          const successLandIds = normalizeAutoFarmIdArray(successActions.map((item) => item.landId));
+          const remainingLandIds = normalizeAutoFarmIdArray(specialCollect.remainingLandIds);
+          const successCount = Array.isArray(successActions) ? successActions.length : 0;
+          const parts = [
+            `候选 ${Number(specialCollect.candidateCount) || 0} 块`,
+            `成功 ${successCount} 块`,
+            `剩余 ${Number(specialCollect.remainingCount) || 0} 块`,
+          ];
+          if (candidateLandIds.length > 0) parts.push("候选地块 " + formatAutoFarmIdList(candidateLandIds, 12));
+          if (remainingLandIds.length > 0) parts.push("剩余地块 " + formatAutoFarmIdList(remainingLandIds, 12));
+          messages.push({
+            level: "info",
+            message: `自动农场 / 自己农场 / 补充逐块收取：${parts.join(" · ")}`,
+          });
+          if (successLandIds.length > 0) {
+            messages.push({
+              level: "info",
+              message: `自动农场 / 自己农场 / 补充逐块收取成功：地块 ${formatAutoFarmIdList(successLandIds, 12)}`,
+            });
+          }
+          failedActions.forEach((item) => {
+            if (!item) return;
+            messages.push({
+              level: "warn",
+              message: `自动农场 / 自己农场 / 补充逐块收取失败：地块 ${Number(item.landId) || "unknown"} · ${item.error || item.reason || "unknown"}`,
+            });
+          });
+        }
+      }
+    }
+
+    const plantResult = ownFarm && ownFarm.plantResult && typeof ownFarm.plantResult === "object" ? ownFarm.plantResult : null;
+    if (plantResult) {
+      const nested = plantResult.plantResult && typeof plantResult.plantResult === "object" ? plantResult.plantResult : null;
+      pushAutoFarmPlantAttemptMessages(messages, nested && nested.attempts);
+      const decisionLog = Array.isArray(plantResult.decisionLog) ? plantResult.decisionLog : [];
+      decisionLog.forEach((item) => {
+        if (!item) return;
+        const prefix = `自动农场 / 自己农场 / 种植决策：第${Number(item.step) || 0}步 ${formatAutoFarmPlantModeLabel(item.mode)}`;
+        if (item.phase === "fallback") {
+          messages.push({
+            level: "warn",
+            message: `${prefix} 失败（${formatAutoFarmDecisionReason(item.reason)}），回退到 ${formatAutoFarmPlantModeLabel(item.fallbackToMode)}`,
+          });
+          return;
+        }
+        const parts = [];
+        if (item.selectedSeedName || item.selectedSeedId) parts.push("目标 " + (item.selectedSeedName || item.selectedSeedId));
+        if (item.source) parts.push("来源 " + formatAutoFarmSeedSourceLabel(item.source));
+        if (item.backpackCount != null) parts.push("背包 " + item.backpackCount);
+        if (item.shopGoodsId != null) parts.push("商品 " + item.shopGoodsId);
+        if (item.effectiveMaxLevel != null) parts.push(formatAutoFarmLevelSourceLabel(item.levelSource) + " Lv." + item.effectiveMaxLevel);
+        parts.push("原因 " + formatAutoFarmDecisionReason(item.reason));
+        messages.push({
+          level: item.phase === "failed" ? "warn" : "info",
+          message: `${prefix} · ${parts.join(" · ")}`,
+        });
+      });
+
+      if (plantResult.ok && plantResult.action === "planted") {
+        const plantedCount = Number(nested && nested.plantedCount != null ? nested.plantedCount : plantResult.emptyCount) || 0;
+        const requestedLandIds = normalizeAutoFarmIdArray(
+          nested && Array.isArray(nested.requestedLandIds)
+            ? nested.requestedLandIds
+            : (nested && Array.isArray(nested.beforeEmptyIds) ? nested.beforeEmptyIds : [])
+        );
+        const skippedLandIds = normalizeAutoFarmIdArray(nested && nested.skippedLandIds);
+        const parts = [];
+        parts.push(formatAutoFarmPlantModeLabel(plantResult.resolvedMode || plantResult.mode));
+        parts.push("成功种植 " + (plantResult.seedName || plantResult.seedId || "unknown"));
+        parts.push("x" + plantedCount);
+        if (requestedLandIds.length > 0) parts.push("目标地块 " + formatAutoFarmIdList(requestedLandIds, 12));
+        if (skippedLandIds.length > 0) parts.push("跳过地块 " + formatAutoFarmIdList(skippedLandIds, 12));
+        if (plantResult.seedSource) parts.push("来源 " + formatAutoFarmSeedSourceLabel(plantResult.seedSource));
+        messages.push({
+          level: "info",
+          message: `自动农场 / 自己农场 / 自动种植：${parts.join(" · ")}`,
+        });
+      } else if (plantResult.ok && plantResult.action === "no_empty_lands") {
+        messages.push({
+          level: "info",
+          message: `自动农场 / 自己农场 / 自动种植：${formatAutoFarmPlantModeLabel(plantResult.resolvedMode || plantResult.mode)} 检测无空地`,
+        });
+      } else if (plantResult.ok && plantResult.action === "skip") {
+        messages.push({
+          level: "info",
+          message: "自动农场 / 自己农场 / 自动种植：当前已关闭",
+        });
+      } else {
+        const attempts = Array.isArray(nested && nested.attempts) ? nested.attempts : [];
+        messages.push({
+          level: "warn",
+          message: `自动农场 / 自己农场 / 自动种植：失败 ${plantResult.reason || plantResult.error || "unknown"}${attempts.length > 0 ? ` · 共尝试 ${attempts.length} 次` : ""}`,
+        });
+      }
+    }
+
+    const fertilizerResult = ownFarm && ownFarm.fertilizerResult && typeof ownFarm.fertilizerResult === "object" ? ownFarm.fertilizerResult : null;
+    if (fertilizerResult) {
+      if (fertilizerResult.skipped) {
+        messages.push({
+          level: "info",
+          message: `自动农场 / 自己农场 / 自动施肥：跳过 ${fertilizerResult.reason || fertilizerResult.executedMode || "unknown"}`,
+        });
+      } else if (fertilizerResult.ok) {
+        messages.push({
+          level: "info",
+          message: `自动农场 / 自己农场 / 自动施肥：成功 ${Number(fertilizerResult.successCount) || 0} 块，跳过 ${Number(fertilizerResult.skippedCount) || 0} 块，失败 ${Number(fertilizerResult.failureCount) || 0} 块`,
+        });
+      } else {
+        messages.push({
+          level: "warn",
+          message: `自动农场 / 自己农场 / 自动施肥：失败 ${fertilizerResult.error || fertilizerResult.reason || "unknown"} · 成功 ${Number(fertilizerResult.successCount) || 0} 块，跳过 ${Number(fertilizerResult.skippedCount) || 0} 块，失败 ${Number(fertilizerResult.failureCount) || 0} 块`,
+        });
+      }
+      if (fertilizerResult.batchUnavailableReason) {
+        messages.push({
+          level: "info",
+          message: `自动农场 / 自己农场 / 自动施肥：批量未启用 ${formatAutoFarmFertilizerBatchReason(fertilizerResult.batchUnavailableReason)}${fertilizerResult.runtimeScriptHash ? (" · 脚本 " + fertilizerResult.runtimeScriptHash) : ""}`,
+        });
+      }
+      const fertilizerActions = Array.isArray(fertilizerResult.actions) ? fertilizerResult.actions : [];
+      fertilizerActions.forEach((action) => {
+        if (!action) return;
+        const parts = [`地块 ${Number(action.landId) || "unknown"}`, formatAutoFarmFertilizerTypeLabel(action.fertilizerType)];
+        const phaseLabel = formatAutoFarmFertilizerPhaseLabel(action.phase);
+        if (phaseLabel) parts.push(phaseLabel);
+        if (action.skipped === true) {
+          parts.push("跳过 " + formatAutoFarmFertilizerReason(action));
+          messages.push({
+            level: "info",
+            message: `自动农场 / 自己农场 / 自动施肥：${parts.join(" · ")}`,
+          });
+          return;
+        }
+        if (action.ok === true) {
+          const beforeMature = formatAutoFarmMatureSecLabel(action.beforeMatureInSec);
+          const afterMature = formatAutoFarmMatureSecLabel(action.afterMatureInSec);
+          const deltaMature = Number(action.deltaMatureInSec);
+          if (Number.isFinite(deltaMature) && deltaMature !== 0) {
+            parts.push("成熟缩短 " + Math.abs(deltaMature) + "s");
+          }
+          if (beforeMature || afterMature) {
+            parts.push(`成熟 ${beforeMature || "?"} -> ${afterMature || "?"}`);
+          }
+          messages.push({
+            level: "info",
+            message: `自动农场 / 自己农场 / 自动施肥：${parts.join(" · ")}`,
+          });
+          return;
+        }
+        parts.push("失败 " + formatAutoFarmFertilizerReason(action));
+        messages.push({
+          level: "warn",
+          message: `自动农场 / 自己农场 / 自动施肥：${parts.join(" · ")}`,
+        });
+      });
+    }
+
+    if (ownFarm && ownFarm.tasks) {
+      messages.push({
+        level: "info",
+        message: `自动农场 / 自己农场 / 巡检后：${formatAutoFarmSnapshot(ownFarm.tasks.after)}`,
+      });
+    }
+  }
+
+  if (friendEnabled && friendSteal) {
+    if (friendSteal.skipped && friendSteal.skipReason === "quiet_hours") {
+      messages.push({
+        level: "info",
+        message: `自动农场 / 好友巡检：静默时段暂停 (${friendSteal.quietHours && friendSteal.quietHours.start ? friendSteal.quietHours.start : "--:--"} - ${friendSteal.quietHours && friendSteal.quietHours.end ? friendSteal.quietHours.end : "--:--"})`,
+      });
+    } else {
+      const parts = [];
+      parts.push("候选 " + (Number(friendSteal.totalCandidates) || 0));
+      parts.push("可偷 " + (Number(friendSteal.stealableCandidates) || 0));
+      if (friendSteal.helpEnabled) {
+        parts.push("可帮 " + (Number(friendSteal.helpableCandidates) || 0));
+        parts.push(formatFriendHelpExpStateSummary(friendSteal.helpExpState));
+        if (friendSteal.helpExpLimitReached) {
+          parts.push("帮忙经验已满");
+        }
+        if (friendSteal.helpTrackingError) {
+          parts.push("帮忙经验跟踪异常");
+        }
+      }
+      if (friendSteal.blacklistPolicy && friendSteal.blacklistPolicy.enabled) {
+        parts.push(friendSteal.blacklistPolicy.strategyLabel || "黑名单策略");
+      }
+      if ((Number(friendSteal.explicitBlacklistedCount) || 0) > 0) {
+        parts.push("手动黑名单 " + friendSteal.explicitBlacklistedCount);
+      }
+      if ((Number(friendSteal.maskedBlockedCount) || 0) > 0) {
+        parts.push("蒙面屏蔽 " + friendSteal.maskedBlockedCount);
+      }
+      if ((Number(friendSteal.cooldownBlockedCount) || 0) > 0) {
+        parts.push("冷却中 " + friendSteal.cooldownBlockedCount);
+      }
+      messages.push({
+        level: "info",
+        message: `自动农场 / 好友巡检：${parts.join(" · ")}`,
+      });
+      if (friendSteal.helpEnabled && (Number(friendSteal.helpableCandidates) || 0) > 0 && (Number(friendSteal.stealableCandidates) || 0) <= 0) {
+        messages.push({
+          level: "info",
+          message: "自动农场 / 好友巡检：本轮无可偷好友，仅执行帮忙巡检",
+        });
+      } else if ((Number(friendSteal.stealableCandidates) || 0) <= 0) {
+        messages.push({
+          level: "info",
+          message: "自动农场 / 好友巡检：本轮无可偷好友",
+        });
+      }
+    }
+
+    const visits = Array.isArray(friendSteal.visits) ? friendSteal.visits : [];
+    visits.forEach((visit) => {
+      if (!visit) return;
+      const friendLabel = formatAutoFarmFriendName(visit.friend);
+      const selective = visit.selective && typeof visit.selective === "object" ? visit.selective : null;
+      const selectiveParts = [];
+      if (selective && selective.enabled) {
+        if (selective.mode === "targeted") selectiveParts.push("逐块收取");
+        else if (selective.mode === "skip_whole_farm") selectiveParts.push("整场跳过");
+        else if (selective.mode === "one_click") selectiveParts.push("一键收取");
+        const skipped = Array.isArray(selective.skipped) ? selective.skipped : [];
+        if (skipped.length > 0) selectiveParts.push("跳过黑名单 " + skipped.length + " 块");
+        const allowed = Array.isArray(selective.allowedLandIds) ? selective.allowedLandIds : [];
+        if (allowed.length > 0) selectiveParts.push("处理地块 " + formatAutoFarmIdList(allowed, 8));
+      }
+      const helpBefore = normalizeHelpCounts(visit.helpBeforeCounts);
+      const helpAfter = normalizeHelpCounts(visit.helpAfterCounts);
+      const helpProgress = getHelpProgressFromVisit(visit);
+      const helpBeforeTotal = helpBefore.water + helpBefore.eraseGrass + helpBefore.killBug;
+      const helpProgressTotal = helpProgress.water + helpProgress.eraseGrass + helpProgress.killBug;
+      const visitAction = String(visit.action || "").toLowerCase();
+      const harvested = visitAction.includes("harvest")
+        || (Number(visit.collectBefore) || 0) > 0
+        || (Number(visit.collectAfter) || 0) > 0;
+      if (!visit.ok) {
+        messages.push({
+          level: "warn",
+          message: `自动农场 / 好友偷菜 / ${friendLabel}：失败 ${visit.error || visit.reason || "unknown"}${selectiveParts.length ? " · " + selectiveParts.join(" · ") : ""}`,
+        });
+        return;
+      }
+      if (visit.reason === "blacklist_strategy_skip_whole_farm") {
+        messages.push({
+          level: "info",
+          message: `自动农场 / 好友偷菜 / ${friendLabel}：命中黑名单作物，跳过整个农场${selectiveParts.length ? " · " + selectiveParts.join(" · ") : ""}`,
+        });
+        return;
+      }
+      if (visit.reason === "all_collectable_blacklisted") {
+        messages.push({
+          level: "info",
+          message: `自动农场 / 好友偷菜 / ${friendLabel}：当前可偷地块全部命中黑名单，跳过收取${selectiveParts.length ? " · " + selectiveParts.join(" · ") : ""}`,
+        });
+        return;
+      }
+      if (visit.reason === "no_collectable_after_enter") {
+        messages.push({
+          level: "info",
+          message: `自动农场 / 好友偷菜 / ${friendLabel}：进场后无可摘作物${selectiveParts.length ? " · " + selectiveParts.join(" · ") : ""}`,
+        });
+        return;
+      }
+      if (visit.reason === "no_actionable_after_enter") {
+        messages.push({
+          level: "info",
+          message: `自动农场 / 好友巡检 / ${friendLabel}：进场后无可偷可帮地块${selectiveParts.length ? " · " + selectiveParts.join(" · ") : ""}`,
+        });
+        return;
+      }
+      if (harvested) {
+        messages.push({
+          level: "info",
+          message: `自动农场 / 好友偷菜 / ${friendLabel}：${Number(visit.collectBefore) || 0} → ${Number(visit.collectAfter) || 0}${selectiveParts.length ? " · " + selectiveParts.join(" · ") : ""}`,
+        });
+      } else if (!visit.helpPerformed) {
+        messages.push({
+          level: "info",
+          message: `自动农场 / 好友偷菜 / ${friendLabel}：已访问${selectiveParts.length ? " · " + selectiveParts.join(" · ") : ""}`,
+        });
+      }
+
+      if (visit.helpSkipReason === "exp_limit_reached") {
+        messages.push({
+          level: "info",
+          message: `自动农场 / 好友帮忙 / ${friendLabel}：今日经验已达上限，跳过帮忙`,
+        });
+        return;
+      }
+
+      if (helpBeforeTotal > 0 || helpProgressTotal > 0 || visit.helpPerformed || (Number(visit.helpExpDelta) || 0) > 0) {
+        const helpParts = [];
+        if (helpBefore.water > 0 || helpProgress.water > 0) helpParts.push(`浇水 ${helpBefore.water} → ${helpAfter.water}`);
+        if (helpBefore.eraseGrass > 0 || helpProgress.eraseGrass > 0) helpParts.push(`除草 ${helpBefore.eraseGrass} → ${helpAfter.eraseGrass}`);
+        if (helpBefore.killBug > 0 || helpProgress.killBug > 0) helpParts.push(`除虫 ${helpBefore.killBug} → ${helpAfter.killBug}`);
+        if ((Number(visit.helpExpDelta) || 0) > 0) helpParts.push(`经验 +${Number(visit.helpExpDelta) || 0}`);
+        if (visit.helpExpLimitReached) {
+          helpParts.push((Number(visit.helpExpDelta) || 0) > 0 ? "今日经验已满" : "经验未增长，按今日已满处理");
+        }
+        messages.push({
+          level: helpProgressTotal > 0 || (Number(visit.helpExpDelta) || 0) > 0 ? "info" : "warn",
+          message: `自动农场 / 好友帮忙 / ${friendLabel}：${helpParts.length ? helpParts.join(" · ") : "无进展"}`,
+        });
+      }
+    });
+
+    if (friendSteal.helpEnabled && friendSteal.helpExpLimitReached) {
+      messages.push({
+        level: "info",
+        message: `自动农场 / 好友帮忙：今日经验已达上限，后续帮忙已暂停（${formatFriendHelpExpStateSummary(friendSteal.helpExpState)}）`,
+      });
+    }
+
+    if (friendSteal.returnHome) {
+      messages.push({
+        level: friendSteal.returnHome.ok ? "info" : "warn",
+        message: `自动农场 / 回家：${friendSteal.returnHome.ok ? "已返回自己农场" : ("失败 " + (friendSteal.returnHome.error || "unknown"))}`,
+      });
+    }
+  }
+
+  const ownActionCount = Array.isArray(ownFarm && ownFarm.tasks && ownFarm.tasks.actions) ? ownFarm.tasks.actions.length : 0;
+  const friendVisitCount = Array.isArray(friendSteal && friendSteal.visits) ? friendSteal.visits.length : 0;
+  const summary = [
+    `自己 ${ownActionCount} 动作`,
+    `好友 ${friendVisitCount} 次`,
+  ];
+  if ((Number(cooldownApplied) || 0) > 0) {
+    summary.push(`新增冷却 ${cooldownApplied}`);
+  }
+  messages.push({
+    level: "info",
+    message: `自动农场 / 调度完成：${summary.join(" · ")}`,
+  });
+
+  return messages;
 }
 
 class AutoFarmManager {
@@ -95,6 +1098,7 @@ class AutoFarmManager {
     this.timer = null;
     this.running = false;
     this.busy = false;
+    this.currentRunContext = null;
     this.nextRunAt = null;
     this.lastStartedAt = null;
     this.lastFinishedAt = null;
@@ -103,8 +1107,20 @@ class AutoFarmManager {
     this.lastError = null;
     this.lastResult = null;
     this.recentEvents = [];
-    // 仅保存在当前 Node 进程内存里；不做账号隔离，但会按本地日期自动清空。
-    this.careExpLimitState = null;
+    this.todayStats = createEmptyTodayStats();
+    this.friendVisitCooldowns = new Map();
+    this.persistAutoFertilizerStateImpl = typeof opts.persistAutoFertilizerState === "function"
+      ? opts.persistAutoFertilizerState
+      : null;
+    this.persistFriendHelpExpStateImpl = typeof opts.persistFriendHelpExpState === "function"
+      ? opts.persistFriendHelpExpState
+      : null;
+    this.autoFertilizerState = normalizeAutoFertilizerState(opts.initialAutoFertilizerState);
+    this.friendHelpExpState = normalizeFriendHelpExpState(opts.initialFriendHelpExpState);
+    this.autoFertilizerStatePersistChain = Promise.resolve(false);
+    this.friendHelpExpStatePersistChain = Promise.resolve(false);
+    this.lastPersistedAutoFertilizerStateSerialized = JSON.stringify(serializeAutoFertilizerState(this.autoFertilizerState));
+    this.lastPersistedFriendHelpExpStateSerialized = JSON.stringify(serializeFriendHelpExpState(this.friendHelpExpState));
     this.config = normalizeAutoFarmConfig({});
   }
 
@@ -114,7 +1130,8 @@ class AutoFarmManager {
   }
 
   getState() {
-    this._pruneCareExpLimit(Date.now());
+    this._ensureTodayStatsFresh();
+    this._pruneFriendVisitCooldowns();
     return {
       running: this.running,
       busy: this.busy,
@@ -125,17 +1142,139 @@ class AutoFarmManager {
       lastFriendRunAt: this.lastFriendRunAt ? new Date(this.lastFriendRunAt).toISOString() : null,
       lastError: this.lastError,
       lastResult: this.lastResult,
-      careExpLimitState: this.careExpLimitState ? { ...this.careExpLimitState } : null,
+      todayStats: { ...this.todayStats },
       config: { ...this.config },
+      friendVisitCooldowns: Array.from(this.friendVisitCooldowns.entries()).map(([gid, untilMs]) => ({
+        gid,
+        untilMs,
+        untilAt: new Date(untilMs).toISOString(),
+      })),
+      friendHelpExpState: this.getFriendHelpExpStateSnapshot(),
       recentEvents: [...this.recentEvents],
       runtime: this.getTransportState(),
     };
   }
 
+  getAutoFertilizerStateSnapshot() {
+    return cloneAutoFertilizerStateForSave(this.autoFertilizerState);
+  }
+
+  replaceAutoFertilizerState(raw, opts) {
+    this.autoFertilizerState = normalizeAutoFertilizerState(raw);
+    const snapshot = this.getAutoFertilizerStateSnapshot();
+    this.lastPersistedAutoFertilizerStateSerialized = JSON.stringify(serializeAutoFertilizerState(snapshot));
+    if (opts && opts.persist === true) {
+      void this._persistAutoFertilizerState("replace");
+    }
+    return snapshot;
+  }
+
+  getFriendHelpExpStateSnapshot() {
+    return normalizeFriendHelpExpState(this.friendHelpExpState);
+  }
+
+  replaceFriendHelpExpState(raw, opts) {
+    this.friendHelpExpState = normalizeFriendHelpExpState(raw);
+    const snapshot = this.getFriendHelpExpStateSnapshot();
+    this.lastPersistedFriendHelpExpStateSerialized = JSON.stringify(serializeFriendHelpExpState(snapshot));
+    if (opts && opts.persist === true) {
+      void this._persistFriendHelpExpState("replace");
+    }
+    return snapshot;
+  }
+
+  async recordFriendHelpExpDelta(delta, opts) {
+    const result = addFriendHelpExp(this.friendHelpExpState, delta, opts);
+    if (!(opts && opts.persist === false) && result.applied > 0) {
+      await this._persistFriendHelpExpState(opts && opts.reason ? opts.reason : "record_friend_help_exp");
+    }
+    return result;
+  }
+
+  async markFriendHelpExpLimitReached(opts) {
+    const result = applyFriendHelpExpLimitReached(this.friendHelpExpState, opts);
+    if (!(opts && opts.persist === false)) {
+      await this._persistFriendHelpExpState(opts && opts.reason ? opts.reason : "mark_friend_help_exp_limit");
+    }
+    return result;
+  }
+
+  async recordFertilizerGrid(grid, type, opts) {
+    const entry = grid && typeof grid === "object" ? grid : {};
+    const landId = toPositiveInt(entry.landId);
+    const plantId = toPositiveInt(entry.plantId);
+    const currentSeason = toPositiveInt(entry.currentSeason);
+    const totalSeason = Math.max(1, toPositiveInt(entry.totalSeason) || currentSeason || 1);
+    if (landId <= 0 || plantId <= 0 || currentSeason <= 0) {
+      return { ok: false, reason: "invalid_grid" };
+    }
+    const landKey = String(landId);
+    const nextType = normalizeAutoFertilizerAppliedType(type);
+    const seasonKey = `${landId}:${plantId}:${currentSeason}`;
+    const marks = this.autoFertilizerState.landMarks && typeof this.autoFertilizerState.landMarks === "object"
+      ? this.autoFertilizerState.landMarks
+      : (this.autoFertilizerState.landMarks = Object.create(null));
+    const current = marks[landKey];
+    const next = current && current.seasonKey === seasonKey
+      ? current
+      : {
+          landId,
+          seasonKey,
+          plantId,
+          currentSeason,
+          totalSeason,
+          normalApplied: false,
+          organicApplied: false,
+          normalBlocked: false,
+          organicBlocked: false,
+          normalNoEffectCount: 0,
+          organicNoEffectCount: 0,
+          normalBlockedReason: null,
+          organicBlockedReason: null,
+          normalEvidence: null,
+          organicEvidence: null,
+          updatedAt: null,
+        };
+    next.plantId = plantId;
+    next.currentSeason = currentSeason;
+    next.totalSeason = totalSeason;
+    const recordedAt = new Date().toISOString();
+    const evidence = {
+      source: "manual_record",
+      at: recordedAt,
+      beforeMatureInSec: toFiniteNumberOrNull(entry.matureInSec),
+      afterMatureInSec: null,
+      deltaMatureInSec: null,
+    };
+    if (nextType === "organic") {
+      next.organicApplied = true;
+      next.organicBlocked = false;
+      next.organicNoEffectCount = 0;
+      next.organicBlockedReason = null;
+      next.organicEvidence = evidence;
+    } else {
+      next.normalApplied = true;
+      next.normalBlocked = false;
+      next.normalNoEffectCount = 0;
+      next.normalBlockedReason = null;
+      next.normalEvidence = evidence;
+    }
+    next.updatedAt = recordedAt;
+    marks[landKey] = next;
+    this.autoFertilizerState.updatedAt = next.updatedAt;
+    if (!(opts && opts.persist === false)) {
+      await this._persistAutoFertilizerState(opts && opts.reason ? opts.reason : `record_${nextType}`);
+    }
+    return {
+      ok: true,
+      mark: { ...next },
+    };
+  }
+
   start(rawConfig) {
     if (rawConfig) this.updateConfig(rawConfig);
-    if (!this.config.autoFarmOwnEnabled && !this.config.autoFarmFriendEnabled) {
-      throw new Error("自动化已启动的项目为空，请至少启用自己农场或好友偷菜");
+    if (!this.config.autoFarmOwnEnabled && !this.config.autoFarmFriendEnabled && !this.config.autoFarmFriendHelpEnabled) {
+      throw new Error("自动化已启动的项目为空，请至少启用自己农场、好友偷菜或好友帮忙");
     }
     this.running = true;
     this._pushEvent("info", "自动化已启动");
@@ -144,6 +1283,10 @@ class AutoFarmManager {
   }
 
   stop(reason = "manual") {
+    if (this.busy && this.currentRunContext) {
+      this.currentRunContext.cancelled = true;
+      this.currentRunContext.reason = String(reason || "manual");
+    }
     this.running = false;
     this.nextRunAt = null;
     if (this.timer) {
@@ -156,8 +1299,8 @@ class AutoFarmManager {
 
   async runOnce(rawConfig) {
     if (rawConfig) this.updateConfig(rawConfig);
-    if (!this.config.autoFarmOwnEnabled && !this.config.autoFarmFriendEnabled) {
-      throw new Error("自动化已启动的项目为空，请至少启用自己农场或好友偷菜");
+    if (!this.config.autoFarmOwnEnabled && !this.config.autoFarmFriendEnabled && !this.config.autoFarmFriendHelpEnabled) {
+      throw new Error("自动化已启动的项目为空，请至少启用自己农场、好友偷菜或好友帮忙");
     }
     if (this.busy) {
       throw new Error("自动化正在执行中");
@@ -166,16 +1309,37 @@ class AutoFarmManager {
   }
 
   _pushEvent(level, message, extra) {
+    const payload = extra && typeof extra === "object" ? { ...extra } : null;
     const entry = {
       time: new Date().toISOString(),
       level,
       message,
     };
-    if (extra !== undefined) entry.extra = extra;
-    this.recentEvents.push(entry);
-    if (this.recentEvents.length > 40) {
-      this.recentEvents.splice(0, this.recentEvents.length - 40);
+    if (payload && payload.cycleId) {
+      entry.cycleId = String(payload.cycleId);
+      delete payload.cycleId;
     }
+    if (payload && payload.cycleSeq != null) {
+      entry.cycleSeq = Number(payload.cycleSeq) || 0;
+      delete payload.cycleSeq;
+    }
+    if (payload && payload.category) {
+      entry.category = String(payload.category);
+      delete payload.category;
+    }
+    if (payload && Object.keys(payload).length > 0) entry.extra = payload;
+    this.recentEvents.push(entry);
+    if (this.recentEvents.length > AUTO_FARM_RECENT_EVENT_LIMIT) {
+      this.recentEvents.splice(0, this.recentEvents.length - AUTO_FARM_RECENT_EVENT_LIMIT);
+    }
+  }
+
+  _ensureTodayStatsFresh(now) {
+    const dateKey = getTodayKey(now);
+    if (!this.todayStats || this.todayStats.dateKey !== dateKey) {
+      this.todayStats = createEmptyTodayStats(dateKey);
+    }
+    return this.todayStats;
   }
 
   _schedule(delayMs) {
@@ -201,6 +1365,99 @@ class AutoFarmManager {
     }, delay);
   }
 
+  _pruneFriendVisitCooldowns(nowMs) {
+    const now = Number.isFinite(nowMs) ? nowMs : Date.now();
+    for (const [gid, untilMs] of this.friendVisitCooldowns.entries()) {
+      if (!Number.isFinite(untilMs) || untilMs <= now) {
+        this.friendVisitCooldowns.delete(gid);
+      }
+    }
+  }
+
+  async _persistAutoFertilizerState(reason) {
+    if (!this.persistAutoFertilizerStateImpl) return false;
+    const persist = this.persistAutoFertilizerStateImpl;
+    this.autoFertilizerStatePersistChain = this.autoFertilizerStatePersistChain
+      .catch(() => false)
+      .then(async () => {
+        const serialized = JSON.stringify(serializeAutoFertilizerState(this.autoFertilizerState));
+        if (serialized === this.lastPersistedAutoFertilizerStateSerialized) {
+          return false;
+        }
+        const snapshot = this.getAutoFertilizerStateSnapshot();
+        snapshot.updatedAt = new Date().toISOString();
+        try {
+          await persist(snapshot, { reason: reason || "unknown" });
+          this.autoFertilizerState.updatedAt = snapshot.updatedAt;
+          this.lastPersistedAutoFertilizerStateSerialized = serialized;
+          return true;
+        } catch (error) {
+          this._pushEvent("warn", `自动施肥状态持久化失败: ${toErrorMessage(error)}`, {
+            category: "auto_fertilizer_state_persist_failed",
+            reason: reason || "unknown",
+          });
+          return false;
+        }
+      });
+    return await this.autoFertilizerStatePersistChain;
+  }
+
+  async _persistFriendHelpExpState(reason) {
+    if (!this.persistFriendHelpExpStateImpl) return false;
+    const persist = this.persistFriendHelpExpStateImpl;
+    this.friendHelpExpStatePersistChain = this.friendHelpExpStatePersistChain
+      .catch(() => false)
+      .then(async () => {
+        const serialized = JSON.stringify(serializeFriendHelpExpState(this.friendHelpExpState));
+        if (serialized === this.lastPersistedFriendHelpExpStateSerialized) {
+          return false;
+        }
+        const snapshot = this.getFriendHelpExpStateSnapshot();
+        snapshot.updatedAt = new Date().toISOString();
+        try {
+          await persist(snapshot, { reason: reason || "unknown" });
+          this.friendHelpExpState.updatedAt = snapshot.updatedAt;
+          this.lastPersistedFriendHelpExpStateSerialized = JSON.stringify(serializeFriendHelpExpState(snapshot));
+          return true;
+        } catch (error) {
+          this._pushEvent("warn", `好友帮忙经验持久化失败: ${toErrorMessage(error)}`, {
+            category: "friend_help_exp_persist_failed",
+            reason: reason || "unknown",
+          });
+          return false;
+        }
+      });
+    return await this.friendHelpExpStatePersistChain;
+  }
+
+  _buildFriendVisitCooldownEntries(nowMs) {
+    this._pruneFriendVisitCooldowns(nowMs);
+    return Array.from(this.friendVisitCooldowns.entries()).map(([gid, untilMs]) => ({
+      gid,
+      untilMs,
+    }));
+  }
+
+  _applyFriendVisitCooldowns(friendSteal, nowMs) {
+    this._pruneFriendVisitCooldowns(nowMs);
+    const visits = Array.isArray(friendSteal && friendSteal.visits) ? friendSteal.visits : [];
+    let applied = 0;
+    for (let i = 0; i < visits.length; i += 1) {
+      const visit = visits[i];
+      const gid = Number(visit && visit.friend && visit.friend.gid);
+      if (!Number.isFinite(gid) || gid <= 0) continue;
+      const cooldown = shouldApplyFriendCooldown(visit);
+      if (!cooldown) continue;
+      const untilMs = nowMs + cooldown.ms;
+      const current = this.friendVisitCooldowns.get(gid) || 0;
+      if (untilMs > current) {
+        this.friendVisitCooldowns.set(gid, untilMs);
+        applied += 1;
+      }
+    }
+    return applied;
+  }
+
   _computeNextDelayMs(now) {
     const delays = [];
     if (this.config.autoFarmOwnEnabled) {
@@ -209,7 +1466,7 @@ class AutoFarmManager {
         : now;
       delays.push(Math.max(0, ownDueAt - now));
     }
-    if (this.config.autoFarmFriendEnabled) {
+    if (this.config.autoFarmFriendEnabled || this.config.autoFarmFriendHelpEnabled) {
       const friendDueAt = this.lastFriendRunAt > 0
         ? this.lastFriendRunAt + this.config.autoFarmFriendIntervalSec * 1000
         : now;
@@ -219,80 +1476,15 @@ class AutoFarmManager {
     return Math.max(250, Math.min(...delays));
   }
 
-  _markRunCompletedAt(due, completedAtMs) {
-    const ts = Number.isFinite(Number(completedAtMs)) ? Number(completedAtMs) : Date.now();
-    if (due && due.ownDue) this.lastOwnRunAt = ts;
-    if (due && due.friendDue) this.lastFriendRunAt = ts;
-  }
-
   _getDueFlags(now, force) {
     const ownDue = !!this.config.autoFarmOwnEnabled && (
       force || this.lastOwnRunAt <= 0 || now - this.lastOwnRunAt >= this.config.autoFarmOwnIntervalSec * 1000
     );
-    const friendDue = !!this.config.autoFarmFriendEnabled && (
+    const friendModuleEnabled = !!(this.config.autoFarmFriendEnabled || this.config.autoFarmFriendHelpEnabled);
+    const friendDue = friendModuleEnabled && (
       force || this.lastFriendRunAt <= 0 || now - this.lastFriendRunAt >= this.config.autoFarmFriendIntervalSec * 1000
     );
     return { ownDue, friendDue };
-  }
-
-  _pruneCareExpLimit(now) {
-    if (!this.careExpLimitState) return;
-    const today = getLocalDateKey(now);
-    if (this.careExpLimitState.dateKey !== today) {
-      this.careExpLimitState = null;
-    }
-  }
-
-  _updateCareExpLimitFromResult(result, now) {
-    this._pruneCareExpLimit(now);
-    const ownTasks = result && result.ownFarm && result.ownFarm.tasks ? result.ownFarm.tasks : null;
-    const friendSteal = result && result.friendSteal && typeof result.friendSteal === "object"
-      ? result.friendSteal
-      : null;
-    const source = ownTasks && ownTasks.careExpLimitReached
-      ? "own"
-      : friendSteal && friendSteal.careExpLimitReached
-        ? "friend"
-        : null;
-    if (!source) return;
-    const info = source === "own"
-      ? ownTasks && ownTasks.careExpLimitInfo && typeof ownTasks.careExpLimitInfo === "object"
-        ? ownTasks.careExpLimitInfo
-        : {}
-      : friendSteal && friendSteal.careExpLimitInfo && typeof friendSteal.careExpLimitInfo === "object"
-        ? friendSteal.careExpLimitInfo
-        : {};
-    const sourceLabel = source === "friend" ? "好友" : "自己";
-    const nextState = {
-      source,
-      sourceLabel,
-      dateKey: getLocalDateKey(now),
-      detectedAt: new Date(now).toISOString(),
-      key: info.key || null,
-      landId: info.landId != null ? info.landId : null,
-      expDelta: info.result && info.result.expDelta != null ? info.result.expDelta : null,
-      expBefore: info.result && info.result.expBefore != null ? info.result.expBefore : null,
-      expAfter: info.result && info.result.expAfter != null ? info.result.expAfter : null,
-      reason: info.result && info.result.noExpGainReason
-        ? info.result.noExpGainReason
-        : info.result && info.result.reason
-          ? info.result.reason
-          : "no_exp_gain",
-    };
-    const prev = this.careExpLimitState;
-    const changed = !prev
-      || prev.dateKey !== nextState.dateKey
-      || prev.key !== nextState.key
-      || prev.landId !== nextState.landId
-      || prev.source !== nextState.source;
-    this.careExpLimitState = nextState;
-    if (changed) {
-      this._pushEvent(
-        "info",
-        `共享经验疑似到上限，暂停打理: ${sourceLabel}${formatCareActionLabel(nextState.key)}${nextState.landId != null ? ` 地块${nextState.landId}` : ""}`,
-        nextState,
-      );
-    }
   }
 
   async _tick() {
@@ -331,23 +1523,21 @@ class AutoFarmManager {
       "getFriendList",
       "enterOwnFarm",
       "enterFriendFarm",
-      "getSelfExp",
-      "waitForSelfExpChange",
       "triggerOneClickOperation",
-      "getSeedList",
-      "getShopSeedList",
-      "buyShopGoods",
-      "waterSingleLand",
-      "killBugSingleLand",
-      "eraseGrassSingleLand",
-      "waterLands",
-      "killBugLands",
-      "eraseGrassLands",
       "clickMatureEffect",
-      "getHarvestablePlantLandIds",
-      "plantSingleLand",
-      "plantSeedsOnLands",
+      "dismissRewardPopup",
+      "inspectLandDetail",
+      "inspectFarmModelRuntime",
+      "inspectMainUiRuntime",
+      "inspectFarmComponentCandidates",
+      "getPlayerProfile",
+      "scanSystemAccountCandidates",
+      "fertilizeLand",
+      "getSeedList",
+      "requestShopData",
+      "getShopSeedList",
       "autoReconnectIfNeeded",
+      "autoPlant",
     ]);
   }
 
@@ -357,75 +1547,148 @@ class AutoFarmManager {
 
   async _runCycle(force, dueFlags) {
     const now = Date.now();
-    this._pruneCareExpLimit(now);
+    const cycleId = new Date(now).toISOString();
+    const beforeAutoFertilizerStateSerialized = JSON.stringify(serializeAutoFertilizerState(this.autoFertilizerState));
+    const beforeFriendHelpExpStateSerialized = JSON.stringify(serializeFriendHelpExpState(this.friendHelpExpState));
+    let cycleSeq = 0;
+    const pushCycleEvent = (level, message, extra) => {
+      cycleSeq += 1;
+      this._pushEvent(level, message, {
+        ...(extra && typeof extra === "object" ? extra : {}),
+        cycleId,
+        cycleSeq,
+      });
+    };
+    this._pruneFriendVisitCooldowns(now);
+    this._ensureTodayStatsFresh(now);
     const due = dueFlags || this._getDueFlags(now, force);
     if (!due.ownDue && !due.friendDue) {
       return this.getState();
     }
 
     this.busy = true;
+    this.currentRunContext = {
+      cancelled: false,
+      reason: null,
+      cycleId,
+    };
     this.lastStartedAt = new Date().toISOString();
     this.lastError = null;
+    if (due.ownDue) this.lastOwnRunAt = now;
+    if (due.friendDue) this.lastFriendRunAt = now;
+    pushCycleEvent("info", `自动农场 / 开始调度：自己农场=${due.ownDue ? "执行" : "跳过"}，好友巡检=${due.friendDue ? "执行" : "跳过"}`, {
+      category: "cycle_start",
+      due: {
+        ownDue: due.ownDue,
+        friendDue: due.friendDue,
+      },
+    });
 
     try {
       const session = await this.ensureSession();
       const injectState = await this.ensureGameCtlImpl(session);
-      const transportState = this.getTransportState();
-      const isQqRuntime = !!(transportState && transportState.resolvedTarget === "qq_ws");
-      const careExpLimitState = this.config.autoFarmStopCareWhenNoExp ? this.careExpLimitState : null;
-      const skipCareBecauseNoExp = !!careExpLimitState;
       const cycleOpts = {
         ownFarmEnabled: due.ownDue,
-        friendStealEnabled: due.friendDue,
-        includeWater: !skipCareBecauseNoExp,
-        includeEraseGrass: !skipCareBecauseNoExp,
-        includeKillBug: !skipCareBecauseNoExp,
-        stopCareWhenNoExp: !!this.config.autoFarmStopCareWhenNoExp,
+        friendStealEnabled: due.friendDue && this.config.autoFarmFriendEnabled === true,
         autoPlantMode: this.config.autoFarmPlantMode || "none",
-        autoPlantSource: this.config.autoFarmPlantSource || "auto",
-        autoPlantSelectedSeedKey: this.config.autoFarmPlantSelectedSeedKey || "",
-        useClientAutoPlant: isQqRuntime,
+        autoPlantPrimaryMode: this.config.autoFarmPlantPrimaryMode || this.config.autoFarmPlantMode || "none",
+        autoPlantSecondaryMode: this.config.autoFarmPlantSecondaryMode || "none",
+        autoPlantSeedId: this.config.autoFarmPlantSeedId || 0,
+        autoPlantMaxLevel: this.config.autoFarmPlantMaxLevel || 0,
+        autoFertilizerEnabled: !!this.config.autoFarmFertilizerEnabled,
+        autoFertilizerMode: this.config.autoFarmFertilizerMode || "none",
+        autoFertilizerMultiSeason: !!this.config.autoFarmFertilizerMultiSeason,
+        autoFertilizerLandTypes: Array.isArray(this.config.autoFarmFertilizerLandTypes)
+          ? [...this.config.autoFarmFertilizerLandTypes]
+          : ["gold", "black", "red", "normal"],
+        autoFertilizerGift: !!this.config.autoFarmFertilizerGift,
+        autoFertilizerBuy: !!this.config.autoFarmFertilizerBuy,
+        autoFertilizerBuyType: this.config.autoFarmFertilizerBuyType || "organic",
+        autoFertilizerBuyMax: this.config.autoFarmFertilizerBuyMax || 10,
+        autoFertilizerBuyMode: this.config.autoFarmFertilizerBuyMode || "threshold",
+        autoFertilizerBuyThreshold: this.config.autoFarmFertilizerBuyThreshold || 100,
+        autoFertilizerRushThresholdSec: this.config.autoFarmFertilizerRushThresholdSec != null
+          ? this.config.autoFarmFertilizerRushThresholdSec
+          : 300,
+        autoFertilizerState: this.autoFertilizerState,
         enterWaitMs: this.config.autoFarmEnterWaitMs,
         actionWaitMs: this.config.autoFarmActionWaitMs,
         maxFriends: this.config.autoFarmMaxFriends,
         refreshFriendList: this.config.autoFarmRefreshFriendList,
         returnHome: this.config.autoFarmReturnHome,
+        friendHelpEnabled: this.config.autoFarmFriendHelpEnabled === true,
+        friendHelpStopOnExpLimit: this.config.autoFarmFriendHelpStopOnExpLimit !== false,
+        friendHelpExpState: this.friendHelpExpState,
+        friendQuietHoursEnabled: !!this.config.autoFarmFriendQuietHoursEnabled,
+        friendQuietHoursStart: this.config.autoFarmFriendQuietHoursStart || "23:00",
+        friendQuietHoursEnd: this.config.autoFarmFriendQuietHoursEnd || "07:00",
+        friendBlockMaskedStealers: this.config.autoFarmFriendBlockMaskedStealers !== false,
+        friendBlacklist: Array.isArray(this.config.autoFarmFriendBlacklist)
+          ? [...this.config.autoFarmFriendBlacklist]
+          : [],
+        friendVisitCooldowns: this._buildFriendVisitCooldownEntries(now),
+        friendStealPlantBlacklistEnabled: this.config.autoFarmFriendStealPlantBlacklistEnabled === true,
+        friendStealPlantBlacklistStrategy: this.config.autoFarmFriendStealPlantBlacklistStrategy,
+        friendStealPlantBlacklist: Array.isArray(this.config.autoFarmFriendStealPlantBlacklist)
+          ? [...this.config.autoFarmFriendStealPlantBlacklist]
+          : [],
         stopOnError: this.config.autoFarmStopOnError,
+        runContext: this.currentRunContext,
       };
       const result = await runAutoFarmCycle({
         session,
         callGameCtl: this.callGameCtlImpl.bind(this),
         options: cycleOpts,
       });
-      this._updateCareExpLimitFromResult(result, now);
-      const completedAtMs = Date.now();
-      this._markRunCompletedAt(due, completedAtMs);
-      this.lastFinishedAt = new Date(completedAtMs).toISOString();
+      if (result && result.friendSteal && result.friendSteal.helpEnabled === true) {
+        this.replaceFriendHelpExpState(result.friendSteal.helpExpState, { persist: false });
+      }
+      this.lastFinishedAt = new Date().toISOString();
       this.lastResult = {
         injected: injectState.injected,
         due,
         result,
       };
-      this._pushEvent(
-        "info",
-        `执行完成: own=${due.ownDue ? "on" : "off"}, friend=${due.friendDue ? "on" : "off"}`,
-        {
-          injected: injectState.injected,
-          ownActions: Array.isArray(result?.ownFarm?.tasks?.actions) ? result.ownFarm.tasks.actions.length : 0,
-          friendVisits: Array.isArray(result?.friendSteal?.visits) ? result.friendSteal.visits.length : 0,
-          skipCareBecauseNoExp,
-        },
-      );
+      const cooldownApplied = this._applyFriendVisitCooldowns(result && result.friendSteal, now);
+      mergeCycleResultIntoTodayStats(this.todayStats, result);
+      buildAutoFarmCycleLogMessages({
+        due,
+        injectState,
+        result,
+        cooldownApplied,
+      }).forEach((item, index) => {
+        // 第一条“开始调度”在本轮开始时已经单独写入，这里跳过重复项。
+        if (index === 0) return;
+        pushCycleEvent(item.level || "info", item.message, {
+          category: "cycle_detail",
+        });
+      });
       return this.getState();
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      const completedAtMs = Date.now();
-      this._markRunCompletedAt(due, completedAtMs);
-      this.lastFinishedAt = new Date(completedAtMs).toISOString();
+      this.lastFinishedAt = new Date().toISOString();
+      if (isAutomationStoppedError(err)) {
+        this.lastError = null;
+        pushCycleEvent("info", `自动农场 / 当前轮已停止：${err.message || "manual"}`, {
+          category: "cycle_stopped",
+        });
+        return this.getState();
+      }
       this.lastError = err.message;
-      this._pushEvent("error", `执行失败: ${err.message}`);
+      pushCycleEvent("error", `自动农场 / 调度失败：${err.message}`, {
+        category: "cycle_failed",
+      });
       throw err;
     } finally {
+      const afterAutoFertilizerStateSerialized = JSON.stringify(serializeAutoFertilizerState(this.autoFertilizerState));
+      if (afterAutoFertilizerStateSerialized !== beforeAutoFertilizerStateSerialized) {
+        await this._persistAutoFertilizerState("cycle");
+      }
+      const afterFriendHelpExpStateSerialized = JSON.stringify(serializeFriendHelpExpState(this.friendHelpExpState));
+      if (afterFriendHelpExpStateSerialized !== beforeFriendHelpExpStateSerialized) {
+        await this._persistFriendHelpExpState("cycle");
+      }
+      this.currentRunContext = null;
       this.busy = false;
     }
   }
@@ -434,4 +1697,5 @@ class AutoFarmManager {
 module.exports = {
   AutoFarmManager,
   normalizeAutoFarmConfig,
+  normalizeAutoFertilizerState,
 };

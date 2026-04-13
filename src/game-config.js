@@ -194,11 +194,25 @@ function getLevelExpProgress(level, totalExp) {
   if (!current) return null;
   const currentFloor = Number(current && current.exp) || 0;
   const nextFloor = next ? (Number(next && next.exp) || currentFloor) : null;
-  const currentProgress = Math.max(0, exp - currentFloor);
   const needed = nextFloor != null ? Math.max(0, nextFloor - currentFloor) : null;
+  const looksLikeCurrentLevelExp = (
+    needed != null &&
+    currentFloor > 0 &&
+    exp < currentFloor &&
+    exp <= needed
+  );
+  const normalizedTotalExp = looksLikeCurrentLevelExp ? (currentFloor + exp) : exp;
+  const currentProgressRaw = looksLikeCurrentLevelExp
+    ? exp
+    : Math.max(0, normalizedTotalExp - currentFloor);
+  const currentProgress = needed != null
+    ? Math.max(0, Math.min(currentProgressRaw, needed))
+    : Math.max(0, currentProgressRaw);
   return {
     level: curLevel,
-    totalExp: exp,
+    totalExp: normalizedTotalExp,
+    rawExp: exp,
+    expMode: looksLikeCurrentLevelExp ? "current_level" : "total",
     current: currentProgress,
     needed,
     currentFloor,
