@@ -19,7 +19,13 @@ const { AutoFarmManager } = require("./auto-farm-manager");
 const { PreviewManager } = require("./preview-manager");
 const { QqWsSession } = require("./qq-ws-session");
 const { ensureGameCtl, callGameCtl } = require("./game-ctl-utils");
-const { buildQqBundle, getQqBundleState, patchQqGameFile, resolveQqPatchTarget } = require("./qq-bundle");
+const {
+  buildQqBundle,
+  getQqBundleState,
+  inspectPatchedQqGameFile,
+  patchQqGameFiles,
+  resolveQqPatchTarget,
+} = require("./qq-bundle");
 const { QQ_RPC_GAME_CTL_METHODS } = require("./qq-rpc-spec");
 const {
   getPlantAnalyticsList,
@@ -145,10 +151,31 @@ function getQqScriptSyncState(getQqWsSnapshot, getQqBundleSnapshot) {
   const expectedScriptHash = bundleSnapshot && typeof bundleSnapshot.scriptHash === "string"
     ? bundleSnapshot.scriptHash
     : null;
+  const targetInspection = bundleSnapshot && bundleSnapshot.targetInspection && typeof bundleSnapshot.targetInspection === "object"
+    ? bundleSnapshot.targetInspection
+    : null;
+  const targetScriptHash = targetInspection && typeof targetInspection.scriptHash === "string"
+    ? targetInspection.scriptHash
+    : null;
+  const runtimeMatchesExpected = !!(runtimeScriptHash && expectedScriptHash && runtimeScriptHash === expectedScriptHash);
+  const targetMatchesExpected = !!(targetScriptHash && expectedScriptHash && targetScriptHash === expectedScriptHash);
+  const runtimeMatchesTarget = !!(runtimeScriptHash && targetScriptHash && runtimeScriptHash === targetScriptHash);
+  let status = "unknown";
+  if (runtimeMatchesExpected) status = "runtime_synced";
+  else if (targetMatchesExpected && runtimeScriptHash) status = "runtime_restart_required";
+  else if (targetInspection && targetInspection.exists && !targetScriptHash) status = "target_unpatched";
+  else if (targetInspection && targetInspection.exists && expectedScriptHash && targetScriptHash && targetScriptHash !== expectedScriptHash) status = "target_outdated";
+  else if (!runtimeScriptHash && targetMatchesExpected) status = "runtime_not_connected";
+  else if (!targetInspection || !targetInspection.exists) status = "target_missing";
   return {
     runtimeScriptHash,
     expectedScriptHash,
-    inSync: !!(runtimeScriptHash && expectedScriptHash && runtimeScriptHash === expectedScriptHash),
+    targetScriptHash,
+    runtimeMatchesExpected,
+    targetMatchesExpected,
+    runtimeMatchesTarget,
+    status,
+    inSync: runtimeMatchesExpected,
   };
 }
 
@@ -1253,12 +1280,43 @@ function createGateway(config) {
     };
   }
 
-  function getQqBundleSnapshot() {
+  function getQqBundleSnapshot(options = {}) {
+    let snapshot = null;
     try {
-      return buildQqBundle({ config, projectRoot }).meta;
+      snapshot = buildQqBundle({ config, projectRoot }).meta;
     } catch (_) {
-      return getQqBundleState(config);
+      snapshot = getQqBundleState(config);
     }
+    const target = resolveQqPatchTarget({
+      targetPath: options.targetPath,
+      appId: options.appId,
+      fallbackTargetPath: snapshot && snapshot.targetPath ? snapshot.targetPath : config.qqGameJsPath,
+      fallbackAppId: snapshot && snapshot.appId ? snapshot.appId : config.qqAppId,
+      srcRoot: options.srcRoot || config.qqMiniappSrcRoot,
+    });
+    const targetPaths = Array.isArray(target && target.targetPaths) && target.targetPaths.length > 0
+      ? target.targetPaths
+      : (target && target.targetPath ? [target.targetPath] : []);
+    const targetInspections = targetPaths
+      .slice(0, 8)
+      .map((targetPath) => inspectPatchedQqGameFile(targetPath, snapshot && snapshot.scriptHash))
+      .filter(Boolean);
+    const targetInspection = targetInspections[0] || null;
+    const enriched = {
+      ...(snapshot && typeof snapshot === "object" ? snapshot : {}),
+      targetMode: target && target.targetMode ? target.targetMode : (snapshot && snapshot.targetMode ? snapshot.targetMode : null),
+      targetPath: target && target.targetPath ? target.targetPath : (snapshot && snapshot.targetPath ? snapshot.targetPath : null),
+      targetPaths,
+      canPatch: !!(target && target.targetResolvable),
+      targetError: target && target.targetError ? target.targetError : (snapshot && snapshot.targetError ? snapshot.targetError : null),
+      appId: target && target.appId ? target.appId : (snapshot && snapshot.appId ? snapshot.appId : null),
+      discovery: target && target.discovery ? target.discovery : (snapshot && snapshot.discovery ? snapshot.discovery : null),
+      patchTargetCount: targetPaths.length,
+      targetInspection,
+      targetInspections,
+    };
+    enriched.sync = getQqScriptSyncState(getQqWsSnapshot, () => enriched);
+    return enriched;
   }
 
   function assertQqRuntimeBundleSynced() {
@@ -1946,8 +2004,13 @@ function createGateway(config) {
         if (!target.targetPath) {
           throw new Error(target.targetError || "未找到可用的 QQ game.js");
         }
+        const bundle = getQqBundleSnapshot({
+          targetPath: requestUrl.searchParams.get("targetPath"),
+          appId: requestUrl.searchParams.get("appid"),
+          srcRoot: requestUrl.searchParams.get("srcRoot") || config.qqMiniappSrcRoot,
+        });
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: true, data: target }));
+        res.end(JSON.stringify({ ok: true, data: { ...target, bundle } }));
       } catch (e) {
         const err = e instanceof Error ? e : new Error(String(e));
         res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
@@ -1973,7 +2036,15 @@ function createGateway(config) {
           config,
           projectRoot,
         });
-        const patch = patchQqGameFile(target.targetPath, built.bundleText, {
+        const bundle = getQqBundleSnapshot({
+          targetPath: parsed.targetPath,
+          appId: parsed.appId,
+          srcRoot: parsed.srcRoot || config.qqMiniappSrcRoot,
+        });
+        const targetPaths = Array.isArray(target.targetPaths) && target.targetPaths.length > 0
+          ? target.targetPaths
+          : [target.targetPath];
+        const patches = patchQqGameFiles(targetPaths, built.bundleText, {
           noBackup: !!parsed.noBackup,
         });
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
@@ -1981,8 +2052,11 @@ function createGateway(config) {
           ok: true,
           data: {
             meta: built.meta,
+            bundle,
             target,
-            patch,
+            patches,
+            patch: patches[0] || null,
+            patchedCount: patches.length,
           },
         }));
       } catch (e) {

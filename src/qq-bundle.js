@@ -35,6 +35,20 @@ function loadSource(projectRoot, relPath) {
   return fs.readFileSync(path.join(projectRoot, relPath), "utf8");
 }
 
+function extractBundleScriptHash(source) {
+  const text = String(source || "");
+  const patterns = [
+    /\/\/\s*scriptHash=([0-9a-f]{16,40})/i,
+    /scriptHash:\s*["']([0-9a-f]{16,40})["']/i,
+    /__QQ_FARM_BUNDLE_HASH__["']?\s*[:=]\s*["']([0-9a-f]{16,40})["']/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) return String(match[1]).toLowerCase();
+  }
+  return null;
+}
+
 function renderHostSource(hostTemplate, replacements) {
   let text = String(hostTemplate);
   Object.keys(replacements).forEach((key) => {
@@ -69,6 +83,7 @@ function resolveQqPatchTarget(options = {}) {
       appId: resolvedAppId || null,
       targetMode: "explicit",
       targetPath: absoluteTarget,
+      targetPaths: [absoluteTarget],
       targetResolvable: true,
       targetError: null,
       discovery: null,
@@ -85,6 +100,9 @@ function resolveQqPatchTarget(options = {}) {
         appId: discovery.appId,
         targetMode: "auto",
         targetPath: discovery.selected.gameJsPath,
+        targetPaths: Array.isArray(discovery.candidateGameJsPaths) && discovery.candidateGameJsPaths.length > 0
+          ? [...new Set(discovery.candidateGameJsPaths.map((item) => path.resolve(item)))]
+          : [path.resolve(discovery.selected.gameJsPath)],
         targetResolvable: true,
         targetError: null,
         discovery,
@@ -130,6 +148,7 @@ function getQqBundleState(config) {
     targetConfigured: !!config.qqGameJsPath || !!config.qqAppId,
     targetMode: target.targetMode,
     targetPath: target.targetPath,
+    targetPaths: Array.isArray(target.targetPaths) ? target.targetPaths : (target.targetPath ? [target.targetPath] : []),
     canPatch: !!target.targetResolvable,
     targetError: target.targetError,
     discovery: target.discovery,
@@ -243,6 +262,36 @@ function ensureParentDir(targetPath) {
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
 }
 
+function inspectPatchedQqGameFile(targetPath, expectedScriptHash) {
+  const absoluteTarget = path.resolve(String(targetPath || ""));
+  if (!absoluteTarget || !fs.existsSync(absoluteTarget)) {
+    return {
+      targetPath: absoluteTarget || null,
+      exists: false,
+      hasMarkers: false,
+      scriptHash: null,
+      inSync: false,
+    };
+  }
+
+  const original = fs.readFileSync(absoluteTarget, "utf8");
+  const startIndex = original.indexOf(MARKER_START);
+  const endIndex = original.indexOf(MARKER_END);
+  const hasMarkers = startIndex >= 0 && endIndex >= 0 && endIndex > startIndex;
+  const injectedText = hasMarkers
+    ? original.slice(startIndex, endIndex + MARKER_END.length)
+    : "";
+  const scriptHash = extractBundleScriptHash(injectedText || original);
+  const expected = expectedScriptHash ? String(expectedScriptHash).toLowerCase() : null;
+  return {
+    targetPath: absoluteTarget,
+    exists: true,
+    hasMarkers,
+    scriptHash,
+    inSync: !!(expected && scriptHash && scriptHash === expected),
+  };
+}
+
 function patchQqGameFile(targetPath, bundleText, options = {}) {
   const absoluteTarget = path.resolve(targetPath);
   const original = fs.readFileSync(absoluteTarget, "utf8");
@@ -276,13 +325,29 @@ function patchQqGameFile(targetPath, bundleText, options = {}) {
   };
 }
 
+function patchQqGameFiles(targetPaths, bundleText, options = {}) {
+  const seen = new Set();
+  const list = Array.isArray(targetPaths) ? targetPaths : [targetPaths];
+  const results = [];
+  for (const item of list) {
+    const absoluteTarget = path.resolve(String(item || ""));
+    if (!absoluteTarget || seen.has(absoluteTarget)) continue;
+    seen.add(absoluteTarget);
+    results.push(patchQqGameFile(absoluteTarget, bundleText, options));
+  }
+  return results;
+}
+
 module.exports = {
   MARKER_START,
   MARKER_END,
   DEFAULT_QQ_BUNDLE_FILENAME,
   buildQqBundle,
+  extractBundleScriptHash,
   ensureParentDir,
   getQqBundleState,
+  inspectPatchedQqGameFile,
+  patchQqGameFiles,
   patchQqGameFile,
   resolveQqPatchTarget,
 };

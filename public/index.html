@@ -2343,7 +2343,30 @@
       }
 
       function getQqBundleState(payload) {
+        var lookedUpBundle = qqLookupState && qqLookupState.data && qqLookupState.data.bundle && typeof qqLookupState.data.bundle === "object"
+          ? qqLookupState.data.bundle
+          : null;
+        if (lookedUpBundle && qqLookupState && qqLookupState.ok) {
+          return lookedUpBundle;
+        }
         return payload && payload.qqBundle && typeof payload.qqBundle === "object" ? payload.qqBundle : null;
+      }
+
+      function getQqBundleSync(payload) {
+        var bundle = getQqBundleState(payload);
+        return bundle && bundle.sync && typeof bundle.sync === "object" ? bundle.sync : null;
+      }
+
+      function explainQqSyncError(errorLike) {
+        var err = String(errorLike && errorLike.message ? errorLike.message : errorLike);
+        if (err.indexOf("missing methods") < 0 && err.indexOf("scriptHash mismatch") < 0) {
+          return err;
+        }
+        var sync = getQqBundleSync(lastHealth);
+        if (sync && sync.status === "runtime_restart_required") {
+          return "当前 QQ 小程序仍在使用旧版宿主脚本；目标 game.js 已更新到最新版本，请彻底关闭并重开 QQ 小程序后再刷新这里。";
+        }
+        return "当前 QQ 小程序仍在使用旧版宿主脚本，请重开 QQ 小程序后再刷新这里。";
       }
 
       function normalizeText(value) {
@@ -2428,10 +2451,13 @@
             if (selected.lastTouchedAt) {
               parts.push("更新 " + formatDateTime(selected.lastTouchedAt));
             }
+            if (bundle && bundle.patchTargetCount > 1) {
+              parts.push("补丁覆盖 " + bundle.patchTargetCount + " 份候选缓存");
+            }
             txtQqTargetState.textContent = parts.join(" · ");
             return;
           }
-          txtQqTargetState.textContent = "显式路径: " + shortenMiddle(data.targetPath);
+          txtQqTargetState.textContent = "显式路径: " + shortenMiddle(data.targetPath) + (bundle && bundle.patchTargetCount > 1 ? (" · 补丁覆盖 " + bundle.patchTargetCount + " 份候选缓存") : "");
           return;
         }
 
@@ -4139,10 +4165,7 @@
             return j;
           })
           .catch(function (e) {
-            var err = String(e && e.message ? e.message : e);
-            if (err.indexOf("missing methods") >= 0 || err.indexOf("scriptHash mismatch") >= 0) {
-              err = "当前 QQ 小程序仍在使用旧版宿主脚本，请重开 QQ 小程序后再刷新这里。";
-            }
+            var err = explainQqSyncError(e);
             renderLandDetails(null, err);
             appendLine("土地状态加载失败", err);
           });
@@ -4190,10 +4213,7 @@
             return j;
           })
           .catch(function (e) {
-            var err = String(e && e.message ? e.message : e);
-            if (err.indexOf("missing methods") >= 0 || err.indexOf("scriptHash mismatch") >= 0) {
-              err = "当前 QQ 小程序仍在使用旧版宿主脚本，请重开 QQ 小程序后再刷新这里。";
-            }
+            var err = explainQqSyncError(e);
             renderAccountStatus(null, err);
             appendLine("账户状态加载失败", err);
           });
@@ -5032,16 +5052,35 @@
         const bundle = getQqBundleState(payload);
         maybeSeedQqAppIdFromBundle(bundle);
         if (bundle) {
+          const sync = bundle.sync && typeof bundle.sync === "object" ? bundle.sync : null;
           const bundleParts = [
             "文件 " + (bundle.defaultFilename || "qq-miniapp-bootstrap.js"),
             "ws " + (bundle.hostWsUrl || "未设置"),
             "版本 " + (bundle.hostVersion || "qq-host-1"),
           ];
+          if (bundle.scriptHash) {
+            bundleParts.push("源码hash=" + bundle.scriptHash);
+          }
+          if (sync && sync.targetScriptHash) {
+            bundleParts.push("文件hash=" + sync.targetScriptHash + (sync.targetMatchesExpected ? " 已同步" : " 未同步"));
+          }
+          if (sync && sync.runtimeScriptHash) {
+            bundleParts.push(
+              "运行中hash=" + sync.runtimeScriptHash + (
+                sync.runtimeMatchesExpected
+                  ? " 已同步"
+                  : (sync.targetMatchesExpected ? " 待重启" : " 未同步")
+              )
+            );
+          }
           if (bundle.appId) {
             bundleParts.push("appid " + bundle.appId);
           }
           if (bundle.canPatch && bundle.targetPath) {
             bundleParts.push("可直接补丁");
+            if (bundle.patchTargetCount > 1) {
+              bundleParts.push("候选 " + bundle.patchTargetCount + " 份");
+            }
           } else if (bundle.targetConfigured) {
             bundleParts.push("已配置自动定位");
           } else {
@@ -5563,12 +5602,20 @@
             if (!(j && j.ok && j.data)) {
               throw new Error(j && j.error ? j.error : "patch failed");
             }
-            appendLine("QQ game.js 已打补丁", j.data);
+            appendLine("QQ game.js 已打补丁", {
+              patchedCount: j.data.patchedCount || 0,
+              expectedScriptHash: j.data.meta && j.data.meta.scriptHash ? j.data.meta.scriptHash : null,
+              target: j.data.target || null,
+              patches: Array.isArray(j.data.patches) ? j.data.patches : [],
+            });
             if (j.data && j.data.target && j.data.target.appId) {
               qqLookupState = {
                 appId: j.data.target.appId,
                 ok: true,
-                data: j.data.target,
+                data: {
+                  ...j.data.target,
+                  bundle: j.data.bundle || null,
+                },
                 error: null,
               };
             }

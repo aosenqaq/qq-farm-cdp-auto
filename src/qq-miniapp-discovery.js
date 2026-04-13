@@ -197,6 +197,7 @@ function findLatestQqMiniappByAppId(options = {}) {
       ? path.dirname(selected.dirPath).replace(/miniapp_src$/i, "miniapp_pkgs")
       : null,
     candidateCount: candidates.length,
+    candidateGameJsPaths: candidates.map((item) => item.gameJsPath),
     selected: summarizeCandidate(selected),
     candidates: candidates.slice(0, 8).map(summarizeCandidate),
   };
