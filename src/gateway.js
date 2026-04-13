@@ -15,7 +15,7 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 const { CdpSession } = require("./cdp-session");
 const { WmpfCdpSession } = require("./cdp-wmpf-session");
-const { AutoFarmManager } = require("./auto-farm-manager");
+const { AutoFarmManager, normalizeAutoFertilizerState } = require("./auto-farm-manager");
 const { PreviewManager } = require("./preview-manager");
 const { QqWsSession } = require("./qq-ws-session");
 const { ensureGameCtl, callGameCtl } = require("./game-ctl-utils");
@@ -45,9 +45,24 @@ const {
 } = require("./game-config");
 const { getProfilePlantLevel, resolveProfileWithCandidates } = require("./player-profile-resolver");
 const { STEAL_CROP_BLACKLIST_OPTIONS } = require("./steal-crop-blacklist-options");
+const {
+  ensureFriendHelpExpCacheFile,
+  readFriendHelpExpCache,
+  writeFriendHelpExpCache,
+} = require("./friend-help-exp-cache");
+const {
+  ensurePlayerProfileCacheFile,
+  isProfileCacheUsable,
+  profilesMatchIdentity,
+  readPlayerProfileCache,
+  writePlayerProfileCache,
+} = require("./player-profile-cache");
 
 const WS_PATH = "/ws";
 const REQUIRED_GAME_CTL_METHODS = [...QQ_RPC_GAME_CTL_METHODS];
+const DEFAULT_PLANT_IMAGE_FILENAME = "400.jpg";
+const DEFAULT_PLANT_IMAGE_URL = "/api/default-plant-image";
+const DEFAULT_PLANT_IMAGE_PATH = path.join(__dirname, "..", DEFAULT_PLANT_IMAGE_FILENAME);
 
 /** 农场功能开关默认值（与页面一致；可 POST /api/farm-config 持久化） */
 const FARM_CONFIG_DEFAULT = {
@@ -58,6 +73,8 @@ const FARM_CONFIG_DEFAULT = {
   verboseLog: false,
   autoFarmOwnEnabled: true,
   autoFarmFriendEnabled: false,
+  autoFarmFriendHelpEnabled: false,
+  autoFarmFriendHelpStopOnExpLimit: true,
   autoFarmOwnIntervalSec: 30,
   autoFarmFriendIntervalSec: 90,
   autoFarmMaxFriends: 5,
@@ -81,6 +98,7 @@ const FARM_CONFIG_DEFAULT = {
   autoFarmFertilizerBuyMax: 10,
   autoFarmFertilizerBuyMode: "threshold",
   autoFarmFertilizerBuyThreshold: 100,
+  autoFarmFertilizerRushThresholdSec: 300,
   autoFarmFriendQuietHoursEnabled: false,
   autoFarmFriendQuietHoursStart: "23:00",
   autoFarmFriendQuietHoursEnd: "07:00",
@@ -107,8 +125,10 @@ function decoratePlayerProfile(profile) {
     const progress = getLevelExpProgress(level, exp);
     if (progress) {
       base.levelProgress = progress;
-      if (base.nextLevelExp == null && progress.nextLevelTotalExp != null) {
-        base.nextLevelExp = progress.nextLevelTotalExp;
+      base.totalExp = progress.totalExp;
+      base.expMode = progress.expMode;
+      if (!(Number(base.nextLevelExp) > 0) && progress.needed != null) {
+        base.nextLevelExp = progress.needed;
       }
     }
   }
@@ -123,6 +143,25 @@ function hasStableProfileIdentity(profile) {
     (typeof cur.name === "string" && cur.name.trim()) ||
     (Number(cur.level) || 0) > 0
   );
+}
+
+function hasUsableProfileLevel(profile) {
+  return getProfilePlantLevel(profile) > 0;
+}
+
+function getProfileTotalExpValue(profile) {
+  const totalExp = Number(profile && profile.totalExp);
+  if (Number.isFinite(totalExp) && totalExp >= 0) return totalExp;
+  const level = Number(profile && profile.level);
+  const exp = Number(profile && profile.exp);
+  if (!Number.isFinite(level) || level <= 0 || !Number.isFinite(exp) || exp < 0) {
+    return null;
+  }
+  const progress = getLevelExpProgress(level, exp);
+  if (!progress || !Number.isFinite(Number(progress.totalExp))) {
+    return null;
+  }
+  return Number(progress.totalExp);
 }
 
 function getActiveQqClientKey(getQqWsSnapshot) {
@@ -199,12 +238,23 @@ function isTrustedResolvedProfile(profile, excludedGids) {
 function buildProfileAssetOverlay(baseProfile, overlayProfile) {
   const base = baseProfile && typeof baseProfile === "object" ? { ...baseProfile } : {};
   const overlay = overlayProfile && typeof overlayProfile === "object" ? overlayProfile : {};
-  if (overlay.gold != null) base.gold = overlay.gold;
-  if (overlay.exp != null) base.exp = overlay.exp;
-  if (overlay.nextLevelExp != null) base.nextLevelExp = overlay.nextLevelExp;
-  if (overlay.levelProgress != null) base.levelProgress = overlay.levelProgress;
-  if (overlay.farmMaxLandLevel != null) base.farmMaxLandLevel = overlay.farmMaxLandLevel;
-  const merged = { ...base, ...overlay };
+  const merged = { ...base };
+  if ((Number(overlay.gid) || 0) > 0) merged.gid = Number(overlay.gid);
+  if ((Number(overlay.playerId) || 0) > 0) merged.playerId = Number(overlay.playerId);
+  if (typeof overlay.name === "string" && overlay.name.trim()) merged.name = overlay.name;
+  if ((Number(overlay.level) || 0) > 0) merged.level = Number(overlay.level);
+  if ((Number(overlay.plantLevel) || 0) > 0) merged.plantLevel = Number(overlay.plantLevel);
+  if ((Number(overlay.farmMaxLandLevel) || 0) > 0) merged.farmMaxLandLevel = Number(overlay.farmMaxLandLevel);
+  if (((Number(overlay.exp) || 0) > 0) || merged.exp == null) merged.exp = overlay.exp;
+  if (((Number(overlay.totalExp) || 0) > 0) || merged.totalExp == null) merged.totalExp = overlay.totalExp;
+  if (((Number(overlay.nextLevelExp) || 0) > 0) || merged.nextLevelExp == null) merged.nextLevelExp = overlay.nextLevelExp;
+  if (overlay.levelProgress && Number(overlay.levelProgress.needed) > 0) merged.levelProgress = overlay.levelProgress;
+  if (overlay.expMode) merged.expMode = overlay.expMode;
+  if (((Number(overlay.gold) || 0) > 0) || merged.gold == null) merged.gold = overlay.gold;
+  if (((Number(overlay.coupon) || 0) > 0) || merged.coupon == null) merged.coupon = overlay.coupon;
+  if (((Number(overlay.diamond) || 0) > 0) || merged.diamond == null) merged.diamond = overlay.diamond;
+  if (((Number(overlay.bean) || 0) > 0) || merged.bean == null) merged.bean = overlay.bean;
+  if (overlay._source) merged._source = overlay._source;
   const plantLevel = getProfilePlantLevel(merged);
   if (plantLevel > 0) {
     merged.plantLevel = plantLevel;
@@ -215,8 +265,41 @@ function buildProfileAssetOverlay(baseProfile, overlayProfile) {
   return merged;
 }
 
+async function loadUsableCachedPlayerProfile(currentProfile) {
+  try {
+    const cacheState = await readPlayerProfileCache();
+    if (!cacheState || !cacheState.usableProfile) return null;
+    if (currentProfile && !profilesMatchIdentity(currentProfile, cacheState.usableProfile)) {
+      return null;
+    }
+    return decoratePlayerProfile({ ...cacheState.usableProfile, _source: "disk_cache" });
+  } catch (_) {
+    return null;
+  }
+}
+
+function loadUsableMemoryCachedPlayerProfile(profileCache) {
+  const cached = profileCache && profileCache.profile && isProfileCacheUsable(profileCache.profile)
+    ? profileCache.profile
+    : null;
+  return cached ? decoratePlayerProfile({ ...cached, _source: "memory_cache" }) : null;
+}
+
+async function persistUsablePlayerProfile(profile) {
+  if (!isProfileCacheUsable(profile)) return;
+  try {
+    await writePlayerProfileCache(null, profile);
+  } catch (_) {
+    /* 忽略缓存写入失败，避免影响主流程 */
+  }
+}
+
 function farmConfigPath() {
   return path.join(__dirname, "..", "data", "farm-config.json");
+}
+
+function autoFertilizerStatePath() {
+  return path.join(__dirname, "..", "data", "auto-fertilizer-state.json");
 }
 
 async function loadFarmConfig() {
@@ -250,6 +333,58 @@ async function saveFarmConfig(partial) {
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(farmConfigPath(), JSON.stringify(next, null, 2), "utf8");
   return next;
+}
+
+async function saveAutoFertilizerState(state) {
+  const dir = path.join(__dirname, "..", "data");
+  const next = normalizeAutoFertilizerState(state);
+  next.updatedAt = next.updatedAt || new Date().toISOString();
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(autoFertilizerStatePath(), JSON.stringify(next, null, 2), "utf8");
+  return next;
+}
+
+async function loadAutoFertilizerState() {
+  const dir = path.join(__dirname, "..", "data");
+  await fs.mkdir(dir, { recursive: true });
+  try {
+    const raw = await fs.readFile(autoFertilizerStatePath(), "utf8");
+    const parsed = JSON.parse(raw);
+    const normalized = normalizeAutoFertilizerState(parsed);
+    normalized.updatedAt = normalized.updatedAt || new Date().toISOString();
+    const normalizedText = JSON.stringify(normalized, null, 2);
+    if (raw.trim() !== normalizedText.trim()) {
+      await fs.writeFile(autoFertilizerStatePath(), normalizedText, "utf8");
+    }
+    return normalized;
+  } catch (_) {
+    const empty = normalizeAutoFertilizerState({});
+    empty.updatedAt = new Date().toISOString();
+    await fs.writeFile(autoFertilizerStatePath(), JSON.stringify(empty, null, 2), "utf8");
+    return empty;
+  }
+}
+
+async function loadFriendHelpExpState() {
+  const cache = await readFriendHelpExpCache();
+  return cache && cache.state ? cache.state : {};
+}
+
+async function saveFriendHelpExpState(state) {
+  return await writeFriendHelpExpCache(null, state);
+}
+
+function findFarmGridByLandId(status, landId) {
+  const targetLandId = Number(landId) || 0;
+  if (!targetLandId) return null;
+  const grids = Array.isArray(status && status.grids) ? status.grids : [];
+  for (let i = 0; i < grids.length; i += 1) {
+    const grid = grids[i];
+    if (Number(grid && grid.landId) === targetLandId) {
+      return grid;
+    }
+  }
+  return null;
 }
 
 async function readJsonBody(req) {
@@ -391,9 +526,14 @@ function getLandTypeLabel(type) {
   return "未知土地";
 }
 
+function getDefaultPlantImagePath() {
+  return fsSync.existsSync(DEFAULT_PLANT_IMAGE_PATH) ? DEFAULT_PLANT_IMAGE_PATH : null;
+}
+
 function buildPlantImageUrl(seedId) {
   const normalized = Number(seedId) || 0;
-  return normalized > 0 ? `/api/plant-image?seedId=${normalized}` : null;
+  if (normalized > 0) return `/api/plant-image?seedId=${normalized}`;
+  return getDefaultPlantImagePath() ? DEFAULT_PLANT_IMAGE_URL : null;
 }
 
 function formatMatureEta(seconds) {
@@ -846,8 +986,18 @@ async function fetchFriendListForUi({ ensureAutomationSession, ensureAutomationG
 }
 
 async function fetchPlayerProfileForUi({ ensureAutomationSession, ensureAutomationGameCtl, callAutomationGameCtl, config, getQqWsSnapshot, profileCache }) {
-  const session = await ensureAutomationSession();
-  await ensureAutomationGameCtl(session);
+  const memoryCachedProfile = loadUsableMemoryCachedPlayerProfile(profileCache);
+  const startupCachedProfile = memoryCachedProfile || await loadUsableCachedPlayerProfile(null);
+
+  let session = null;
+  try {
+    session = await ensureAutomationSession();
+    await ensureAutomationGameCtl(session);
+  } catch (error) {
+    if (startupCachedProfile) return startupCachedProfile;
+    throw error;
+  }
+
   let profile = null;
   let profileError = null;
   try {
@@ -883,11 +1033,24 @@ async function fetchPlayerProfileForUi({ ensureAutomationSession, ensureAutomati
   }
   const excludedGidSet = new Set(excludedGids);
   const resolved = resolveProfileWithCandidates(profile, candidates, { excludedGids });
-  const currentProfile = resolved.profile && typeof resolved.profile === "object"
+  let currentProfile = resolved.profile && typeof resolved.profile === "object"
     ? decoratePlayerProfile({ ...resolved.profile, _source: resolved.source })
     : null;
+  const diskCachedProfile = await loadUsableCachedPlayerProfile(currentProfile);
+  const fallbackProfile = loadUsableMemoryCachedPlayerProfile(profileCache) || diskCachedProfile;
+  if (currentProfile && fallbackProfile && profilesMatchIdentity(currentProfile, fallbackProfile)) {
+    currentProfile = decoratePlayerProfile({
+      ...buildProfileAssetOverlay(fallbackProfile, currentProfile),
+      _source: currentProfile._source || fallbackProfile._source || "runtime",
+    });
+  }
 
   if (!profileCache || typeof profileCache !== "object") {
+    if (currentProfile && isProfileCacheUsable(currentProfile)) {
+      await persistUsablePlayerProfile(currentProfile);
+      return currentProfile;
+    }
+    if (diskCachedProfile) return diskCachedProfile;
     return currentProfile;
   }
 
@@ -910,12 +1073,15 @@ async function fetchPlayerProfileForUi({ ensureAutomationSession, ensureAutomati
       (profileCache.lockedGid == null && Number(profileCache.profile.gid) === Number(currentProfile.gid || 0))
     ) {
       profileCache.profile = { ...currentProfile };
+      await persistUsablePlayerProfile(currentProfile);
       return currentProfile;
     }
 
     if (profileCache.lockedGid != null && currentGid != null && currentGid !== profileCache.lockedGid) {
       const sticky = buildProfileAssetOverlay(profileCache.profile, currentProfile);
-      return { ...sticky, _source: "locked_gid_profile+runtime_assets" };
+      const decorated = decoratePlayerProfile({ ...sticky, _source: "locked_gid_profile+runtime_assets" });
+      await persistUsablePlayerProfile(decorated);
+      return decorated;
     }
 
     if (
@@ -923,25 +1089,49 @@ async function fetchPlayerProfileForUi({ ensureAutomationSession, ensureAutomati
       currentProfile._source === "system_candidates+runtime_assets"
     ) {
       const sticky = buildProfileAssetOverlay(profileCache.profile, currentProfile);
-      return { ...sticky, _source: "sticky_profile+runtime_assets" };
+      const decorated = decoratePlayerProfile({ ...sticky, _source: "sticky_profile+runtime_assets" });
+      await persistUsablePlayerProfile(decorated);
+      return decorated;
     }
 
     profileCache.profile = { ...currentProfile };
+    await persistUsablePlayerProfile(currentProfile);
     return currentProfile;
   }
 
   if (currentProfile && hasStableProfileIdentity(currentProfile) && profileCache.profile) {
     const sticky = buildProfileAssetOverlay(profileCache.profile, currentProfile);
-    return { ...sticky, _source: "sticky_profile+runtime_assets" };
+    const decorated = decoratePlayerProfile({ ...sticky, _source: "sticky_profile+runtime_assets" });
+    await persistUsablePlayerProfile(decorated);
+    return decorated;
   }
 
   if (profileCache.profile) {
     const sticky = buildProfileAssetOverlay(profileCache.profile, currentProfile);
-    return { ...sticky, _source: "sticky_profile+runtime_assets" };
+    const decorated = decoratePlayerProfile({ ...sticky, _source: "sticky_profile+runtime_assets" });
+    await persistUsablePlayerProfile(decorated);
+    return decorated;
+  }
+
+  if (diskCachedProfile && (!currentProfile || !hasUsableProfileLevel(currentProfile))) {
+    profileCache.profile = { ...diskCachedProfile };
+    if (profileCache.lockedGid == null && Number(diskCachedProfile.gid) > 0) {
+      profileCache.lockedGid = Number(diskCachedProfile.gid);
+    }
+    return diskCachedProfile;
   }
 
   if (currentProfile && hasStableProfileIdentity(currentProfile)) {
+    await persistUsablePlayerProfile(currentProfile);
     return currentProfile;
+  }
+
+  if (diskCachedProfile) {
+    profileCache.profile = { ...diskCachedProfile };
+    if (profileCache.lockedGid == null && Number(diskCachedProfile.gid) > 0) {
+      profileCache.lockedGid = Number(diskCachedProfile.gid);
+    }
+    return diskCachedProfile;
   }
 
   if (profileError || candidatesError) {
@@ -989,7 +1179,7 @@ async function inspectRecentClickTraceForUi({ ensureAutomationSession, ensureAut
   return payload && typeof payload === "object" ? payload : null;
 }
 
-async function fertilizeLandForUi({ ensureAutomationSession, ensureAutomationGameCtl, callAutomationGameCtl, body }) {
+async function fertilizeLandForUi({ ensureAutomationSession, ensureAutomationGameCtl, callAutomationGameCtl, autoFarmManager, body }) {
   const session = await ensureAutomationSession();
   await ensureAutomationGameCtl(session);
   const input = body && typeof body === "object" ? body : {};
@@ -997,12 +1187,36 @@ async function fertilizeLandForUi({ ensureAutomationSession, ensureAutomationGam
     silent: true,
     dryRun: input.dryRun !== false,
     type: input.type || input.mode || "auto",
+    internalFallback: input.internalFallback === true,
     waitAfterOpen: input.waitAfterOpen,
     waitAfterAction: input.waitAfterAction,
   }];
   if (input.landId != null) args[0].landId = Number(input.landId);
   if (input.path) args[0].path = String(input.path);
   const payload = await callAutomationGameCtl(session, "gameCtl.fertilizeLand", args);
+  if (
+    autoFarmManager
+    && payload
+    && payload.ok === true
+    && String(payload.action || "") === "fertilized"
+    && Number(payload.landId) > 0
+  ) {
+    try {
+      const status = await callAutomationGameCtl(session, "gameCtl.getFarmStatus", [{
+        silent: true,
+        includeGrids: true,
+        includeLandIds: false,
+      }]);
+      const grid = findFarmGridByLandId(status, payload.landId);
+      if (grid) {
+        await autoFarmManager.recordFertilizerGrid(grid, payload.resolvedMode || input.type || input.mode || "normal", {
+          reason: "manual_api",
+        });
+      }
+    } catch (_) {
+      // 手动施肥主流程成功即可，不阻塞状态缓存回写。
+    }
+  }
   return payload && typeof payload === "object" ? payload : null;
 }
 
@@ -1033,6 +1247,44 @@ function normalizeAnalyticsLevelRequest(requestedLevel, profile) {
 }
 
 async function performFriendOperation({ session, callAutomationGameCtl, target, action, enterWaitMs, actionWaitMs, returnHome }) {
+  async function readFarmStatus() {
+    return await callAutomationGameCtl(session, "gameCtl.getFarmStatus", [{
+      includeGrids: false,
+      includeLandIds: false,
+      silent: true,
+    }]);
+  }
+
+  function buildFriendOperations(nextAction, status) {
+    const operations = [];
+    const workCounts = status && status.workCounts && typeof status.workCounts === "object" ? status.workCounts : {};
+    if (nextAction === "steal") {
+      if ((Number(workCounts.collect) || 0) > 0) {
+        operations.push({ key: "collect", op: "HARVEST" });
+      }
+      return { operations, workCounts };
+    }
+    if (nextAction === "help") {
+      if ((Number(workCounts.eraseGrass) || 0) > 0) operations.push({ key: "eraseGrass", op: "ERASE_GRASS" });
+      if ((Number(workCounts.killBug) || 0) > 0) operations.push({ key: "killBug", op: "KILL_BUG" });
+      if ((Number(workCounts.water) || 0) > 0) operations.push({ key: "water", op: "WATER" });
+      return { operations, workCounts };
+    }
+    throw new Error(`unsupported friend action: ${nextAction}`);
+  }
+
+  async function waitForFriendFarmStatus(timeoutMs) {
+    const deadline = Date.now() + Math.max(0, Number(timeoutMs) || 0);
+    let lastStatus = null;
+    do {
+      lastStatus = await readFarmStatus();
+      if (lastStatus && lastStatus.farmType === "friend") return lastStatus;
+      if (Date.now() >= deadline) break;
+      await sleep(180);
+    } while (true);
+    return lastStatus;
+  }
+
   const waitMs = Math.max(0, Number(enterWaitMs) || 0);
   const opWaitMs = Math.max(0, Number(actionWaitMs) || 0);
   const enter = await callAutomationGameCtl(session, "gameCtl.enterFriendFarm", [target, {
@@ -1040,27 +1292,23 @@ async function performFriendOperation({ session, callAutomationGameCtl, target, 
     includeAfterOwnership: true,
     silent: true,
   }]);
-  const before = await callAutomationGameCtl(session, "gameCtl.getFarmStatus", [{
-    includeGrids: false,
-    includeLandIds: false,
-    silent: true,
-  }]);
+  let before = await waitForFriendFarmStatus(Math.max(1200, waitMs, opWaitMs));
   if (!before || before.farmType !== "friend") {
     throw new Error("not in friend farm");
   }
 
-  const operations = [];
-  const workCounts = before && before.workCounts && typeof before.workCounts === "object" ? before.workCounts : {};
-  if (action === "steal") {
-    if ((Number(workCounts.collect) || 0) > 0) {
-      operations.push({ key: "collect", op: "HARVEST" });
+  let { operations, workCounts } = buildFriendOperations(action, before);
+  if (action === "help" && operations.length <= 0) {
+    const deadline = Date.now() + Math.max(600, opWaitMs);
+    while (operations.length <= 0 && Date.now() < deadline) {
+      await sleep(180);
+      const nextStatus = await readFarmStatus();
+      if (!nextStatus || nextStatus.farmType !== "friend") break;
+      before = nextStatus;
+      const resolved = buildFriendOperations(action, before);
+      operations = resolved.operations;
+      workCounts = resolved.workCounts;
     }
-  } else if (action === "help") {
-    if ((Number(workCounts.eraseGrass) || 0) > 0) operations.push({ key: "eraseGrass", op: "ERASE_GRASS" });
-    if ((Number(workCounts.killBug) || 0) > 0) operations.push({ key: "killBug", op: "KILL_BUG" });
-    if ((Number(workCounts.water) || 0) > 0) operations.push({ key: "water", op: "WATER" });
-  } else {
-    throw new Error(`unsupported friend action: ${action}`);
   }
 
   const actions = [];
@@ -1083,11 +1331,7 @@ async function performFriendOperation({ session, callAutomationGameCtl, target, 
     });
   }
 
-  const after = await callAutomationGameCtl(session, "gameCtl.getFarmStatus", [{
-    includeGrids: false,
-    includeLandIds: false,
-    silent: true,
-  }]);
+  const after = await readFarmStatus();
 
   let returnHomeResult = null;
   if (returnHome !== false) {
@@ -1259,9 +1503,9 @@ function createGateway(config) {
     return await ensureGameCtl(session, projectRoot, REQUIRED_GAME_CTL_METHODS);
   }
 
-  async function callAutomationGameCtl(session, pathName, args) {
+  async function callAutomationGameCtl(session, pathName, args, callOptions) {
     if (isQqRuntimeSession(session)) {
-      return await qqWsSession.call(pathName, args);
+      return await qqWsSession.call(pathName, args, callOptions);
     }
     return await callGameCtl(session, pathName, args);
   }
@@ -1334,6 +1578,8 @@ function createGateway(config) {
     lockedGid: null,
     profile: null,
   };
+  void ensurePlayerProfileCacheFile(projectRoot).catch(() => {});
+  void ensureFriendHelpExpCacheFile(projectRoot).catch(() => {});
 
   const autoFarmManager = new AutoFarmManager({
     ensureSession: ensureAutomationSession,
@@ -1341,20 +1587,30 @@ function createGateway(config) {
     ensureGameCtl: ensureAutomationGameCtl,
     callGameCtl: callAutomationGameCtl,
     getTransportState: getAutomationTransportState,
+    initialAutoFertilizerState: normalizeAutoFertilizerState({}),
+    persistAutoFertilizerState: async (state) => {
+      await saveAutoFertilizerState(state);
+    },
+    initialFriendHelpExpState: {},
+    persistFriendHelpExpState: async (state) => {
+      await saveFriendHelpExpState(state);
+    },
     projectRoot,
   });
   let autoFarmBootConfigLoaded = false;
+  let autoFarmBootStateLoaded = false;
+  let autoFarmBootHelpExpLoaded = false;
   let autoFarmAutoStartDone = false;
 
   function shouldAutoStartAutoFarm(configData) {
-    return !!(configData && (configData.autoFarmOwnEnabled || configData.autoFarmFriendEnabled));
+    return !!(configData && (configData.autoFarmOwnEnabled || configData.autoFarmFriendEnabled || configData.autoFarmFriendHelpEnabled));
   }
 
   function maybeAutoStartAutoFarm(reason) {
     if (autoFarmAutoStartDone) return;
     const state = autoFarmManager.getState();
     const configData = state && state.config ? state.config : null;
-    if (!autoFarmBootConfigLoaded || !shouldAutoStartAutoFarm(configData)) return;
+    if (!autoFarmBootConfigLoaded || !autoFarmBootStateLoaded || !autoFarmBootHelpExpLoaded || !shouldAutoStartAutoFarm(configData)) return;
     const target = resolveAutomationRuntimeTarget();
     if (target === "qq_ws" && !qqWsSession.isReady()) return;
     if (state && state.running) {
@@ -1388,6 +1644,28 @@ function createGateway(config) {
     .catch(() => {
       autoFarmBootConfigLoaded = true;
       maybeAutoStartAutoFarm("config_load_failed");
+    });
+  loadAutoFertilizerState()
+    .then((savedState) => {
+      autoFarmManager.replaceAutoFertilizerState(savedState, { persist: false });
+      autoFarmBootStateLoaded = true;
+      maybeAutoStartAutoFarm("auto_fertilizer_state_loaded");
+    })
+    .catch(() => {
+      autoFarmManager.replaceAutoFertilizerState({}, { persist: false });
+      autoFarmBootStateLoaded = true;
+      maybeAutoStartAutoFarm("auto_fertilizer_state_load_failed");
+    });
+  loadFriendHelpExpState()
+    .then((savedState) => {
+      autoFarmManager.replaceFriendHelpExpState(savedState, { persist: false });
+      autoFarmBootHelpExpLoaded = true;
+      maybeAutoStartAutoFarm("friend_help_exp_state_loaded");
+    })
+    .catch(() => {
+      autoFarmManager.replaceFriendHelpExpState({}, { persist: false });
+      autoFarmBootHelpExpLoaded = true;
+      maybeAutoStartAutoFarm("friend_help_exp_state_load_failed");
     });
 
   /**
@@ -2530,6 +2808,7 @@ function createGateway(config) {
           ensureAutomationSession,
           ensureAutomationGameCtl,
           callAutomationGameCtl,
+          autoFarmManager,
           body,
         });
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
@@ -2542,10 +2821,32 @@ function createGateway(config) {
       return;
     }
 
+    if (req.method === "GET" && urlPath === "/api/default-plant-image") {
+      try {
+        const imagePath = getDefaultPlantImagePath();
+        if (!imagePath) {
+          res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: false, error: "default image not found" }));
+          return;
+        }
+        const ext = path.extname(imagePath).toLowerCase();
+        res.writeHead(200, {
+          "Content-Type": MIME[ext] || "application/octet-stream",
+          "Cache-Control": "public, max-age=3600",
+        });
+        fsSync.createReadStream(imagePath).pipe(res);
+      } catch (e) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+      return;
+    }
+
     if (req.method === "GET" && urlPath === "/api/plant-image") {
       try {
         const seedId = Number(parsedUrl.searchParams.get("seedId") || "0");
-        const imagePath = getSeedImagePathBySeedId(seedId);
+        const imagePath = getSeedImagePathBySeedId(seedId) || getDefaultPlantImagePath();
         if (!imagePath) {
           res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
           res.end(JSON.stringify({ ok: false, error: "image not found" }));
@@ -2634,6 +2935,21 @@ function createGateway(config) {
         }
 
         if (action === "steal" || action === "help") {
+          let helpProfileBefore = null;
+          if (action === "help") {
+            try {
+              helpProfileBefore = await fetchPlayerProfileForUi({
+                ensureAutomationSession,
+                ensureAutomationGameCtl,
+                callAutomationGameCtl,
+                config,
+                getQqWsSnapshot,
+                profileCache: playerProfileCache,
+              });
+            } catch (_) {
+              helpProfileBefore = null;
+            }
+          }
           const result = await performFriendOperation({
             session,
             callAutomationGameCtl,
@@ -2643,6 +2959,34 @@ function createGateway(config) {
             actionWaitMs: parsed.actionWaitMs != null ? parsed.actionWaitMs : currentConfig.autoFarmActionWaitMs,
             returnHome: parsed.returnHome !== false,
           });
+          if (action === "help" && autoFarmManager && result && result.ok === true) {
+            try {
+              const helpProfileAfter = await fetchPlayerProfileForUi({
+                ensureAutomationSession,
+                ensureAutomationGameCtl,
+                callAutomationGameCtl,
+                config,
+                getQqWsSnapshot,
+                profileCache: playerProfileCache,
+              });
+              const beforeTotalExp = getProfileTotalExpValue(helpProfileBefore);
+              const afterTotalExp = getProfileTotalExpValue(helpProfileAfter);
+              const deltaExp = Number.isFinite(beforeTotalExp) && Number.isFinite(afterTotalExp)
+                ? Math.max(0, afterTotalExp - beforeTotalExp)
+                : 0;
+              result.helpExpTracked = deltaExp > 0
+                ? await autoFarmManager.recordFriendHelpExpDelta(deltaExp, {
+                    friendGid: typeof normalizedTarget === "number" ? normalizedTarget : null,
+                    reason: "manual_friend_help",
+                  })
+                : await autoFarmManager.markFriendHelpExpLimitReached({
+                    friendGid: typeof normalizedTarget === "number" ? normalizedTarget : null,
+                    reason: "manual_friend_help_no_exp_mark_limit",
+                  });
+            } catch (_) {
+              result.helpExpTracked = null;
+            }
+          }
           res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
           res.end(JSON.stringify({ ok: true, data: result }));
           return;

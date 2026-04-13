@@ -10,6 +10,9 @@ pnpm-debug.log*
 
 # 本地 / 敏感配置（若需示例可另建 farm-config.example.json 并提交）
 data/farm-config.json
+data/auto-fertilizer-state.json
+data/friend-help-exp-cache.json
+data/player-profile-cache.json
 .env
 .env.local
 .env.*.local

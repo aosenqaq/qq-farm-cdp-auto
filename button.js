@@ -543,6 +543,127 @@
     return true;
   }
 
+  function getNodeInteractionPoint(node) {
+    const targetNode = toNode(node);
+    if (!targetNode) return null;
+    const rect = safeCall(function () { return getNodeScreenRect(targetNode); }, null);
+    if (rect && isFinite(rect.centerX) && isFinite(rect.centerY)) {
+      return {
+        x: Math.round(Number(rect.centerX)),
+        y: Math.round(Number(rect.centerY)),
+        source: 'screen_rect'
+      };
+    }
+    const center = safeCall(function () { return nodeToClient(targetNode); }, null);
+    if (center && isFinite(center.x) && isFinite(center.y)) {
+      return {
+        x: Math.round(Number(center.x)),
+        y: Math.round(Number(center.y)),
+        source: 'node_center'
+      };
+    }
+    return null;
+  }
+
+  function collectLandInteractionCandidateNodes(pathOrNode) {
+    const result = [];
+    const seen = [];
+    const pushNode = function (label, node) {
+      const targetNode = toNode(node);
+      if (!targetNode) return;
+      if (seen.indexOf(targetNode) >= 0) return;
+      seen.push(targetNode);
+      result.push({
+        label: label,
+        node: targetNode,
+      });
+    };
+    const targetNode = toNode(pathOrNode);
+    pushNode('target', targetNode);
+    const gridComp = safeCall(function () { return getGridComponent(targetNode); }, null);
+    pushNode('grid.node', gridComp && safeReadKey(gridComp, 'node'));
+    pushNode('grid.iconNode', gridComp && safeReadKey(gridComp, 'iconNode'));
+    if (gridComp && typeof gridComp.getIconNode === 'function') {
+      pushNode('grid.getIconNode()', safeCall(function () { return gridComp.getIconNode(); }, null));
+    }
+    if (gridComp && typeof gridComp.findIconNode === 'function') {
+      pushNode('grid.findIconNode()', safeCall(function () { return gridComp.findIconNode(); }, null));
+    }
+    if (targetNode && Array.isArray(targetNode.children)) {
+      targetNode.children.forEach(function (child) {
+        const childName = String(child && child.name || '').toLowerCase();
+        if (/icon|plant|crop|spine|body|select/.test(childName)) {
+          pushNode('target.child:' + childName, child);
+        }
+      });
+    }
+    return result;
+  }
+
+  function invokeManagerAttemptLandInteraction(manager, node) {
+    const payload = {
+      attempted: false,
+      called: false,
+      methodAvailable: !!(manager && typeof manager.attemptLandInteraction === 'function'),
+      reason: null,
+      point: null,
+      pointSource: null,
+      target: null,
+      result: null,
+      error: null,
+      candidates: [],
+    };
+    if (!manager || typeof manager.attemptLandInteraction !== 'function') {
+      payload.reason = 'attemptLandInteraction_missing';
+      return payload;
+    }
+    const candidates = collectLandInteractionCandidateNodes(node);
+    payload.attempted = true;
+    for (let i = 0; i < candidates.length; i += 1) {
+      const candidate = candidates[i];
+      const point = getNodeInteractionPoint(candidate.node);
+      const summary = {
+        label: candidate.label,
+        path: safeCall(function () { return fullPath(candidate.node); }, null),
+        point: point,
+      };
+      payload.candidates.push(summary);
+      if (!point) continue;
+      try {
+        const ret = manager.attemptLandInteraction({ x: point.x, y: point.y });
+        payload.called = true;
+        payload.point = { x: point.x, y: point.y };
+        payload.pointSource = point.source || null;
+        payload.target = {
+          label: candidate.label,
+          path: summary.path,
+          name: candidate.node && candidate.node.name ? candidate.node.name : null,
+        };
+        payload.result = summarizeSpyValue(ret, 1);
+        if (ret !== false) {
+          payload.reason = null;
+          return payload;
+        }
+        payload.reason = 'attemptLandInteraction_returned_false';
+      } catch (err) {
+        payload.called = true;
+        payload.point = { x: point.x, y: point.y };
+        payload.pointSource = point.source || null;
+        payload.target = {
+          label: candidate.label,
+          path: summary.path,
+          name: candidate.node && candidate.node.name ? candidate.node.name : null,
+        };
+        payload.error = err && err.message ? err.message : String(err || 'attemptLandInteraction failed');
+        return payload;
+      }
+    }
+    if (!payload.reason) {
+      payload.reason = payload.candidates.length > 0 ? 'interaction_point_unresolved' : 'interaction_node_missing';
+    }
+    return payload;
+  }
+
   function smartClick(path, index) {
     index = index || 0;
     const node = findNode(path);
@@ -5126,6 +5247,337 @@
     return matched;
   }
 
+  function getFertilizerBucketList(itemM) {
+    const result = [];
+    const seenIds = {};
+
+    function pushBucket(item) {
+      if (!item || getInteractionTypeOfItem(item) !== 'fertilizerbucket') return;
+      const id = Number(safeReadKey(item, 'id')) || 0;
+      if (!id || seenIds[id]) return;
+      const count = toFiniteNumber(safeReadKey(item, 'count'));
+      if (count != null && count <= 0) return;
+      seenIds[id] = true;
+      result.push(item);
+    }
+
+    const list = itemM && typeof itemM.getFertilizer_bucket === 'function'
+      ? safeCall(function () { return itemM.getFertilizer_bucket(); }, null)
+      : null;
+    if (Array.isArray(list)) {
+      list.forEach(pushBucket);
+    }
+    if (result.length === 0 && itemM) {
+      pushBucket(typeof itemM.getNormalFertilizer === 'function'
+        ? safeCall(function () { return itemM.getNormalFertilizer(); }, null)
+        : safeReadKey(itemM, 'normalFertilizerContainer'));
+      pushBucket(typeof itemM.getOrganicFertilizer === 'function'
+        ? safeCall(function () { return itemM.getOrganicFertilizer(); }, null)
+        : safeReadKey(itemM, 'organicFertilizerContainer'));
+    }
+    return result;
+  }
+
+  function getPreferredFertilizerBucketId(mode) {
+    return String(mode || '').toLowerCase() === 'organic' ? 1012 : 1011;
+  }
+
+  function buildDirectFertilizerBucketSelection(itemM, mode) {
+    const buckets = getFertilizerBucketList(itemM);
+    const preferredId = getPreferredFertilizerBucketId(mode);
+    const primaryBucket = buckets.find(function (item) {
+      return (Number(safeReadKey(item, 'id')) || 0) === preferredId;
+    }) || null;
+    const orderedBuckets = [];
+    if (primaryBucket) orderedBuckets.push(primaryBucket);
+    buckets.forEach(function (item) {
+      if (item && item !== primaryBucket) orderedBuckets.push(item);
+    });
+    return {
+      preferredId: preferredId,
+      primaryBucket: primaryBucket,
+      availableBuckets: buckets,
+      orderedBuckets: orderedBuckets
+    };
+  }
+
+  function getLiveFertilizerBucketCount(itemM, bucketLike) {
+    const bucketId = Number(bucketLike && safeReadKey(bucketLike, 'id')) || 0;
+    if (!bucketId) return null;
+    const liveBuckets = getFertilizerBucketList(itemM);
+    const matched = liveBuckets.find(function (item) {
+      return (Number(safeReadKey(item, 'id')) || 0) === bucketId;
+    }) || bucketLike;
+    return toFiniteNumber(safeReadKey(matched, 'count'));
+  }
+
+  function getCurrentDragItemBucketId(manager) {
+    if (!manager) return 0;
+    const dragItem = safeReadKey(manager, 'currentDragItem');
+    const dragModel = dragItem ? safeReadKey(dragItem, 'ItemModel') : null;
+    return Number(safeReadKey(dragModel, 'id')) || 0;
+  }
+
+  function clearCurrentDragItemIfBucketMismatch(manager, bucketLike) {
+    const expectedBucketId = Number(bucketLike && safeReadKey(bucketLike, 'id')) || 0;
+    const currentBucketId = getCurrentDragItemBucketId(manager);
+    const shouldClear = !!(expectedBucketId && currentBucketId && currentBucketId !== expectedBucketId);
+    if (!shouldClear || !manager) {
+      return {
+        cleared: false,
+        expectedBucketId: expectedBucketId || null,
+        currentBucketId: currentBucketId || null,
+      };
+    }
+
+    safeCall(function () {
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentDragItem')) {
+        manager.currentDragItem = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentDragItemOriginParent')) {
+        manager.currentDragItemOriginParent = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentDragItemOriginPos')) {
+        manager.currentDragItemOriginPos = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'isDragging')) {
+        manager.isDragging = false;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'hasDispatchedDragEvent')) {
+        manager.hasDispatchedDragEvent = false;
+      }
+      return true;
+    }, null);
+
+    return {
+      cleared: true,
+      expectedBucketId: expectedBucketId || null,
+      currentBucketId: currentBucketId || null,
+    };
+  }
+
+  function normalizeDragItemHostCandidate(value) {
+    if (!value || typeof value !== 'object') return null;
+    if (
+      typeof value.getComponent === 'function' ||
+      typeof value.emit === 'function' ||
+      typeof value.setParent === 'function' ||
+      typeof value.getParent === 'function'
+    ) {
+      return value;
+    }
+    const node = safeReadKey(value, 'node');
+    if (node && typeof node === 'object') return node;
+    return value;
+  }
+
+  function ensureCurrentDragItemForBucket(manager, bucketLike) {
+    const expectedBucketId = Number(bucketLike && safeReadKey(bucketLike, 'id')) || 0;
+    const result = {
+      ensured: false,
+      reused: false,
+      created: false,
+      reason: null,
+      expectedBucketId: expectedBucketId || null,
+      currentBucketId: null,
+      hostPath: null,
+      hostType: null,
+    };
+    if (!manager) {
+      result.reason = 'manager_missing';
+      return result;
+    }
+    if (!expectedBucketId || !bucketLike || typeof bucketLike !== 'object') {
+      result.reason = 'bucket_missing';
+      return result;
+    }
+
+    const currentBucketId = getCurrentDragItemBucketId(manager);
+    result.currentBucketId = currentBucketId || null;
+    if (currentBucketId === expectedBucketId) {
+      result.ensured = true;
+      result.reused = true;
+      return result;
+    }
+
+    const hostCandidates = [
+      safeReadKey(manager, 'currentDragItem'),
+      expectedBucketId ? getToolNodeByItemId(manager, expectedBucketId) : null,
+      safeReadKey(manager, 'dragPreviewSpineNode'),
+      safeReadKey(manager, 'dragPreview'),
+      safeReadKey(manager, 'detailInteractionNode'),
+      safeReadKey(manager, 'toolInteractionNode'),
+      safeReadKey(manager, 'seedInteractionNode'),
+      safeReadKey(manager, 'node'),
+    ];
+    let host = null;
+    for (let i = 0; i < hostCandidates.length; i += 1) {
+      const candidate = normalizeDragItemHostCandidate(hostCandidates[i]);
+      if (!candidate || typeof candidate !== 'object') continue;
+      host = candidate;
+      break;
+    }
+    if (!host) host = {};
+
+    safeCall(function () {
+      manager.currentDragItem = host;
+      host.ItemModel = bucketLike;
+      if (!safeReadKey(host, 'itemModel')) host.itemModel = bucketLike;
+      if (!safeReadKey(host, 'dragType')) host.dragType = 'fertilizerbucket';
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentDragType')) {
+        manager.currentDragType = 'fertilizerbucket';
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentDragItemOriginParent')) {
+        manager.currentDragItemOriginParent = safeReadKey(host, 'parent') || safeReadKey(host, '_parent') || null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentDragItemOriginPos')) {
+        manager.currentDragItemOriginPos = safeCall(function () {
+          if (typeof host.getPosition === 'function') return host.getPosition();
+          return safeReadKey(host, 'position') || safeReadKey(host, '_pos') || null;
+        }, null);
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'isDragging')) {
+        manager.isDragging = false;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'hasDispatchedDragEvent')) {
+        manager.hasDispatchedDragEvent = false;
+      }
+      if (Object.prototype.hasOwnProperty.call(host, 'active')) {
+        host.active = true;
+      }
+      if (Object.prototype.hasOwnProperty.call(host, '_active')) {
+        host._active = true;
+      }
+      return true;
+    }, null);
+
+    result.currentBucketId = getCurrentDragItemBucketId(manager) || null;
+    result.ensured = result.currentBucketId === expectedBucketId;
+    result.created = result.ensured;
+    result.hostPath = safeCall(function () { return fullPath(host); }, null);
+    result.hostType = host && host.constructor ? host.constructor.name : typeof host;
+    if (!result.ensured) {
+      result.reason = 'drag_item_bucket_not_bound';
+    }
+    return result;
+  }
+
+  function prepareDirectFertilizerBucketState(manager, itemM, mode) {
+    const built = buildDirectFertilizerBucketSelection(itemM, mode);
+    const result = {
+      applied: false,
+      reason: null,
+      preferredBucketId: built.preferredId,
+      primaryBucket: built.primaryBucket,
+      availableBuckets: summarizeInventoryArray(built.availableBuckets, 4),
+      orderedBuckets: summarizeInventoryArray(built.orderedBuckets, 4),
+      beforeState: null,
+      afterState: null,
+      dragReset: null,
+      dragEnsure: null,
+    };
+    if (!manager) {
+      result.reason = 'manager_missing';
+      return result;
+    }
+    if (!built.primaryBucket) {
+      result.reason = 'primary_bucket_missing';
+      return result;
+    }
+    if (!Array.isArray(built.orderedBuckets) || built.orderedBuckets.length === 0) {
+      result.reason = 'bucket_list_empty';
+      return result;
+    }
+
+    result.beforeState = {
+      currentDetailType: safeReadKey(manager, 'currentDetailType'),
+      currentDragType: safeReadKey(manager, 'currentDragType'),
+      currentDataItems: summarizeInventoryArray(safeReadKey(manager, 'currentData'), 8),
+      currentDataState: summarizeCurrentDataState(manager),
+    };
+    safeCall(function () {
+      built.orderedBuckets.forEach(function (item) {
+        if (item && Object.prototype.hasOwnProperty.call(item, 'isSelected')) {
+          item.isSelected = false;
+        }
+      });
+      manager.currentData = built.orderedBuckets.slice();
+      selectCurrentDataItem(manager, built.primaryBucket);
+      manager.currentDragType = 'fertilizerbucket';
+      manager.currentDetailType = null;
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentDetailComp')) {
+        manager.currentDetailComp = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentToolNodeInfo')) {
+        manager.currentToolNodeInfo = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentSeedNodeInfo')) {
+        manager.currentSeedNodeInfo = null;
+      }
+      return true;
+    }, null);
+    result.dragReset = clearCurrentDragItemIfBucketMismatch(manager, built.primaryBucket);
+    result.dragEnsure = ensureCurrentDragItemForBucket(manager, built.primaryBucket);
+    result.applied = Array.isArray(safeReadKey(manager, 'currentData')) &&
+      safeReadKey(manager, 'currentDragType') === 'fertilizerbucket' &&
+      !!(result.dragEnsure && result.dragEnsure.ensured);
+    result.afterState = {
+      currentDetailType: safeReadKey(manager, 'currentDetailType'),
+      currentDragType: safeReadKey(manager, 'currentDragType'),
+      currentDataItems: summarizeInventoryArray(safeReadKey(manager, 'currentData'), 8),
+      currentDataState: summarizeCurrentDataState(manager),
+    };
+    if (!result.applied) {
+      result.reason = (result.dragEnsure && result.dragEnsure.reason) || 'bucket_state_not_applied';
+    }
+    return result;
+  }
+
+  function primeDirectFertilizerDetail(manager, itemM, fertilizerItem) {
+    const result = {
+      primed: false,
+      usedCandidate: null,
+      attempts: []
+    };
+    if (!manager || typeof manager.showDetailForItem !== 'function' || !fertilizerItem) return result;
+    const candidates = buildFertilizerDetailCandidates(itemM, fertilizerItem);
+    for (let i = 0; i < candidates.length; i += 1) {
+      const candidate = candidates[i];
+      let ret = null;
+      let error = null;
+      const beforeDetailType = safeReadKey(manager, 'currentDetailType');
+      const beforeDetailComp = safeReadKey(manager, 'currentDetailComp');
+      try {
+        ret = manager.showDetailForItem(candidate.value);
+      } catch (err) {
+        error = err && err.message ? err.message : String(err || 'showDetailForItem failed');
+      }
+      const afterDetailType = safeReadKey(manager, 'currentDetailType');
+      const afterDetailComp = safeReadKey(manager, 'currentDetailComp');
+      const detailChanged = afterDetailType !== beforeDetailType || afterDetailComp !== beforeDetailComp;
+      result.attempts.push({
+        label: candidate.label,
+        candidate: summarizeSpyValue(candidate.value, 1),
+        ret: summarizeSpyValue(ret, 1),
+        error: error,
+        detailChanged: detailChanged,
+        detailTypeBefore: beforeDetailType,
+        detailTypeAfter: afterDetailType,
+      });
+      if (!error && (detailChanged || afterDetailType != null || afterDetailComp)) {
+        result.primed = true;
+        result.usedCandidate = candidate.label;
+        return result;
+      }
+    }
+    if (result.attempts.some(function (item) { return item && !item.error; })) {
+      const fallback = result.attempts.find(function (item) { return item && !item.error; });
+      result.primed = true;
+      result.usedCandidate = fallback ? fallback.label : null;
+    }
+    return result;
+  }
+
   function summarizeCurrentDataState(manager) {
     const list = safeReadKey(manager, 'currentData');
     if (!Array.isArray(list)) {
@@ -5149,6 +5601,18 @@
       ownKeys: ownKeys.slice(0, 20),
       ownPropertyNames: ownNames.slice(0, 30),
       extra: extra,
+    };
+  }
+
+  function summarizeCurrentDragState(manager) {
+    const dragItem = manager ? safeReadKey(manager, 'currentDragItem') : null;
+    return {
+      currentDragType: manager ? safeReadKey(manager, 'currentDragType') : null,
+      hasCurrentDragItem: !!dragItem,
+      currentDragItem: summarizeSpyValue(dragItem, 1),
+      currentDragItemModel: summarizeInventoryEntry(dragItem ? safeReadKey(dragItem, 'ItemModel') : null),
+      currentToolNodeInfo: summarizeInteractionNodeInfoValue(manager ? safeReadKey(manager, 'currentToolNodeInfo') : null),
+      currentSeedNodeInfo: summarizeInteractionNodeInfoValue(manager ? safeReadKey(manager, 'currentSeedNodeInfo') : null),
     };
   }
 
@@ -7323,10 +7787,6 @@
       if (waitAfter > 0) await wait(Math.min(waitAfter, 120));
     }
     if (landDetailComp) {
-      if (typeof landDetailComp.onLandNodeClick === 'function') {
-        safeCall(function () { return landDetailComp.onLandNodeClick(); }, null);
-        if (waitAfter > 0) await wait(Math.min(waitAfter, 180));
-      }
       if (safeReadKey(landDetailComp, 'detailType') !== 'land' && typeof landDetailComp.onSwitchBtnClick === 'function') {
         safeCall(function () { return landDetailComp.onSwitchBtnClick(); }, null);
         if (waitAfter > 0) await wait(Math.min(waitAfter, 180));
@@ -7404,6 +7864,69 @@
       resolvedLandType: resolvedLandType,
       landTypeResolved: !!resolvedLandType
     });
+  }
+
+  async function syncLandDetailToTarget(targetNode, manager, opts) {
+    opts = opts || {};
+    const waitAfter = Math.max(0, Number(opts.waitAfter) || 0);
+    const interactionRoot = getPlantInteractionRoot();
+    const interactionManager = manager || findPlantInteractionManager();
+    const landDetailComp = findLandDetailComponent(interactionRoot);
+    const gridState = safeCall(function () {
+      return getGridState(targetNode, { silent: true, farmType: 'own' });
+    }, null);
+    const targetLandId = gridState && gridState.landId != null
+      ? normalizeLandId(gridState.landId)
+      : null;
+    const result = {
+      targetLandId: targetLandId,
+      beforeDetailType: landDetailComp ? safeReadKey(landDetailComp, 'detailType') : null,
+      beforeDetailLandId: landDetailComp ? normalizeLandId(safeReadKey(landDetailComp, 'landId')) : null,
+      appliedLandId: false,
+      refreshed: [],
+      switchedToLand: false,
+      afterDetailType: null,
+      afterDetailLandId: null,
+    };
+    if (!landDetailComp || targetLandId == null) {
+      return result;
+    }
+
+    if (normalizeLandId(safeReadKey(landDetailComp, 'landId')) !== targetLandId) {
+      const applied = safeCall(function () {
+        landDetailComp.landId = targetLandId;
+        return true;
+      }, false);
+      result.appliedLandId = !!applied;
+    }
+
+    [
+      'onLandChanged',
+      'updateLandLabel',
+      'updateBenefitDisplay',
+      'updateLandSprite',
+    ].forEach(function (methodName) {
+      if (typeof landDetailComp[methodName] !== 'function') return;
+      safeCall(function () { return landDetailComp[methodName](); }, null);
+      result.refreshed.push(methodName);
+    });
+    if (waitAfter > 0) await wait(Math.min(waitAfter, 120));
+
+    if (safeReadKey(landDetailComp, 'detailType') !== 'land' && typeof landDetailComp.onSwitchBtnClick === 'function') {
+      safeCall(function () { return landDetailComp.onSwitchBtnClick(); }, null);
+      result.switchedToLand = true;
+      if (waitAfter > 0) await wait(Math.min(waitAfter, 180));
+    }
+
+    result.afterDetailType = safeReadKey(landDetailComp, 'detailType');
+    result.afterDetailLandId = normalizeLandId(safeReadKey(landDetailComp, 'landId'));
+    if (interactionManager && Object.prototype.hasOwnProperty.call(interactionManager, 'pendingDetailLandId')) {
+      safeCall(function () {
+        interactionManager.pendingDetailLandId = targetLandId;
+        return true;
+      }, null);
+    }
+    return result;
   }
 
   async function inspectFertilizerRuntime(opts) {
@@ -7859,31 +8382,98 @@
   }
 
   function findFertilizerActionNode(mode, manager, selectedBucket) {
+    function getNodeButtonLikeScore(node) {
+      if (!node) return 0;
+      if (safeCall(function () { return !!node.getComponent(cc.Button); }, false)) return 3;
+      if (!Array.isArray(node.components)) return 0;
+      const hasButtonLikeComponent = node.components.some(function (comp) {
+        if (!comp || typeof comp !== 'object') return false;
+        const keys = safeCall(function () { return Object.keys(comp); }, []);
+        return keys.indexOf('clickEvents') >= 0 || typeof safeReadKey(comp, '_onTouchEnded') === 'function';
+      });
+      return hasButtonLikeComponent ? 2 : 0;
+    }
+
+    function findTouchableAncestor(node, stopNode) {
+      let current = node;
+      const stop = stopNode || null;
+      while (current) {
+        if (getNodeButtonLikeScore(current) > 0) return current;
+        if (stop && current === stop) break;
+        current = current.parent || null;
+      }
+      return null;
+    }
+
+    function getPreferredHourLabels(item) {
+      const count = toFiniteNumber(item && safeReadKey(item, 'count'));
+      if (!(count > 0)) return [];
+      const rawHours = count / 3600;
+      const variants = [];
+      const seen = {};
+      const pushVariant = function (value) {
+        if (!isFinite(value) || value <= 0) return;
+        const text = String(value).replace(/\.0$/, '') + '小时';
+        if (seen[text]) return;
+        seen[text] = true;
+        variants.push(text);
+      };
+      pushVariant(Math.floor(rawHours * 10) / 10);
+      pushVariant(Math.round(rawHours * 10) / 10);
+      pushVariant(Math.ceil(rawHours * 10) / 10);
+      pushVariant(Math.floor(rawHours));
+      pushVariant(Math.round(rawHours));
+      return variants;
+    }
+
     const modeName = String(mode || '').toLowerCase();
     const directToolNode = getToolNodeByItemId(manager, selectedBucket && selectedBucket.id);
     if (directToolNode) return directToolNode;
     const toolRoot = manager ? safeReadKey(manager, 'toolInteractionNode') : null;
     if (toolRoot) {
-      const toolNodes = walk(toolRoot)
-        .map(function (node) {
-          return {
-            node: node,
-            path: fullPath(node),
-            texts: getNodeTextList(node, { maxDepth: 2 }).slice(0, 4),
-          };
-        })
-        .filter(function (entry) {
-          return entry.node && entry.texts.some(function (text) { return /小时/.test(String(text)); });
+      const preferredHourLabels = getPreferredHourLabels(selectedBucket);
+      const byPath = new Map();
+      walk(toolRoot).forEach(function (node) {
+        if (!node || !node.activeInHierarchy) return;
+        const texts = getNodeTextList(node, { maxDepth: 1 }).slice(0, 6);
+        const joined = texts.join(' ').toLowerCase();
+        const buttonScore = getNodeButtonLikeScore(node);
+        const touchNode = buttonScore > 0 ? node : (findTouchableAncestor(node, toolRoot) || node);
+        const touchPath = safeCall(function () { return fullPath(touchNode); }, null);
+        if (!touchNode || !touchPath) return;
+        const touchTexts = getNodeTextList(touchNode, { maxDepth: 1 }).slice(0, 6);
+        const touchJoined = touchTexts.join(' ').toLowerCase();
+        const ownButtonScore = getNodeButtonLikeScore(touchNode);
+        const hasHourText = texts.some(function (text) { return /小时/.test(String(text)); }) ||
+          touchTexts.some(function (text) { return /小时/.test(String(text)); });
+        const matchesPreferredHours = preferredHourLabels.some(function (label) {
+          const lower = String(label || '').toLowerCase();
+          return joined.indexOf(lower) >= 0 || touchJoined.indexOf(lower) >= 0;
         });
-      if (toolNodes.length >= 2) {
-        toolNodes.sort(function (a, b) {
-          const ta = (a.texts[0] || '');
-          const tb = (b.texts[0] || '');
-          const na = parseFloat(String(ta).replace(/[^\d.]/g, ''));
-          const nb = parseFloat(String(tb).replace(/[^\d.]/g, ''));
-          return (nb || 0) - (na || 0);
+        const score =
+          (matchesPreferredHours ? 100 : 0) +
+          (hasHourText ? 20 : 0) +
+          (ownButtonScore * 12) +
+          (/node\d+/i.test(String(touchNode.name || '')) ? 10 : 0) +
+          (touchNode === toolRoot ? -20 : 0) +
+          nodeDepth(touchNode, toolRoot);
+        if (!hasHourText && ownButtonScore <= 0) return;
+        const current = byPath.get(touchPath);
+        if (!current || score > current.score) {
+          byPath.set(touchPath, {
+            node: touchNode,
+            path: touchPath,
+            texts: touchTexts.length > 0 ? touchTexts : texts,
+            score: score,
+          });
+        }
+      });
+      const ranked = Array.from(byPath.values())
+        .sort(function (a, b) {
+          return (b.score || 0) - (a.score || 0);
         });
-        return modeName === 'organic' ? toolNodes[1].node : toolNodes[0].node;
+      if (ranked.length > 0) {
+        return ranked[0].node;
       }
     }
     const toolInfo = manager ? safeReadKey(manager, 'currentToolNodeInfo') : null;
@@ -7917,8 +8507,8 @@
     const interactionRoot = getPlantInteractionRoot();
     if (!interactionRoot) return null;
     const fallbackNames = modeName === 'organic'
-      ? ['node3', 'node2']
-      : ['node2', 'node1'];
+      ? ['node3', 'node2', 'group_5']
+      : ['node2', 'node1', 'group_5'];
     const nodes = walk(interactionRoot).filter(function (node) {
       return !!(node && node.activeInHierarchy);
     });
@@ -7984,6 +8574,700 @@
     return hasSeedGroupActionNodes();
   }
 
+  function findPlantInteractionSubNodeByName(name) {
+    const interactionRoot = getPlantInteractionRoot();
+    if (!interactionRoot) return null;
+    return walk(interactionRoot).find(function (node) {
+      return !!(node && node.name === name && node.activeInHierarchy);
+    }) || null;
+  }
+
+  function toActivePlantInteractionNode(node) {
+    const targetNode = toNode(node);
+    if (!targetNode || !targetNode.activeInHierarchy) return null;
+    return targetNode;
+  }
+
+  function getPlantInteractionVisibleNodes(manager) {
+    const currentManager = manager || findPlantInteractionManager();
+    return {
+      followNode: findPlantInteractionSubNodeByName('followNode'),
+      landDetail: findPlantInteractionSubNodeByName('land_detail'),
+      seedGroup: findPlantInteractionSubNodeByName('seedGroup'),
+      detailNode: findPlantInteractionSubNodeByName('detailNode'),
+      toolInteractionNode: toActivePlantInteractionNode(currentManager && safeReadKey(currentManager, 'toolInteractionNode')),
+      seedInteractionNode: toActivePlantInteractionNode(currentManager && safeReadKey(currentManager, 'seedInteractionNode')),
+      detailInteractionNode: toActivePlantInteractionNode(currentManager && safeReadKey(currentManager, 'detailInteractionNode')),
+      dragPreview: toActivePlantInteractionNode(currentManager && safeReadKey(currentManager, 'dragPreview')),
+      dragPreviewSpineNode: toActivePlantInteractionNode(currentManager && safeReadKey(currentManager, 'dragPreviewSpineNode')),
+    };
+  }
+
+  function getPlantInteractionDetailComp(manager) {
+    const currentManager = manager || findPlantInteractionManager();
+    return currentManager ? safeReadKey(currentManager, 'currentDetailComp') : null;
+  }
+
+  function isPlantInteractionDetailCompShowing(detailComp) {
+    if (!detailComp || typeof detailComp !== 'object') return false;
+    return !!safeCall(function () {
+      if (typeof detailComp.getIsShowing === 'function') return detailComp.getIsShowing();
+      return safeReadKey(detailComp, 'isShowing');
+    }, false);
+  }
+
+  function snapshotPlantInteractionUiState(manager) {
+    const currentManager = manager || findPlantInteractionManager();
+    const nodes = getPlantInteractionVisibleNodes(currentManager);
+    const detailComp = getPlantInteractionDetailComp(currentManager);
+    return {
+      currentDetailType: currentManager ? safeReadKey(currentManager, 'currentDetailType') : null,
+      currentDragType: currentManager ? safeReadKey(currentManager, 'currentDragType') : null,
+      hasCurrentDragItem: !!(currentManager && safeReadKey(currentManager, 'currentDragItem')),
+      detailCompShowing: isPlantInteractionDetailCompShowing(detailComp),
+      followNodeVisible: !!nodes.followNode,
+      landDetailVisible: !!nodes.landDetail,
+      seedGroupVisible: !!nodes.seedGroup,
+      detailNodeVisible: !!nodes.detailNode,
+      toolInteractionVisible: !!nodes.toolInteractionNode,
+      seedInteractionVisible: !!nodes.seedInteractionNode,
+      detailInteractionVisible: !!nodes.detailInteractionNode,
+      dragPreviewVisible: !!nodes.dragPreview,
+      dragPreviewSpineVisible: !!nodes.dragPreviewSpineNode,
+      followNodePath: nodes.followNode ? fullPath(nodes.followNode) : null,
+      landDetailPath: nodes.landDetail ? fullPath(nodes.landDetail) : null,
+      seedGroupPath: nodes.seedGroup ? fullPath(nodes.seedGroup) : null,
+      detailNodePath: nodes.detailNode ? fullPath(nodes.detailNode) : null,
+      toolInteractionPath: nodes.toolInteractionNode ? fullPath(nodes.toolInteractionNode) : null,
+      seedInteractionPath: nodes.seedInteractionNode ? fullPath(nodes.seedInteractionNode) : null,
+      detailInteractionPath: nodes.detailInteractionNode ? fullPath(nodes.detailInteractionNode) : null,
+      dragPreviewPath: nodes.dragPreview ? fullPath(nodes.dragPreview) : null,
+      dragPreviewSpinePath: nodes.dragPreviewSpineNode ? fullPath(nodes.dragPreviewSpineNode) : null,
+    };
+  }
+
+  function isPlantInteractionUiStateActive(state) {
+    const currentState = state || {};
+    return !!(
+      currentState.currentDragType ||
+      currentState.hasCurrentDragItem ||
+      currentState.detailCompShowing ||
+      currentState.followNodeVisible ||
+      currentState.landDetailVisible ||
+      currentState.seedGroupVisible ||
+      currentState.detailNodeVisible ||
+      currentState.toolInteractionVisible ||
+      currentState.seedInteractionVisible ||
+      currentState.detailInteractionVisible ||
+      currentState.dragPreviewVisible ||
+      currentState.dragPreviewSpineVisible
+    );
+  }
+
+  function forceHidePlantInteractionNode(node) {
+    if (!node || typeof node !== 'object') {
+      return { ok: false, reason: 'node_missing' };
+    }
+    const path = safeCall(function () { return fullPath(node); }, null);
+    safeCall(function () {
+      if (Object.prototype.hasOwnProperty.call(node, 'active')) node.active = false;
+      if (Object.prototype.hasOwnProperty.call(node, '_active')) node._active = false;
+      return true;
+    }, null);
+    return { ok: true, path: path };
+  }
+
+  function disableNodeComponents(node) {
+    if (!node || !Array.isArray(node.components)) return { ok: false, disabledCount: 0 };
+    let disabledCount = 0;
+    safeCall(function () {
+      node.components.forEach(function (comp) {
+        if (!comp || typeof comp !== 'object') return;
+        if (Object.prototype.hasOwnProperty.call(comp, 'enabled')) {
+          comp.enabled = false;
+          disabledCount += 1;
+          return;
+        }
+        if (Object.prototype.hasOwnProperty.call(comp, '_enabled')) {
+          comp._enabled = false;
+          disabledCount += 1;
+        }
+      });
+      return true;
+    }, null);
+    return { ok: true, disabledCount: disabledCount };
+  }
+
+  function forceHidePlantInteractionTree(rootOrNode) {
+    const root = toNode(rootOrNode);
+    if (!root) {
+      return { ok: false, reason: 'root_missing', hiddenCount: 0, disabledComponentCount: 0 };
+    }
+    const nodes = [root].concat(walk(root).slice(1));
+    let hiddenCount = 0;
+    let disabledComponentCount = 0;
+    for (let i = nodes.length - 1; i >= 0; i -= 1) {
+      const node = nodes[i];
+      const hidden = forceHidePlantInteractionNode(node);
+      if (hidden && hidden.ok) hiddenCount += 1;
+      const disabled = disableNodeComponents(node);
+      if (disabled && disabled.ok) {
+        disabledComponentCount += Number(disabled.disabledCount) || 0;
+      }
+      safeCall(function () {
+        if (Object.prototype.hasOwnProperty.call(node, '_activeInHierarchy')) {
+          node._activeInHierarchy = false;
+        }
+        if (Object.prototype.hasOwnProperty.call(node, 'opacity')) {
+          node.opacity = 0;
+        }
+        return true;
+      }, null);
+    }
+    return {
+      ok: true,
+      path: safeCall(function () { return fullPath(root); }, null),
+      hiddenCount: hiddenCount,
+      disabledComponentCount: disabledComponentCount,
+    };
+  }
+
+  function hidePlantInteractionDetailComp(detailComp) {
+    if (!detailComp || typeof detailComp !== 'object') {
+      return { ok: false, reason: 'detail_comp_missing' };
+    }
+    let result = null;
+    let method = null;
+    safeCall(function () {
+      if (typeof detailComp.hideFertilizeDetail === 'function') {
+        method = 'hideFertilizeDetail';
+        result = detailComp.hideFertilizeDetail();
+      } else if (typeof detailComp.hideWithAnimation === 'function') {
+        method = 'hideWithAnimation';
+        result = detailComp.hideWithAnimation();
+      }
+      if (Object.prototype.hasOwnProperty.call(detailComp, 'isShowing')) {
+        detailComp.isShowing = false;
+      }
+      return true;
+    }, null);
+    const detailNode = toNode(safeReadKey(detailComp, 'node'));
+    if (detailNode) {
+      forceHidePlantInteractionNode(detailNode);
+    }
+    return {
+      ok: true,
+      method: method,
+      path: detailNode ? fullPath(detailNode) : null,
+      result: summarizeSpyValue(result, 1),
+    };
+  }
+
+  function clearPlantInteractionManagerState(manager) {
+    if (!manager) {
+      return { ok: false, reason: 'manager_missing' };
+    }
+    safeCall(function () {
+      hidePlantInteractionDetailComp(safeReadKey(manager, 'currentDetailComp'));
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentDragItem')) {
+        manager.currentDragItem = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentDragItemOriginParent')) {
+        manager.currentDragItemOriginParent = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentDragItemOriginPos')) {
+        manager.currentDragItemOriginPos = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentDragType')) {
+        manager.currentDragType = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentDetailType')) {
+        manager.currentDetailType = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentDetailComp')) {
+        manager.currentDetailComp = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentToolNodeInfo')) {
+        manager.currentToolNodeInfo = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentSeedNodeInfo')) {
+        manager.currentSeedNodeInfo = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentTouchPos')) {
+        manager.currentTouchPos = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'currentData')) {
+        manager.currentData = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'pendingDetailLandId')) {
+        manager.pendingDetailLandId = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'isDragging')) {
+        manager.isDragging = false;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'hasDispatchedDragEvent')) {
+        manager.hasDispatchedDragEvent = false;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'hasPerformedOperation')) {
+        manager.hasPerformedOperation = false;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'detailLongPressTimer')) {
+        manager.detailLongPressTimer = null;
+      }
+      if (Object.prototype.hasOwnProperty.call(manager, 'detailLongPressTime')) {
+        manager.detailLongPressTime = 0;
+      }
+      return true;
+    }, null);
+    return { ok: true };
+  }
+
+  async function closePlantInteractionUi(manager, opts) {
+    opts = opts || {};
+    const currentManager = manager || findPlantInteractionManager();
+    const waitAfterEach = Math.max(0, Number(opts.waitAfterEach) || 80);
+    const maxCommonCloseAttempts = Math.max(1, Number(opts.maxCommonCloseAttempts) || 2);
+    const actions = [];
+
+    async function runStep(label, invoker) {
+      const before = snapshotPlantInteractionUiState(currentManager);
+      let result = null;
+      let error = null;
+      try {
+        result = invoker();
+      } catch (err) {
+        error = err && err.message ? err.message : String(err || (label + ' failed'));
+      }
+      if (waitAfterEach > 0) {
+        await wait(waitAfterEach);
+      }
+      const after = snapshotPlantInteractionUiState(currentManager);
+      actions.push({
+        label: label,
+        result: summarizeSpyValue(result, 1),
+        error: error,
+        before: before,
+        after: after,
+      });
+      return after;
+    }
+
+    const before = snapshotPlantInteractionUiState(currentManager);
+    const needsCleanup = isPlantInteractionUiStateActive(before);
+    if (!needsCleanup) {
+      return {
+        ok: true,
+        cleaned: true,
+        before: before,
+        after: before,
+        actions: actions,
+      };
+    }
+
+    const landDetailComp = findLandDetailComponent();
+    const detailComp = getPlantInteractionDetailComp(currentManager);
+
+    if (landDetailComp && before.seedGroupVisible && typeof landDetailComp.onSwitchBtnClick === 'function') {
+      await runStep('landDetail.onSwitchBtnClick', function () {
+        return landDetailComp.onSwitchBtnClick();
+      });
+    }
+
+    if (detailComp && (before.detailCompShowing || before.detailNodeVisible)) {
+      await runStep('detailComp.hide', function () {
+        return hidePlantInteractionDetailComp(detailComp);
+      });
+    }
+
+    if (currentManager && typeof currentManager.commonClose === 'function') {
+      for (let i = 0; i < maxCommonCloseAttempts; i += 1) {
+        await runStep('manager.commonClose#' + (i + 1), function () {
+          return currentManager.commonClose();
+        });
+      }
+    }
+
+    if (currentManager && typeof currentManager.hideAllInteractionNodes === 'function') {
+      await runStep('manager.hideAllInteractionNodes', function () {
+        return currentManager.hideAllInteractionNodes();
+      });
+    }
+
+    if (currentManager && typeof currentManager.hideDetailUI === 'function') {
+      await runStep('manager.hideDetailUI', function () {
+        return currentManager.hideDetailUI();
+      });
+    }
+
+    if (currentManager && typeof currentManager.clearInteractionRender === 'function') {
+      await runStep('manager.clearInteractionRender', function () {
+        return currentManager.clearInteractionRender();
+      });
+    }
+
+    if (currentManager && typeof currentManager.restoreGestureToNormal === 'function') {
+      await runStep('manager.restoreGestureToNormal', function () {
+        return currentManager.restoreGestureToNormal();
+      });
+    }
+
+    if (currentManager && typeof currentManager.clearDragPreview === 'function') {
+      await runStep('manager.clearDragPreview', function () {
+        return currentManager.clearDragPreview();
+      });
+    }
+
+    await runStep('clearPlantInteractionManagerState', function () {
+      return clearPlantInteractionManagerState(currentManager);
+    });
+
+    let finalState = snapshotPlantInteractionUiState(currentManager);
+    if (isPlantInteractionUiStateActive(finalState) &&
+        currentManager && typeof currentManager.onGlobalClick === 'function') {
+      finalState = await runStep('manager.onGlobalClick', function () {
+        return currentManager.onGlobalClick();
+      });
+    }
+
+    if (isPlantInteractionUiStateActive(finalState) &&
+        currentManager && typeof currentManager.reset === 'function') {
+      finalState = await runStep('manager.reset', function () {
+        return currentManager.reset();
+      });
+    }
+
+    if (finalState.detailCompShowing) {
+      await runStep('forceHide.detailComp', function () {
+        return hidePlantInteractionDetailComp(getPlantInteractionDetailComp(currentManager));
+      });
+    }
+    if (finalState.landDetailVisible) {
+      await runStep('forceHide.land_detail', function () {
+        return forceHidePlantInteractionNode(findPlantInteractionSubNodeByName('land_detail'));
+      });
+    }
+    if (finalState.followNodeVisible) {
+      await runStep('forceHide.followNode', function () {
+        return forceHidePlantInteractionNode(findPlantInteractionSubNodeByName('followNode'));
+      });
+    }
+    if (finalState.seedGroupVisible) {
+      await runStep('forceHide.seedGroup', function () {
+        return forceHidePlantInteractionNode(findPlantInteractionSubNodeByName('seedGroup'));
+      });
+    }
+    if (finalState.detailNodeVisible) {
+      await runStep('forceHide.detailNode', function () {
+        return forceHidePlantInteractionNode(findPlantInteractionSubNodeByName('detailNode'));
+      });
+    }
+    if (finalState.toolInteractionVisible) {
+      await runStep('forceHide.toolInteractionNode', function () {
+        return forceHidePlantInteractionNode(toNode(currentManager && safeReadKey(currentManager, 'toolInteractionNode')));
+      });
+    }
+    if (finalState.seedInteractionVisible) {
+      await runStep('forceHide.seedInteractionNode', function () {
+        return forceHidePlantInteractionNode(toNode(currentManager && safeReadKey(currentManager, 'seedInteractionNode')));
+      });
+    }
+    if (finalState.detailInteractionVisible) {
+      await runStep('forceHide.detailInteractionNode', function () {
+        return forceHidePlantInteractionNode(toNode(currentManager && safeReadKey(currentManager, 'detailInteractionNode')));
+      });
+    }
+    if (finalState.dragPreviewVisible) {
+      await runStep('forceHide.dragPreview', function () {
+        return forceHidePlantInteractionNode(toNode(currentManager && safeReadKey(currentManager, 'dragPreview')));
+      });
+    }
+    if (finalState.dragPreviewSpineVisible) {
+      await runStep('forceHide.dragPreviewSpineNode', function () {
+        return forceHidePlantInteractionNode(toNode(currentManager && safeReadKey(currentManager, 'dragPreviewSpineNode')));
+      });
+    }
+    if (isPlantInteractionUiStateActive(finalState)) {
+      await runStep('forceHide.interactionRootTree', function () {
+        return forceHidePlantInteractionTree(getPlantInteractionRoot());
+      });
+    }
+
+    const after = snapshotPlantInteractionUiState(currentManager);
+    return {
+      ok: true,
+      cleaned: !isPlantInteractionUiStateActive(after),
+      before: before,
+      after: after,
+      actions: actions,
+    };
+  }
+
+  async function closePlantInteractionUiRpc(opts) {
+    return await closePlantInteractionUi(findPlantInteractionManager(), opts || {});
+  }
+
+  async function dismissLandUpgradeOverlay(opts) {
+    opts = opts || {};
+    const detected = detectActiveOverlays({
+      silent: true,
+      limit: 3,
+      minAreaRatio: opts.minAreaRatio == null ? 0.12 : opts.minAreaRatio,
+      keywords: [
+        '土地升级', '升级', '黑土地', '金土地', 'upgrade'
+      ],
+      excludeKeywords: [
+        'reward', 'award', 'prize', 'gift', '仓库', '商店', '背包'
+      ],
+      closeKeywords: [
+        'close', 'btn_close', 'cancel', 'ok', 'confirm', 'sure', 'x',
+        '关闭', '取消', '确定'
+      ],
+    });
+    const target = detected && Array.isArray(detected.list)
+      ? detected.list.find(function (item) {
+          const texts = Array.isArray(item && item.texts) ? item.texts : [];
+          return matchesKeywords(texts, ['土地升级', '黑土地', '金土地', '升级']);
+        }) || null
+      : null;
+    if (!target) {
+      return {
+        ok: false,
+        reason: 'land_upgrade_overlay_not_found',
+        detected: detected,
+      };
+    }
+    return await dismissOverlayTarget(target, {
+      silent: true,
+      waitAfter: opts.waitAfter == null ? 220 : opts.waitAfter,
+    });
+  }
+
+  function summarizeFertilizeLandResult(result) {
+    const src = result && typeof result === 'object' ? result : {};
+    const before = src && src.before && typeof src.before === 'object' ? src.before : null;
+    const after = src && src.after && typeof src.after === 'object' ? src.after : null;
+    return {
+      ok: src.ok === true,
+      action: src.action || null,
+      landId: toFiniteNumber(src.landId),
+      plantName: src.plantName ? String(src.plantName) : null,
+      requestedMode: src.requestedMode ? String(src.requestedMode) : null,
+      resolvedMode: src.resolvedMode ? String(src.resolvedMode) : null,
+      reason: src.reason ? String(src.reason) : null,
+      executionSource: src.executionSource ? String(src.executionSource) : null,
+      before: before ? {
+        stageKind: before.stageKind || null,
+        matureInSec: toFiniteNumber(before.matureInSec),
+        currentSeason: toFiniteNumber(before.currentSeason),
+        totalSeason: toFiniteNumber(before.totalSeason),
+      } : null,
+      after: after ? {
+        stageKind: after.stageKind || null,
+        matureInSec: toFiniteNumber(after.matureInSec),
+        currentSeason: toFiniteNumber(after.currentSeason),
+        totalSeason: toFiniteNumber(after.totalSeason),
+      } : null,
+      deltaMatureInSec: toFiniteNumber(src.deltaMatureInSec),
+      selectedBucketDeltaCount: toFiniteNumber(src.selectedBucketDeltaCount),
+    };
+  }
+
+  function shouldRetryBatchFertilizerSwitch(reasonLike) {
+    const text = String(
+      reasonLike && typeof reasonLike === 'object'
+        ? (reasonLike.reason || reasonLike.error || reasonLike.message || '')
+        : (reasonLike || '')
+    ).trim().toLowerCase();
+    if (!text) return false;
+    return text === 'action_panel_not_ready' ||
+      text === 'action_node_missing' ||
+      text === 'plant interaction manager not found' ||
+      text === 'direct_bucket_state_not_ready' ||
+      text === 'bucket_state_not_applied' ||
+      text.indexOf('panel not ready') >= 0 ||
+      text.indexOf('action node missing') >= 0 ||
+      text.indexOf('drag item not ready') >= 0 ||
+      text.indexOf('bucket state not ready') >= 0 ||
+      text.indexOf('interaction manager') >= 0;
+  }
+
+  function shouldAbortBatchFertilizer(reasonLike) {
+    const text = String(
+      reasonLike && typeof reasonLike === 'object'
+        ? (reasonLike.reason || reasonLike.error || reasonLike.message || '')
+        : (reasonLike || '')
+    ).trim().toLowerCase();
+    if (!text) return false;
+    return text.indexOf('no fertilizer available') >= 0 ||
+      text.indexOf('normal fertilizer not available') >= 0 ||
+      text.indexOf('organic fertilizer not available') >= 0;
+  }
+
+  async function fertilizeLandsBatch(opts) {
+    opts = opts || {};
+    const requestedLandIds = normalizeLandIds(
+      Array.isArray(opts.landIds) ? opts.landIds :
+      (Array.isArray(opts.landIdList) ? opts.landIdList :
+      (opts.landId != null ? [opts.landId] : []))
+    );
+    if (requestedLandIds.length === 0) throw new Error('landIds required');
+
+    const rawMode = String(opts.type || opts.mode || 'auto').trim().toLowerCase();
+    const dryRun = opts.dryRun !== false;
+    const useInternalFallback = opts.internalFallback === true;
+    const waitAfterOpen = Math.max(100, Number(opts.waitAfterOpen) || 350);
+    const waitAfterAction = Math.max(100, Number(opts.waitAfterAction) || 500);
+    const switchWaitAfterOpenRaw = toFiniteNumber(opts.switchWaitAfterOpen);
+    const switchWaitAfterOpen = Math.max(80, switchWaitAfterOpenRaw != null ? switchWaitAfterOpenRaw : Math.min(waitAfterOpen, 180));
+    const betweenLandWaitRaw = toFiniteNumber(opts.betweenLandWait);
+    const betweenLandWait = Math.max(0, betweenLandWaitRaw != null ? betweenLandWaitRaw : 80);
+    const retryResetWaitRaw = toFiniteNumber(opts.retryResetWait);
+    const retryResetWait = Math.max(0, retryResetWaitRaw != null ? retryResetWaitRaw : 120);
+    const shouldCleanupUi = opts.cleanupUi !== false;
+    const cleanupWaitAfterEach = Math.min(120, Math.max(60, Math.floor(waitAfterAction / 4) || 0));
+    const results = [];
+    let abortedReason = null;
+    let closeUi = null;
+
+    const closeInteractionUi = async function () {
+      try {
+        const closed = await closePlantInteractionUi(findPlantInteractionManager(), {
+          waitAfterEach: cleanupWaitAfterEach,
+          maxCommonCloseAttempts: 2,
+        });
+        return {
+          ok: closed && closed.ok === true,
+          cleaned: closed && closed.cleaned === true,
+          error: closed && closed.error ? String(closed.error) : null,
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          cleaned: false,
+          error: error && error.message ? error.message : String(error || 'closePlantInteractionUi failed'),
+        };
+      }
+    };
+
+    try {
+      for (let i = 0; i < requestedLandIds.length; i += 1) {
+        const landId = requestedLandIds[i];
+        let entry = null;
+
+        for (let attemptIndex = 0; attemptIndex < 2; attemptIndex += 1) {
+          const retriedAfterReset = attemptIndex > 0;
+          if (retriedAfterReset) {
+            await closeInteractionUi();
+            if (retryResetWait > 0) {
+              await wait(retryResetWait);
+            }
+          }
+
+          try {
+            const rawResult = await fertilizeLand({
+              type: rawMode,
+              dryRun: dryRun,
+              internalFallback: useInternalFallback,
+              cleanupUi: false,
+              landId: landId,
+              waitAfterOpen: (i === 0 || retriedAfterReset) ? waitAfterOpen : switchWaitAfterOpen,
+              waitAfterAction: waitAfterAction,
+              silent: true,
+            });
+            entry = {
+              index: i,
+              landId: landId,
+              retriedAfterReset: retriedAfterReset,
+              ...summarizeFertilizeLandResult(rawResult),
+              error: null,
+            };
+            if (attemptIndex === 0 && i > 0 && entry.ok !== true && shouldRetryBatchFertilizerSwitch(entry.reason)) {
+              continue;
+            }
+            break;
+          } catch (error) {
+            const errorMessage = error && error.message ? error.message : String(error || 'fertilizeLand failed');
+            entry = {
+              index: i,
+              landId: landId,
+              retriedAfterReset: retriedAfterReset,
+              ok: false,
+              action: null,
+              plantName: null,
+              requestedMode: rawMode || null,
+              resolvedMode: rawMode === 'auto' ? null : rawMode,
+              reason: null,
+              executionSource: null,
+              before: null,
+              after: null,
+              deltaMatureInSec: null,
+              selectedBucketDeltaCount: null,
+              error: errorMessage,
+            };
+            if (attemptIndex === 0 && i > 0 && shouldRetryBatchFertilizerSwitch(errorMessage)) {
+              continue;
+            }
+            break;
+          }
+        }
+
+        if (!entry) {
+          entry = {
+            index: i,
+            landId: landId,
+            retriedAfterReset: false,
+            ok: false,
+            action: null,
+            plantName: null,
+            requestedMode: rawMode || null,
+            resolvedMode: rawMode === 'auto' ? null : rawMode,
+            reason: null,
+            executionSource: null,
+            before: null,
+            after: null,
+            deltaMatureInSec: null,
+            selectedBucketDeltaCount: null,
+            error: 'fertilize_batch_unknown_error',
+          };
+        }
+
+        results.push(entry);
+
+        const failureReason = entry.reason || entry.error || '';
+        if (shouldAbortBatchFertilizer(failureReason)) {
+          abortedReason = failureReason;
+          break;
+        }
+
+        if (betweenLandWait > 0 && i < requestedLandIds.length - 1) {
+          await wait(betweenLandWait);
+        }
+      }
+    } finally {
+      if (shouldCleanupUi) {
+        closeUi = await closeInteractionUi();
+      }
+    }
+
+    const successCount = results.filter(function (item) { return item && item.ok === true; }).length;
+    const failureCount = results.filter(function (item) { return item && item.ok === false; }).length;
+
+    const payload = {
+      ok: failureCount === 0 && !abortedReason,
+      action: 'fertilize_batch',
+      requestedMode: rawMode || null,
+      landIds: requestedLandIds,
+      processedCount: results.length,
+      successCount: successCount,
+      failureCount: failureCount,
+      aborted: !!abortedReason,
+      reason: abortedReason || null,
+      closeUi: closeUi,
+      results: results,
+    };
+    return opts.silent ? payload : out(payload);
+  }
+
   async function fertilizeLand(opts) {
     opts = opts || {};
     const rawMode = String(opts.type || opts.mode || 'auto').trim().toLowerCase();
@@ -8030,11 +9314,19 @@
       throw new Error('organic fertilizer not available');
     }
 
-    openLandInteraction(targetNode);
-    await wait(waitAfterOpen);
+    let manager = null;
+    const shouldAutoCleanupUi = opts.cleanupUi !== false;
+    let shouldCleanupUi = false;
+    try {
+      openLandInteraction(targetNode);
+      shouldCleanupUi = true;
+      await wait(waitAfterOpen);
 
-    const manager = findPlantInteractionManager();
-    if (!manager) throw new Error('plant interaction manager not found');
+      manager = findPlantInteractionManager();
+      if (!manager) throw new Error('plant interaction manager not found');
+      await syncLandDetailToTarget(targetNode, manager, {
+        waitAfter: Math.min(waitAfterOpen, 220),
+      });
 
     const targetArgForCheck = before.landId != null ? before.landId : before.path;
     const managerCanFertilize = typeof manager.canFertilize === 'function'
@@ -8073,57 +9365,49 @@
 
     const fertilizerItem = findBestFertilizerDetailItem(itemM, resolvedMode);
     payload.fertilizerItem = summarizeInventoryEntry(fertilizerItem);
-    const selectedBucket = findFirstCurrentDataFertilizerBucket(manager, resolvedMode);
+    const directBucketState = prepareDirectFertilizerBucketState(manager, itemM, resolvedMode);
+    const selectedBucket = directBucketState.primaryBucket ||
+      findFirstCurrentDataFertilizerBucket(manager, resolvedMode);
     payload.selectedBucket = summarizeInventoryEntry(selectedBucket);
-    payload.selectedBucketApplied = false;
+    payload.selectedBucketApplied = !!directBucketState.applied;
     payload.targetArg = targetArgForCheck;
-
-    primeFertilizerToolNodes(manager, selectedBucket, targetArgForCheck);
-    await wait(120);
-
-    const actionPanelReady = await ensureFertilizerActionPanel(manager);
-    const actionNode = findFertilizerActionNode(resolvedMode, manager, selectedBucket);
-    payload.actionNode = actionNode ? {
-      path: fullPath(actionNode),
-      name: actionNode.name || null,
-      texts: getNodeTextList(actionNode, { maxDepth: 2 }).slice(0, 6),
-    } : null;
-    payload.actionPanelReady = actionPanelReady;
-
-    let interactionNodePrimed = false;
-    if (typeof manager.selectAppropriateInteractionNode === 'function') {
-      safeCall(function () {
-        manager.selectAppropriateInteractionNode();
-        return true;
-      }, null);
-      await wait(80);
-      interactionNodePrimed = true;
-    }
-    payload.interactionNodePrimed = interactionNodePrimed;
-    const managerCanFertilizeAfterPrime = typeof manager.canFertilize === 'function'
-      ? !!safeCall(function () { return manager.canFertilize(targetArgForCheck); }, false)
-      : null;
-    payload.checks.managerCanFertilizeAfterPrime = managerCanFertilizeAfterPrime;
+    payload.directBucketState = {
+      applied: !!directBucketState.applied,
+      reason: directBucketState.reason,
+      preferredBucketId: directBucketState.preferredBucketId,
+      availableBuckets: directBucketState.availableBuckets,
+      orderedBuckets: directBucketState.orderedBuckets,
+      beforeState: directBucketState.beforeState,
+      afterState: directBucketState.afterState,
+      dragReset: directBucketState.dragReset || null,
+      dragEnsure: directBucketState.dragEnsure || null,
+    };
+    payload.actionNode = null;
+    payload.actionPanelReady = null;
+    payload.interactionNodePrimed = false;
+    payload.checks.managerCanFertilizeAfterPrime = null;
     payload.detailPrimed = false;
     payload.detailPrimeSource = null;
-    payload.managerStateAfterPrime = {
+    payload.detailPrimeAttempts = [];
+    payload.managerStateAfterPrime = directBucketState.afterState || {
       currentDetailType: safeReadKey(manager, 'currentDetailType'),
       currentDragType: safeReadKey(manager, 'currentDragType'),
       currentToolNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentToolNodeInfo')),
       currentSeedNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentSeedNodeInfo')),
       currentDetailComp: summarizeRuntimeObject(safeReadKey(manager, 'currentDetailComp'), 'currentDetailComp'),
+      currentDragState: summarizeCurrentDragState(manager),
     };
 
     if (dryRun) {
-      payload.wouldCall = 'openLandInteraction(targetLand) -> emitNodeTouch(fertilizerActionNode) -> emitNodeTouch(targetLand) -> compare matureInSec';
+      payload.wouldCall = 'openLandInteraction(targetLand) -> prepareDirectFertilizerBucketState(mode) -> performFertilizing(landId)';
       payload.internalFallbackEnabled = useInternalFallback;
       payload.targetArgCandidates = {
         landId: before.landId,
         path: before.path,
       };
-      if (!actionPanelReady || !actionNode) {
+      if (!directBucketState.applied || !selectedBucket) {
         payload.ok = false;
-        payload.reason = !actionPanelReady ? 'action_panel_not_ready' : 'action_node_missing';
+        payload.reason = !selectedBucket ? 'direct_bucket_missing' : 'direct_bucket_state_not_ready';
       }
       return opts.silent ? payload : out(payload);
     }
@@ -8146,6 +9430,7 @@
           currentDragType: safeReadKey(manager, 'currentDragType'),
           currentDataItems: summarizeInventoryArray(safeReadKey(manager, 'currentData'), 8),
           currentDetailComp: summarizeRuntimeObject(safeReadKey(manager, 'currentDetailComp'), 'currentDetailComp'),
+          currentDragState: summarizeCurrentDragState(manager),
         },
       });
       return { result: result, error: error };
@@ -8153,6 +9438,7 @@
 
     const performArg = targetArgForCheck;
     payload.performArg = performArg;
+    payload.selectedBucketCountBefore = getLiveFertilizerBucketCount(itemM, selectedBucket);
     let performError = null;
     let performResult = null;
     let actionTapResult = null;
@@ -8161,8 +9447,329 @@
     let landRetapResult = null;
     let landRetapError = null;
     let postLandRetap = null;
+    let postDirectManager = null;
+    let postDirectTargetPrimed = null;
 
-    if (actionNode) {
+    const directManagerTry = runAttempt('prepareDirectFertilizerBucketState(mode)->performFertilizing(targetArg)', function () {
+      const prepared = prepareDirectFertilizerBucketState(manager, itemM, resolvedMode);
+      if (!prepared.applied || !prepared.primaryBucket) {
+        throw new Error(prepared.reason || 'direct fertilizer bucket state not ready');
+      }
+      const dragReady = ensureCurrentDragItemForBucket(manager, prepared.primaryBucket);
+      if (!dragReady.ensured) {
+        throw new Error(dragReady.reason || 'direct fertilizer drag item not ready');
+      }
+      if (typeof manager.performFertilizing === 'function') return manager.performFertilizing(performArg);
+      return null;
+    });
+    performResult = directManagerTry.result;
+    performError = directManagerTry.error;
+    await wait(Math.max(waitAfterAction, 700));
+    postDirectManager = getGridState(targetNode, { silent: true, farmType: 'own' });
+    payload.postDirectManager = {
+      stageKind: postDirectManager.stageKind,
+      matureInSec: postDirectManager.matureInSec,
+      currentSeason: postDirectManager.currentSeason,
+      totalSeason: postDirectManager.totalSeason,
+    };
+    payload.deltaAfterDirectManagerMatureInSec = Number(before.matureInSec) && Number(postDirectManager.matureInSec)
+      ? Number(postDirectManager.matureInSec) - Number(before.matureInSec)
+      : null;
+    payload.selectedBucketCountAfterDirectManager = getLiveFertilizerBucketCount(itemM, selectedBucket);
+    payload.selectedBucketDeltaAfterDirectManager = payload.selectedBucketCountAfterDirectManager != null && payload.selectedBucketCountBefore != null
+      ? payload.selectedBucketCountAfterDirectManager - payload.selectedBucketCountBefore
+      : null;
+    payload.managerStateAfterDirectManager = {
+      currentDetailType: safeReadKey(manager, 'currentDetailType'),
+      currentDragType: safeReadKey(manager, 'currentDragType'),
+      currentToolNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentToolNodeInfo')),
+      currentSeedNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentSeedNodeInfo')),
+      currentDetailComp: summarizeRuntimeObject(safeReadKey(manager, 'currentDetailComp'), 'currentDetailComp'),
+      currentDataState: summarizeCurrentDataState(manager),
+      currentDragState: summarizeCurrentDragState(manager),
+    };
+    if ((typeof payload.selectedBucketDeltaAfterDirectManager === 'number' && payload.selectedBucketDeltaAfterDirectManager < 0) ||
+        (typeof payload.deltaAfterDirectManagerMatureInSec === 'number' && payload.deltaAfterDirectManagerMatureInSec < -5)) {
+      payload.ok = true;
+      payload.performResult = performResult;
+      payload.performError = performError;
+      payload.executionAttempts = executionAttempts;
+      payload.after = payload.postDirectManager;
+      payload.deltaMatureInSec = payload.deltaAfterDirectManagerMatureInSec;
+      payload.executionSource = 'direct_bucket_perform';
+      return opts.silent ? payload : out(payload);
+    }
+
+    const directTargetPrimedTry = runAttempt('prepareDirectFertilizerBucketState(mode)->setCurrentData(targetArg)->selectAppropriateInteractionNode()->attemptLandInteraction(center)->performFertilizing(targetArg)', function () {
+      const prepared = prepareDirectFertilizerBucketState(manager, itemM, resolvedMode);
+      if (!prepared.applied || !prepared.primaryBucket) {
+        throw new Error(prepared.reason || 'direct fertilizer bucket state not ready');
+      }
+      if (typeof manager.setCurrentData === 'function' && performArg != null) {
+        manager.setCurrentData(performArg);
+      }
+      if (typeof manager.selectAppropriateInteractionNode === 'function') {
+        manager.selectAppropriateInteractionNode();
+      }
+      invokeManagerAttemptLandInteraction(manager, targetNode);
+      const dragReady = ensureCurrentDragItemForBucket(manager, prepared.primaryBucket);
+      if (!dragReady.ensured) {
+        throw new Error(dragReady.reason || 'direct fertilizer drag item not ready');
+      }
+      if (typeof manager.performFertilizing === 'function') return manager.performFertilizing(performArg);
+      return null;
+    });
+    performResult = directTargetPrimedTry.result;
+    performError = directTargetPrimedTry.error;
+    await wait(Math.max(waitAfterAction, 700));
+    postDirectTargetPrimed = getGridState(targetNode, { silent: true, farmType: 'own' });
+    payload.postDirectTargetPrimed = {
+      stageKind: postDirectTargetPrimed.stageKind,
+      matureInSec: postDirectTargetPrimed.matureInSec,
+      currentSeason: postDirectTargetPrimed.currentSeason,
+      totalSeason: postDirectTargetPrimed.totalSeason,
+    };
+    payload.deltaAfterDirectTargetPrimedMatureInSec = Number(before.matureInSec) && Number(postDirectTargetPrimed.matureInSec)
+      ? Number(postDirectTargetPrimed.matureInSec) - Number(before.matureInSec)
+      : null;
+    payload.selectedBucketCountAfterDirectTargetPrimed = getLiveFertilizerBucketCount(itemM, selectedBucket);
+    payload.selectedBucketDeltaAfterDirectTargetPrimed = payload.selectedBucketCountAfterDirectTargetPrimed != null && payload.selectedBucketCountBefore != null
+      ? payload.selectedBucketCountAfterDirectTargetPrimed - payload.selectedBucketCountBefore
+      : null;
+    payload.managerStateAfterDirectTargetPrimed = {
+      currentDetailType: safeReadKey(manager, 'currentDetailType'),
+      currentDragType: safeReadKey(manager, 'currentDragType'),
+      currentToolNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentToolNodeInfo')),
+      currentSeedNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentSeedNodeInfo')),
+      currentDetailComp: summarizeRuntimeObject(safeReadKey(manager, 'currentDetailComp'), 'currentDetailComp'),
+      currentDataState: summarizeCurrentDataState(manager),
+      currentDragState: summarizeCurrentDragState(manager),
+    };
+    if ((typeof payload.selectedBucketDeltaAfterDirectTargetPrimed === 'number' && payload.selectedBucketDeltaAfterDirectTargetPrimed < 0) ||
+        (typeof payload.deltaAfterDirectTargetPrimedMatureInSec === 'number' && payload.deltaAfterDirectTargetPrimedMatureInSec < -5)) {
+      payload.ok = true;
+      payload.performResult = performResult;
+      payload.performError = performError;
+      payload.executionAttempts = executionAttempts;
+      payload.after = payload.postDirectTargetPrimed;
+      payload.deltaMatureInSec = payload.deltaAfterDirectTargetPrimedMatureInSec;
+      payload.executionSource = 'direct_target_primed_perform';
+      return opts.silent ? payload : out(payload);
+    }
+
+    const directToolActionPanelReady = await ensureFertilizerActionPanel(manager);
+    const directToolActionNode = findFertilizerActionNode(resolvedMode, manager, selectedBucket);
+    payload.directToolActionPanelReady = directToolActionPanelReady;
+    payload.directToolActionNode = summarizeNodeForClick(directToolActionNode);
+    const preDirectToolBucketState = prepareDirectFertilizerBucketState(manager, itemM, resolvedMode);
+    payload.preDirectToolBucketState = {
+      applied: !!preDirectToolBucketState.applied,
+      reason: preDirectToolBucketState.reason || null,
+      dragReset: preDirectToolBucketState.dragReset || null,
+      dragEnsure: preDirectToolBucketState.dragEnsure || null,
+      currentDataItems: summarizeInventoryArray(safeReadKey(manager, 'currentData'), 8),
+      currentDragState: summarizeCurrentDragState(manager),
+    };
+    if (directToolActionNode) {
+      let directToolTapResult = false;
+      let directToolTapError = null;
+      const expectedBucketId = Number(selectedBucket && safeReadKey(selectedBucket, 'id')) || 0;
+      const directToolTapAttempts = [];
+      try {
+        for (let attemptIndex = 0; attemptIndex < 2; attemptIndex += 1) {
+          const attempt = {
+            index: attemptIndex + 1,
+            expectedBucketId: expectedBucketId || null,
+            beforeDragBucketId: getCurrentDragItemBucketId(manager) || null,
+            touchMethod: null,
+            dragReset: clearCurrentDragItemIfBucketMismatch(manager, selectedBucket),
+            afterDragBucketId: null,
+          };
+          if (attemptIndex > 0) {
+            const retryState = prepareDirectFertilizerBucketState(manager, itemM, resolvedMode);
+            attempt.retryPrepare = {
+              applied: !!retryState.applied,
+              reason: retryState.reason || null,
+              dragReset: retryState.dragReset || null,
+            };
+          }
+          if (!invokeManagerToolTouch(manager, directToolActionNode)) {
+            emitNodeTouch(directToolActionNode);
+            attempt.touchMethod = 'emitNodeTouch';
+          } else {
+            attempt.touchMethod = 'managerToolTouch';
+          }
+          await wait(80);
+          if (!safeReadKey(manager, 'currentDragItem')) {
+            emitNodeTouch(directToolActionNode);
+            attempt.touchMethod = attempt.touchMethod + '+emitNodeTouch';
+            await wait(80);
+          }
+          attempt.dragEnsure = ensureCurrentDragItemForBucket(manager, selectedBucket);
+          attempt.afterDragBucketId = getCurrentDragItemBucketId(manager) || null;
+          directToolTapAttempts.push(attempt);
+          if (!expectedBucketId || attempt.afterDragBucketId === expectedBucketId) {
+            directToolTapResult = true;
+            break;
+          }
+        }
+        if (!directToolTapResult && expectedBucketId) {
+          directToolTapError = 'drag bucket mismatch, expected=' + expectedBucketId + ', actual=' + (getCurrentDragItemBucketId(manager) || 0);
+        }
+      } catch (err) {
+        directToolTapError = err && err.message ? err.message : String(err || 'direct tool tap failed');
+      }
+      await wait(Math.max(waitAfterAction, 180));
+      payload.directToolTap = {
+        result: directToolTapResult,
+        error: directToolTapError,
+        expectedBucketId: expectedBucketId || null,
+        actualBucketId: getCurrentDragItemBucketId(manager) || null,
+        attempts: directToolTapAttempts,
+        currentDataItems: summarizeInventoryArray(safeReadKey(manager, 'currentData'), 8),
+        currentDataState: summarizeCurrentDataState(manager),
+        currentDragState: summarizeCurrentDragState(manager),
+      };
+
+      if (typeof manager.setCurrentData === 'function' && performArg != null) {
+        runAttempt('setCurrentData(targetArg) [after direct tool tap]', function () {
+          return manager.setCurrentData(performArg);
+        });
+        await wait(60);
+      }
+      if (typeof manager.selectAppropriateInteractionNode === 'function') {
+        runAttempt('selectAppropriateInteractionNode() [after direct tool tap]', function () {
+          return manager.selectAppropriateInteractionNode();
+        });
+        await wait(120);
+      }
+
+      const directToolPostPrimeDragReset = clearCurrentDragItemIfBucketMismatch(manager, selectedBucket);
+      payload.directToolPostPrimeDragReset = directToolPostPrimeDragReset;
+      if (directToolPostPrimeDragReset && directToolPostPrimeDragReset.cleared) {
+        try {
+          if (!invokeManagerToolTouch(manager, directToolActionNode)) {
+            emitNodeTouch(directToolActionNode);
+          }
+          await wait(100);
+        } catch (_) {}
+      }
+
+      const directToolLandInteraction = invokeManagerAttemptLandInteraction(manager, targetNode);
+      payload.directToolLandInteraction = directToolLandInteraction;
+      executionAttempts.push({
+        label: 'attemptLandInteraction(after_direct_tool_tap)',
+        result: summarizeSpyValue(directToolLandInteraction, 2),
+        error: directToolLandInteraction && directToolLandInteraction.error
+          ? directToolLandInteraction.error
+          : directToolLandInteraction && directToolLandInteraction.reason
+            ? directToolLandInteraction.reason
+            : null,
+        state: {
+          currentDetailType: safeReadKey(manager, 'currentDetailType'),
+          currentDragType: safeReadKey(manager, 'currentDragType'),
+          currentDataItems: summarizeInventoryArray(safeReadKey(manager, 'currentData'), 8),
+          currentDetailComp: summarizeRuntimeObject(safeReadKey(manager, 'currentDetailComp'), 'currentDetailComp'),
+          currentDragState: summarizeCurrentDragState(manager),
+        },
+      });
+      await wait(directToolLandInteraction && directToolLandInteraction.called ? 120 : 60);
+
+      const directToolPerformTry = runAttempt('performFertilizing(targetArg) [after direct tool tap]', function () {
+        const dragReady = ensureCurrentDragItemForBucket(manager, selectedBucket);
+        if (!dragReady.ensured) {
+          throw new Error(dragReady.reason || 'direct tool drag item not ready');
+        }
+        if (typeof manager.performFertilizing === 'function') return manager.performFertilizing(performArg);
+        return null;
+      });
+      performResult = directToolPerformTry.result;
+      performError = directToolPerformTry.error;
+      await wait(Math.max(waitAfterAction, 700));
+      const postDirectToolPerform = getGridState(targetNode, { silent: true, farmType: 'own' });
+      payload.postDirectToolPerform = {
+        stageKind: postDirectToolPerform.stageKind,
+        matureInSec: postDirectToolPerform.matureInSec,
+        currentSeason: postDirectToolPerform.currentSeason,
+        totalSeason: postDirectToolPerform.totalSeason,
+      };
+      payload.deltaAfterDirectToolPerformMatureInSec = Number(before.matureInSec) && Number(postDirectToolPerform.matureInSec)
+        ? Number(postDirectToolPerform.matureInSec) - Number(before.matureInSec)
+        : null;
+      payload.selectedBucketCountAfterDirectToolPerform = getLiveFertilizerBucketCount(itemM, selectedBucket);
+      payload.selectedBucketDeltaAfterDirectToolPerform = payload.selectedBucketCountAfterDirectToolPerform != null && payload.selectedBucketCountBefore != null
+        ? payload.selectedBucketCountAfterDirectToolPerform - payload.selectedBucketCountBefore
+        : null;
+      payload.managerStateAfterDirectToolPerform = {
+        currentDetailType: safeReadKey(manager, 'currentDetailType'),
+        currentDragType: safeReadKey(manager, 'currentDragType'),
+        currentToolNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentToolNodeInfo')),
+        currentSeedNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentSeedNodeInfo')),
+        currentDetailComp: summarizeRuntimeObject(safeReadKey(manager, 'currentDetailComp'), 'currentDetailComp'),
+        currentDataState: summarizeCurrentDataState(manager),
+        currentDragState: summarizeCurrentDragState(manager),
+      };
+      if ((typeof payload.selectedBucketDeltaAfterDirectToolPerform === 'number' && payload.selectedBucketDeltaAfterDirectToolPerform < 0) ||
+          (typeof payload.deltaAfterDirectToolPerformMatureInSec === 'number' && payload.deltaAfterDirectToolPerformMatureInSec < -5)) {
+        payload.ok = true;
+        payload.performResult = performResult;
+        payload.performError = performError;
+        payload.executionAttempts = executionAttempts;
+        payload.after = payload.postDirectToolPerform;
+        payload.deltaMatureInSec = payload.deltaAfterDirectToolPerformMatureInSec;
+        payload.executionSource = 'direct_tool_selected_perform';
+        return opts.silent ? payload : out(payload);
+      }
+    }
+
+    if (useInternalFallback) {
+      primeFertilizerToolNodes(manager, selectedBucket, targetArgForCheck);
+      await wait(120);
+
+      const actionPanelReady = await ensureFertilizerActionPanel(manager);
+      const actionNode = findFertilizerActionNode(resolvedMode, manager, selectedBucket);
+      payload.actionNode = actionNode ? {
+        path: fullPath(actionNode),
+        name: actionNode.name || null,
+        texts: getNodeTextList(actionNode, { maxDepth: 2 }).slice(0, 6),
+      } : null;
+      payload.actionPanelReady = actionPanelReady;
+
+      let interactionNodePrimed = false;
+      if (typeof manager.selectAppropriateInteractionNode === 'function') {
+        safeCall(function () {
+          manager.selectAppropriateInteractionNode();
+          return true;
+        }, null);
+        await wait(80);
+        interactionNodePrimed = true;
+      }
+      payload.interactionNodePrimed = interactionNodePrimed;
+      payload.checks.managerCanFertilizeAfterPrime = typeof manager.canFertilize === 'function'
+        ? !!safeCall(function () { return manager.canFertilize(targetArgForCheck); }, false)
+        : null;
+      payload.managerStateAfterPrime = {
+        currentDetailType: safeReadKey(manager, 'currentDetailType'),
+        currentDragType: safeReadKey(manager, 'currentDragType'),
+        currentToolNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentToolNodeInfo')),
+        currentSeedNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentSeedNodeInfo')),
+        currentDetailComp: summarizeRuntimeObject(safeReadKey(manager, 'currentDetailComp'), 'currentDetailComp'),
+        currentDragState: summarizeCurrentDragState(manager),
+      };
+
+      const directDetailPrime = primeDirectFertilizerDetail(manager, itemM, fertilizerItem);
+      payload.detailPrimed = !!directDetailPrime.primed;
+      payload.detailPrimeSource = directDetailPrime.usedCandidate;
+      payload.detailPrimeAttempts = directDetailPrime.attempts;
+
+      const directSelectionArg = fertilizerItem || selectedBucket || performArg;
+      safeCall(function () {
+        if (typeof manager.commonClose === 'function') return manager.commonClose();
+        return null;
+      }, null);
+      await wait(80);
+
+      if (actionNode) {
       try {
         if (!invokeManagerToolTouch(manager, actionNode)) {
           emitNodeTouch(actionNode);
@@ -8191,6 +9798,7 @@
         currentSeedNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentSeedNodeInfo')),
         currentDetailComp: summarizeRuntimeObject(safeReadKey(manager, 'currentDetailComp'), 'currentDetailComp'),
         toolNodeByBucket: summarizeNodeForClick(getToolNodeByItemId(manager, selectedBucket && selectedBucket.id)),
+        currentDragState: summarizeCurrentDragState(manager),
       };
       const effectiveDelta = payload.deltaAfterTapMatureInSec;
       if (typeof effectiveDelta === 'number' && effectiveDelta < -5) {
@@ -8207,9 +9815,13 @@
         return opts.silent ? payload : out(payload);
       }
 
-      const directPerformTry = runAttempt('setCurrentData(targetArg)->selectAppropriateInteractionNode()->performFertilizing(targetArg)', function () {
-        if (typeof manager.setCurrentData === 'function') manager.setCurrentData(performArg);
+      const directPerformTry = runAttempt('setCurrentData(fertilizer)->selectAppropriateInteractionNode()->performFertilizing(targetArg)', function () {
+        if (typeof manager.setCurrentData === 'function' && directSelectionArg != null) manager.setCurrentData(directSelectionArg);
         if (typeof manager.selectAppropriateInteractionNode === 'function') manager.selectAppropriateInteractionNode();
+        const dragReady = ensureCurrentDragItemForBucket(manager, selectedBucket);
+        if (!dragReady.ensured) {
+          throw new Error(dragReady.reason || 'fallback drag item not ready');
+        }
         if (typeof manager.performFertilizing === 'function') return manager.performFertilizing(performArg);
         return null;
       });
@@ -8233,6 +9845,7 @@
         currentSeedNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentSeedNodeInfo')),
         currentDetailComp: summarizeRuntimeObject(safeReadKey(manager, 'currentDetailComp'), 'currentDetailComp'),
         currentDataState: summarizeCurrentDataState(manager),
+        currentDragState: summarizeCurrentDragState(manager),
       };
       if (typeof payload.deltaAfterActionDirectPerformMatureInSec === 'number' && payload.deltaAfterActionDirectPerformMatureInSec < -5) {
         payload.performResult = performResult;
@@ -8272,6 +9885,7 @@
         currentSeedNodeInfo: summarizeInteractionNodeInfoValue(safeReadKey(manager, 'currentSeedNodeInfo')),
         currentDetailComp: summarizeRuntimeObject(safeReadKey(manager, 'currentDetailComp'), 'currentDetailComp'),
         toolNodeByBucket: summarizeNodeForClick(getToolNodeByItemId(manager, selectedBucket && selectedBucket.id)),
+        currentDragState: summarizeCurrentDragState(manager),
       };
       const effectiveLandDelta = payload.deltaAfterLandRetapMatureInSec;
       if (typeof effectiveLandDelta === 'number' && effectiveLandDelta < -5) {
@@ -8288,10 +9902,15 @@
         return opts.silent ? payload : out(payload);
       }
     }
+    }
 
     if (useInternalFallback && typeof manager.performFertilizing === 'function') {
       if ((performResult == null || performResult === false) && typeof manager.performFertilizing === 'function') {
         const secondTry = runAttempt('performFertilizing()', function () {
+          const dragReady = ensureCurrentDragItemForBucket(manager, selectedBucket);
+          if (!dragReady.ensured) {
+            throw new Error(dragReady.reason || 'fallback drag item not ready');
+          }
           return manager.performFertilizing();
         });
         if (performResult == null || performResult === false) performResult = secondTry.result;
@@ -8301,6 +9920,10 @@
     }
     if (useInternalFallback && (performResult == null || performResult === false) && typeof manager.attemptPerform === 'function') {
       const thirdTry = runAttempt('attemptPerform(targetArg)', function () {
+        const dragReady = ensureCurrentDragItemForBucket(manager, selectedBucket);
+        if (!dragReady.ensured) {
+          throw new Error(dragReady.reason || 'fallback drag item not ready');
+        }
         return manager.attemptPerform(performArg);
       });
       if (performResult == null || performResult === false) performResult = thirdTry.result;
@@ -8319,10 +9942,34 @@
       currentSeason: after.currentSeason,
       totalSeason: after.totalSeason,
     };
+    payload.selectedBucketCountAfter = getLiveFertilizerBucketCount(itemM, selectedBucket);
+    payload.selectedBucketDeltaCount = payload.selectedBucketCountAfter != null && payload.selectedBucketCountBefore != null
+      ? payload.selectedBucketCountAfter - payload.selectedBucketCountBefore
+      : null;
     payload.deltaMatureInSec = Number(before.matureInSec) && Number(after.matureInSec)
       ? Number(after.matureInSec) - Number(before.matureInSec)
       : null;
-    return opts.silent ? payload : out(payload);
+    payload.ok = (typeof payload.selectedBucketDeltaCount === 'number' && payload.selectedBucketDeltaCount < 0) ||
+      (typeof payload.deltaMatureInSec === 'number' && payload.deltaMatureInSec < -5);
+    if (!payload.ok && !payload.reason) {
+      payload.reason = 'fertilizer_no_observed_effect';
+    }
+      return opts.silent ? payload : out(payload);
+    } finally {
+      if (shouldAutoCleanupUi && shouldCleanupUi) {
+        try {
+          await closePlantInteractionUi(manager || findPlantInteractionManager(), {
+            waitAfterEach: Math.min(120, Math.max(60, Math.floor(waitAfterAction / 4) || 0)),
+            maxCommonCloseAttempts: 2,
+          });
+        } catch (_) {}
+        try {
+          await dismissLandUpgradeOverlay({
+            waitAfter: Math.min(220, Math.max(120, Math.floor(waitAfterAction / 3) || 0)),
+          });
+        } catch (_) {}
+      }
+    }
   }
 
   function normalizeKeywords(keyword) {
@@ -9452,6 +11099,8 @@
     inspectProtocolTransport,
     inspectRecentClickTrace,
     fertilizeLand,
+    fertilizeLandsBatch,
+    closePlantInteractionUi: closePlantInteractionUiRpc,
     openLandAndDiffButtons,
     detectActiveOverlays,
     inspectRewardPopupTextMatches,
@@ -9519,6 +11168,8 @@
       'gameCtl.inspectProtocolTransport(opts)',
       'gameCtl.inspectRecentClickTrace(opts)',
       'gameCtl.fertilizeLand(opts)',
+      'gameCtl.fertilizeLandsBatch(opts)',
+      'gameCtl.closePlantInteractionUi(opts)',
       'gameCtl.openLandAndDiffButtons(path, opts)',
       'gameCtl.snapshotNode(path, opts)',
       'gameCtl.tapAndSnapshot(path, opts)',
