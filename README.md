@@ -9,10 +9,15 @@
 - QQ 小程序本地资源环境：`WebSocket 宿主 + QQ bundle`
 #####
 hook 代码感谢 [evi0s/WMPFDebugger](https://github.com/evi0s/WMPFDebugger)
+#####
 部分功能设计实现思路感谢https://github.com/Penty-d/qq-farm-bot-ui
 #####
 0开作者仓库 https://github.com/linguo2625469/qq-farm-cdp-auto
 #####
+#更新日志
+4-13
+修复微信启动注入问题，合并上游未解锁土地种植bug
+修复种植策略种子不足卡商店购买的bug
 
 # 农场自动化控制台
 
