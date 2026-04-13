@@ -43,6 +43,16 @@ function renderHostSource(hostTemplate, replacements) {
   return text;
 }
 
+/** 防止 qq-host.js 与占位符列表不同步时打出坏补丁（宿主无法连网关）。 */
+function assertHostPlaceholdersReplaced(hostSource) {
+  const found = hostSource.match(/__QQ_FARM_[A-Z0-9_]+__/g);
+  if (!found || found.length === 0) return;
+  const uniq = [...new Set(found)];
+  throw new Error(
+    `qq-host 模板仍有未替换占位符: ${uniq.join(", ")}。请对齐 qq-host.js 与 buildQqBundle 中的 replace 列表。`,
+  );
+}
+
 function resolveQqPatchTarget(options = {}) {
   const explicitTargetPath = trimToString(options.targetPath);
   const explicitAppId = trimToString(options.appId);
@@ -185,6 +195,7 @@ function buildQqBundle(options = {}) {
     "__QQ_FARM_HOST_VERSION__": escapeDoubleQuotedString(hostVersion),
     "__QQ_FARM_BUNDLE_HASH__": scriptHash,
   });
+  assertHostPlaceholdersReplaced(hostSource);
 
   const bundleBody = `;(function () {
   var root = typeof globalThis !== "undefined" ? globalThis : Function("return this")();
