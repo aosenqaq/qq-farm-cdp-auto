@@ -39,6 +39,7 @@ const {
 } = require("./game-config");
 const { getProfilePlantLevel, resolveProfileWithCandidates } = require("./player-profile-resolver");
 const { STEAL_CROP_BLACKLIST_OPTIONS } = require("./steal-crop-blacklist-options");
+const { normalizeHttpPath } = require("./config");
 
 const WS_PATH = "/ws";
 const REQUIRED_GAME_CTL_METHODS = [...QQ_RPC_GAME_CTL_METHODS];
@@ -2666,8 +2667,10 @@ function createGateway(config) {
   const wss = new WebSocket.Server({ noServer: true });
 
   httpServer.on("upgrade", (req, socket, head) => {
-    const urlPath = req && req.url ? req.url.split("?")[0] : "";
-    if (urlPath === WS_PATH) {
+    const rawPath = req && req.url ? req.url.split("?")[0].split("#")[0] : "";
+    const urlPath = normalizeHttpPath(rawPath);
+    const wsNorm = normalizeHttpPath(WS_PATH);
+    if (urlPath === wsNorm) {
       wss.handleUpgrade(req, socket, head, (ws) => {
         wss.emit("connection", ws, req);
       });
@@ -2676,6 +2679,11 @@ function createGateway(config) {
     if (urlPath === config.qqWsPath) {
       qqWsSession.handleUpgrade(req, socket, head);
       return;
+    }
+    if (urlPath && urlPath !== "/favicon.ico") {
+      console.warn(
+        `[gateway][qq_ws] WebSocket upgrade rejected: raw=${JSON.stringify(req.url)} normalized=${urlPath} (expect ${wsNorm} or ${config.qqWsPath})`,
+      );
     }
     socket.destroy();
   });

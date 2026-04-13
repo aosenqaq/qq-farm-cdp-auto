@@ -498,6 +498,10 @@
     closeCurrentSocket();
     setPhase("connecting");
 
+    // QQ/微信小游戏环境：优先走运行时提供的 connectSocket，避免全局 WebSocket 被安全策略拦截导致连不上本机网关
+    if (mini && typeof mini.connectSocket === "function" && openWithMiniSocket(state.url)) {
+      return true;
+    }
     if (openWithWebSocket(state.url)) {
       return true;
     }

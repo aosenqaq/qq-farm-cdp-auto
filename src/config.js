@@ -27,6 +27,15 @@ function parseIntEnv(name, defaultValue) {
   return Number.isFinite(n) ? n : defaultValue;
 }
 
+/** 统一 HTTP/WebSocket 请求路径形态，避免 `/miniapp` 与 `/miniapp/` 与网关配置不一致导致升级失败。 */
+function normalizeHttpPath(raw) {
+  if (raw == null || raw === "") return "";
+  let p = String(raw).split("?")[0].split("#")[0].trim();
+  if (!p.startsWith("/")) p = "/" + p;
+  while (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
+  return p;
+}
+
 function getConfig() {
   return {
     cdpWsUrl: process.env.FARM_CDP_WS || "ws://127.0.0.1:62000",
@@ -51,7 +60,7 @@ function getConfig() {
       const raw = String(process.env.FARM_RUNTIME_TARGET || "cdp").trim().toLowerCase();
       return ["cdp", "qq_ws", "auto"].includes(raw) ? raw : "cdp";
     })(),
-    qqWsPath: process.env.FARM_QQ_WS_PATH || "/miniapp",
+    qqWsPath: normalizeHttpPath(process.env.FARM_QQ_WS_PATH) || "/miniapp",
     qqWsReadyTimeoutMs: parseIntEnv("FARM_QQ_WS_READY_TIMEOUT_MS", 15_000),
     qqWsCallTimeoutMs: parseIntEnv("FARM_QQ_WS_CALL_TIMEOUT_MS", 15_000),
     qqGameJsPath: process.env.FARM_QQ_GAME_JS || "",
@@ -63,4 +72,4 @@ function getConfig() {
   };
 }
 
-module.exports = { getConfig };
+module.exports = { getConfig, normalizeHttpPath };
