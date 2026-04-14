@@ -2,6 +2,8 @@
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 chcp 65001 >nul
+set "PYTHONUTF8=1"
+set "NPM_CONFIG_UNICODE=true"
 
 title QQ Farm Auto - Quick Start
 
