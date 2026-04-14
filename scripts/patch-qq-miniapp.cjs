@@ -12,7 +12,7 @@ const { getConfig } = require(path.join(projectRoot, "src", "config.js"));
 const {
   buildQqBundle,
   ensureParentDir,
-  patchQqGameFiles,
+  patchQqGameFile,
   resolveQqPatchTarget,
 } = require(path.join(projectRoot, "src", "qq-bundle.js"));
 
@@ -99,19 +99,11 @@ function main() {
     console.log(`[qq-patch] resolved appid ${target.appId} -> ${target.targetPath}`);
   }
 
-  const targetPaths = Array.isArray(target.targetPaths) && target.targetPaths.length > 0
-    ? target.targetPaths
-    : [target.targetPath];
-  const results = patchQqGameFiles(targetPaths, bundleText, { noBackup: args.noBackup });
-  results.forEach((result, index) => {
-    console.log(`[qq-patch] patched target[${index + 1}/${results.length}]: ${result.targetPath}`);
-    console.log(`[qq-patch] mode: ${result.replacedExistingBlock ? "replace" : "append"}`);
-    if (!args.noBackup) {
-      console.log(`[qq-patch] backup: ${result.targetPath}.qq-farm.bak`);
-    }
-  });
-  if (results.length > 1) {
-    console.log(`[qq-patch] patched ${results.length} candidate game.js files for appid ${target.appId || args.appId || "unknown"}`);
+  const result = patchQqGameFile(target.targetPath, bundleText, { noBackup: args.noBackup });
+  console.log(`[qq-patch] patched target: ${result.targetPath}`);
+  console.log(`[qq-patch] mode: ${result.replacedExistingBlock ? "replace" : "append"}`);
+  if (!args.noBackup) {
+    console.log(`[qq-patch] backup: ${result.targetPath}.qq-farm.bak`);
   }
 }
 

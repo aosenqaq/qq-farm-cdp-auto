@@ -674,6 +674,24 @@
       align-items: center;
     }
 
+    .auto-section {
+      margin-top: 14px;
+      padding: 14px;
+      border-radius: var(--radius-md);
+      border: 1px solid rgba(109, 81, 50, 0.12);
+      background: rgba(255, 253, 248, 0.72);
+    }
+
+    .auto-section h3 {
+      margin: 0 0 6px;
+      font-size: 1rem;
+      color: var(--accent-strong);
+    }
+
+    .auto-section .hint {
+      margin: 0 0 10px;
+    }
+
     .action-row {
       display: flex;
       flex-wrap: wrap;
@@ -1125,6 +1143,119 @@
       margin-top: 12px;
     }
 
+    .analysis-list.crops {
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 14px;
+    }
+
+    .crop-analysis-card {
+      border: 1px solid rgba(109, 81, 50, 0.14);
+      border-radius: var(--radius-lg);
+      background: rgba(255, 253, 248, 0.96);
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+      min-height: 212px;
+    }
+
+    .crop-analysis-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .crop-analysis-rank {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: rgba(79, 138, 60, 0.1);
+      color: var(--accent-strong);
+      font-size: 0.75rem;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .crop-analysis-title {
+      margin: 0;
+      font-size: 0.95rem;
+      line-height: 1.35;
+      font-weight: 700;
+    }
+
+    .crop-analysis-sub {
+      margin: 4px 0 0;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+
+    .crop-analysis-main-metric {
+      margin: 0;
+      font-size: 0.82rem;
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .crop-analysis-meta-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .crop-analysis-meta-item {
+      border-radius: var(--radius-md);
+      border: 1px solid rgba(109, 81, 50, 0.12);
+      background: rgba(95, 69, 39, 0.03);
+      padding: 8px 10px;
+      display: grid;
+      gap: 3px;
+    }
+
+    .crop-analysis-meta-k {
+      font-size: 0.74rem;
+      color: var(--muted);
+    }
+
+    .crop-analysis-meta-v {
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .analysis-list.strategy {
+      gap: 10px;
+    }
+
+    .strategy-recommend-card {
+      border: 1px solid rgba(109, 81, 50, 0.14);
+      border-radius: var(--radius-lg);
+      background: rgba(255, 253, 248, 0.96);
+      padding: 12px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .strategy-recommend-title {
+      margin: 0;
+      font-size: 0.92rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .strategy-recommend-main {
+      margin: 0;
+      font-size: 0.82rem;
+      color: var(--text);
+      line-height: 1.55;
+    }
+
+    .strategy-recommend-main small {
+      color: var(--muted);
+      font-size: 0.76rem;
+    }
+
     .analysis-card {
       border: 1px solid rgba(109, 81, 50, 0.12);
       border-radius: var(--radius-lg);
@@ -1372,6 +1503,66 @@
       border: 1px solid rgba(109, 81, 50, 0.12);
       font-size: 0.84rem;
       line-height: 1.6;
+    }
+
+    .land-head-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .maturity-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 92;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(31, 24, 18, 0.42);
+      backdrop-filter: blur(4px);
+    }
+
+    .maturity-overlay[hidden] {
+      display: none;
+    }
+
+    .maturity-modal {
+      width: min(640px, calc(100vw - 24px));
+      max-height: min(84vh, 760px);
+      overflow: auto;
+      padding: 20px;
+      border: 1px solid rgba(109, 81, 50, 0.16);
+      border-radius: 20px;
+      background: linear-gradient(180deg, rgba(255, 252, 247, 0.98), rgba(247, 240, 229, 0.98));
+      box-shadow: 0 28px 64px rgba(50, 38, 23, 0.28);
+      color: var(--text);
+    }
+
+    .maturity-modal-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .maturity-modal-head h3 {
+      margin: 0;
+      font-size: 1.02rem;
+    }
+
+    .maturity-modal-close {
+      width: 34px;
+      height: 34px;
+      border: 1px solid rgba(109, 81, 50, 0.18);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.78);
+      color: var(--text);
+      font-size: 1.1rem;
+      line-height: 1;
+      cursor: pointer;
     }
 
     button.action,
@@ -1910,130 +2101,163 @@
             <div class="auto-module-empty">自动化状态加载后，这里会按模块显示当前开关状态和下次预计运行时间。</div>
           </div>
 
-          <div class="check-grid">
-            <label class="check-card">
-              <input type="checkbox" id="autoOwnEnabled" />
-              <div>
-                <strong>基础任务</strong>
-                <small>定时执行一键收获、浇水、除草、杀虫。</small>
-              </div>
-            </label>
-            <label class="check-card">
-              <input type="checkbox" id="autoFriendEnabled" />
-              <div>
-                <strong>好友偷菜</strong>
-                <small>定时扫描好友列表，进入可偷好友农场执行一键摘取。</small>
-              </div>
-            </label>
-            <label class="check-card">
-              <input type="checkbox" id="autoFriendHelpEnabled" />
-              <div>
-                <strong>好友帮忙</strong>
-                <small>定时扫描好友列表，对可浇水、除草、杀虫的好友执行一键帮忙。</small>
-              </div>
-            </label>
-            <label class="check-card">
-              <input type="checkbox" id="autoFriendHelpStopOnExpLimit" />
-              <div>
-                <strong>经验满额停帮忙</strong>
-                <small>当天帮忙经验达到 1500 后自动暂停帮忙，不影响其他自动化模块。</small>
-              </div>
-            </label>
-            <label class="check-card">
-              <input type="checkbox" id="autoRefreshFriendList" />
-              <div>
-                <strong>每轮刷新好友列表</strong>
-                <small>开启后每次好友轮次都会重新获取列表。</small>
-              </div>
-            </label>
-            <label class="check-card">
-              <input type="checkbox" id="autoReturnHome" />
-              <div>
-                <strong>好友轮次后回家</strong>
-                <small>执行完好友扫描后自动回到自己农场。</small>
-              </div>
-            </label>
-            <label class="check-card">
-              <input type="checkbox" id="autoStopOnError" />
-              <div>
-                <strong>出错后结束当前轮次</strong>
-                <small>适合调试阶段，避免错误状态下继续连跑。</small>
-              </div>
-            </label>
-            <label class="check-card">
-              <input type="checkbox" id="autoFriendQuietHoursEnabled" />
-              <div>
-                <strong>好友静默时段</strong>
-                <small>开启后，指定时间段内暂停好友扫描和偷菜。</small>
-              </div>
-            </label>
-          <label class="check-card">
-            <input type="checkbox" id="autoFriendBlockMaskedStealers" />
-            <div>
-              <strong>默认屏蔽蒙面偷菜好友</strong>
-              <small>默认开启，自动跳过系统生成名为“蒙面偷菜”的低等级小号好友。</small>
+          <div class="auto-section">
+            <h3>模块开关</h3>
+            <p class="hint">先确定本轮要跑哪些模块，避免把策略参数和总开关混在一起。</p>
+            <div class="check-grid">
+              <label class="check-card">
+                <input type="checkbox" id="autoOwnEnabled" />
+                <div>
+                  <strong>基础任务</strong>
+                  <small>定时执行一键收获、浇水、除草、杀虫。</small>
+                </div>
+              </label>
+              <label class="check-card">
+                <input type="checkbox" id="autoFriendEnabled" />
+                <div>
+                  <strong>好友偷菜</strong>
+                  <small>定时扫描好友列表，进入可偷好友农场执行一键摘取。</small>
+                </div>
+              </label>
+              <label class="check-card">
+                <input type="checkbox" id="autoFriendHelpEnabled" />
+                <div>
+                  <strong>好友帮忙</strong>
+                  <small>定时扫描好友列表，对可浇水、除草、杀虫的好友执行一键帮忙。</small>
+                </div>
+              </label>
+              <label class="check-card">
+                <input type="checkbox" id="autoFriendHelpStopOnExpLimit" />
+                <div>
+                  <strong>经验满额停帮忙</strong>
+                  <small>当天帮忙经验达到 1500 后自动暂停帮忙，不影响其他自动化模块。</small>
+                </div>
+              </label>
+              <label class="check-card">
+                <input type="checkbox" id="autoFriendBlockMaskedStealers" />
+                <div>
+                  <strong>屏蔽低等级好友</strong>
+                  <small>默认开启，自动跳过系统生成名为“蒙面偷菜”的低等级小号好友。</small>
+                </div>
+              </label>
             </div>
-          </label>
           </div>
 
-          <div class="input-grid compact" style="margin-bottom:12px">
-            <label class="field-block">
-              <span>偷菜作物黑名单策略</span>
-              <select id="autoFriendStealPlantBlacklistStrategy">
-                <option value="1">策略1：命中黑名单作物则跳过整个好友农场</option>
-                <option value="2">策略2：只跳过黑名单作物地块</option>
-              </select>
-            </label>
+          <div class="auto-section">
+            <h3>调度与流程</h3>
+            <p class="hint">控制执行节奏、错误处理、静默时段和好友过滤。</p>
+            <div class="check-grid">
+              <label class="check-card">
+                <input type="checkbox" id="autoRefreshFriendList" />
+                <div>
+                  <strong>每轮刷新好友列表</strong>
+                  <small>开启后每次好友轮次都会重新获取列表。</small>
+                </div>
+              </label>
+              <label class="check-card">
+                <input type="checkbox" id="autoReturnHome" />
+                <div>
+                  <strong>好友轮次后回家</strong>
+                  <small>执行完好友扫描后自动回到自己农场。</small>
+                </div>
+              </label>
+              <label class="check-card">
+                <input type="checkbox" id="autoStopOnError" />
+                <div>
+                  <strong>出错后结束当前轮次</strong>
+                  <small>适合调试阶段，避免错误状态下继续连跑。</small>
+                </div>
+              </label>
+              <label class="check-card">
+                <input type="checkbox" id="autoFriendQuietHoursEnabled" />
+                <div>
+                  <strong>好友静默时段</strong>
+                  <small>开启后，指定时间段内暂停好友扫描和偷菜。</small>
+                </div>
+              </label>
+            </div>
+            <div class="input-grid">
+              <label class="field-block">
+                <span>自己间隔(秒)</span>
+                <input type="number" min="5" id="autoOwnIntervalSec" placeholder="30" />
+              </label>
+              <label class="field-block">
+                <span>好友间隔(秒)</span>
+                <input type="number" min="10" id="autoFriendIntervalSec" placeholder="90" />
+              </label>
+              <label class="field-block">
+                <span>每轮好友数</span>
+                <input type="number" min="1" id="autoMaxFriends" placeholder="5" />
+              </label>
+              <label class="field-block">
+                <span>进场等待(ms)</span>
+                <input type="number" min="0" id="autoEnterWaitMs" placeholder="1800" />
+              </label>
+              <label class="field-block">
+                <span>动作等待(ms)</span>
+                <input type="number" min="0" id="autoActionWaitMs" placeholder="1200" />
+              </label>
+              <label class="field-block">
+                <span>静默开始(HH:MM)</span>
+                <input type="text" id="autoFriendQuietHoursStart" placeholder="23:00" />
+              </label>
+              <label class="field-block">
+                <span>静默结束(HH:MM)</span>
+                <input type="text" id="autoFriendQuietHoursEnd" placeholder="07:00" />
+              </label>
+            </div>
           </div>
 
-          <div class="input-grid compact" style="margin-bottom:12px">
-            <label class="field-block">
-              <span>第一策略</span>
-              <select id="autoPlantPrimaryMode">
-                <option value="none">不种植</option>
-                <option value="backpack_first">背包优先</option>
-                <option value="specified_seed">指定种子优先</option>
-                <option value="highest_level">最高等级作物</option>
-                <option value="max_exp">经验/小时最高</option>
-                <option value="max_fert_exp">普肥经验/小时最高</option>
-                <option value="max_profit">净利润/小时最高</option>
-                <option value="max_fert_profit">普肥净利润/小时最高</option>
-              </select>
-            </label>
-            <label class="field-block">
-              <span>第二策略</span>
-              <select id="autoPlantSecondaryMode">
-                <option value="none">不启用回退</option>
-                <option value="backpack_first">背包优先</option>
-                <option value="specified_seed">指定种子优先</option>
-                <option value="highest_level">最高等级作物</option>
-                <option value="max_exp">经验/小时最高</option>
-                <option value="max_fert_exp">普肥经验/小时最高</option>
-                <option value="max_profit">净利润/小时最高</option>
-                <option value="max_fert_profit">普肥净利润/小时最高</option>
-              </select>
-            </label>
+          <div class="auto-section">
+            <h3>自动种植策略</h3>
+            <p class="hint">先选主策略，再选回退策略；指定种子与等级上限只在对应策略下生效。</p>
+            <div class="input-grid compact" style="margin-bottom:12px">
+              <label class="field-block">
+                <span>第一策略</span>
+                <select id="autoPlantPrimaryMode">
+                  <option value="none">不种植</option>
+                  <option value="backpack_first">背包优先</option>
+                  <option value="specified_seed">指定种子优先</option>
+                  <option value="highest_level">最高等级作物</option>
+                  <option value="max_exp">经验/小时最高</option>
+                  <option value="max_fert_exp">普肥经验/小时最高</option>
+                  <option value="max_profit">净利润/小时最高</option>
+                  <option value="max_fert_profit">普肥净利润/小时最高</option>
+                </select>
+              </label>
+              <label class="field-block">
+                <span>第二策略</span>
+                <select id="autoPlantSecondaryMode">
+                  <option value="none">不启用回退</option>
+                  <option value="backpack_first">背包优先</option>
+                  <option value="specified_seed">指定种子优先</option>
+                  <option value="highest_level">最高等级作物</option>
+                  <option value="max_exp">经验/小时最高</option>
+                  <option value="max_fert_exp">普肥经验/小时最高</option>
+                  <option value="max_profit">净利润/小时最高</option>
+                  <option value="max_fert_profit">普肥净利润/小时最高</option>
+                </select>
+              </label>
+            </div>
+            <div class="input-grid compact" id="plantStrategyFields">
+              <label class="field-block">
+                <span>指定种子</span>
+                <select id="autoPlantSeedId">
+                  <option value="0">跟随策略自动选择</option>
+                </select>
+              </label>
+              <label class="field-block">
+                <span>策略等级上限</span>
+                <input type="number" min="0" id="autoPlantMaxLevel" placeholder="0 表示跟随当前等级" />
+              </label>
+            </div>
+            <p class="summary-note" id="txtPlantStrategyPreview">等待策略分析，稍后会显示当前会自动种植的作物。</p>
           </div>
 
-          <div class="input-grid compact" id="plantStrategyFields">
-            <label class="field-block">
-              <span>指定种子</span>
-              <select id="autoPlantSeedId">
-                <option value="0">跟随策略自动选择</option>
-              </select>
-            </label>
-            <label class="field-block">
-              <span>策略等级上限</span>
-              <input type="number" min="0" id="autoPlantMaxLevel" placeholder="0 表示跟随当前等级" />
-            </label>
-          </div>
-
-          <p class="summary-note" id="txtPlantStrategyPreview">等待策略分析，稍后会显示当前会自动种植的作物。</p>
-
-          <div class="card" style="padding:16px;margin:16px 0">
+          <div class="auto-section">
               <div class="card-head" style="margin-bottom:12px">
                 <div>
-                  <h2>自动施肥策略</h2>
+                  <h3>自动施肥策略</h3>
                   <p class="hint">自动施肥会在自动种植之后执行；无机+有机会在临近成熟时补一轮有机催熟。</p>
                 </div>
               </div>
@@ -2126,74 +2350,55 @@
             <p class="summary-note" id="txtFertilizerStrategyPreview">当前未启用自动施肥。</p>
           </div>
 
-          <div class="input-grid">
-            <label class="field-block">
-              <span>自己间隔(秒)</span>
-              <input type="number" min="5" id="autoOwnIntervalSec" placeholder="30" />
-            </label>
-            <label class="field-block">
-              <span>好友间隔(秒)</span>
-              <input type="number" min="10" id="autoFriendIntervalSec" placeholder="90" />
-            </label>
-            <label class="field-block">
-              <span>每轮好友数</span>
-              <input type="number" min="1" id="autoMaxFriends" placeholder="5" />
-            </label>
-            <label class="field-block">
-              <span>进场等待(ms)</span>
-              <input type="number" min="0" id="autoEnterWaitMs" placeholder="1800" />
-            </label>
-            <label class="field-block">
-              <span>动作等待(ms)</span>
-              <input type="number" min="0" id="autoActionWaitMs" placeholder="1200" />
-            </label>
-            <label class="field-block">
-              <span>静默开始(HH:MM)</span>
-              <input type="text" id="autoFriendQuietHoursStart" placeholder="23:00" />
-            </label>
-            <label class="field-block">
-              <span>静默结束(HH:MM)</span>
-              <input type="text" id="autoFriendQuietHoursEnd" placeholder="07:00" />
-            </label>
-          </div>
-
-          <label class="field-block" style="margin-top:12px">
-            <span>好友黑名单（名字 / 备注 / gid，逗号或换行分隔）</span>
-            <textarea id="autoFriendBlacklist" class="field" rows="4" placeholder="123456789&#10;某个好友备注&#10;某个小号"></textarea>
-          </label>
-
-          <div class="steal-blacklist-box">
-            <div class="steal-blacklist-head">
-              <div>
-                <div class="steal-blacklist-title">
-                  <h2>偷菜作物黑名单</h2>
-                  <span class="steal-blacklist-count" id="txtStealBlacklistCount">0 / 0</span>
-                </div>
-                <p class="hint">参考你给的项目样式做成折叠列表。作物 ID 来自内置静态表，不从游戏运行时动态获取。</p>
-              </div>
-              <button type="button" class="ghost" id="btnStealBlacklistToggle">展开列表</button>
+          <div class="auto-section">
+            <h3>好友规则与黑名单</h3>
+            <p class="hint">把好友过滤和偷菜黑名单集中在一个区域，方便统一调优。</p>
+            <div class="input-grid compact" style="margin-bottom:12px">
+              <label class="field-block">
+                <span>偷菜作物黑名单策略</span>
+                <select id="autoFriendStealPlantBlacklistStrategy">
+                  <option value="1">策略1：命中黑名单作物则跳过整个好友农场</option>
+                  <option value="2">策略2：只跳过黑名单作物地块</option>
+                </select>
+              </label>
             </div>
-
-            <label class="check-card inline" style="margin-top:12px">
-              <input type="checkbox" id="autoFriendStealPlantBlacklistEnabled" />
-              <div>
-                <strong>启用作物偷取黑名单</strong>
-                <small>关闭时会保留已勾选作物，但自动偷菜仍按默认逻辑执行；开启后会跳过这些作物。</small>
-              </div>
+            <label class="field-block" style="margin-top:12px">
+              <span>好友黑名单（名字 / 备注 / gid，逗号或换行分隔）</span>
+              <textarea id="autoFriendBlacklist" class="field" rows="4" placeholder="123456789&#10;某个好友备注&#10;某个小号"></textarea>
             </label>
-
-            <p class="summary-note" id="txtStealBlacklistSummary">等待黑名单作物表加载。</p>
-
-            <div class="steal-blacklist-panel" id="stealBlacklistPanel" hidden>
-              <div class="steal-blacklist-toolbar">
-                <input type="text" id="iptStealBlacklistSearch" class="field" placeholder="搜索作物名 / Seed ID / Plant ID" />
-                <div class="action-row">
-                  <button type="button" class="ghost" id="btnStealBlacklistOnlyUnselected">只看未勾选</button>
-                  <button type="button" class="ghost" id="btnStealBlacklistClearFilter">清空筛选</button>
+            <div class="steal-blacklist-box">
+              <div class="steal-blacklist-head">
+                <div>
+                  <div class="steal-blacklist-title">
+                    <h2>偷菜作物黑名单</h2>
+                    <span class="steal-blacklist-count" id="txtStealBlacklistCount">0 / 0</span>
+                  </div>
+                  <p class="hint">参考你给的项目样式做成折叠列表。作物 ID 来自内置静态表，不从游戏运行时动态获取。</p>
                 </div>
+                <button type="button" class="ghost" id="btnStealBlacklistToggle">展开列表</button>
               </div>
-              <div id="stealCropBlacklistOptions" class="steal-blacklist-grid">
-                <div class="friend-empty">正在加载内置作物表...</div>
+
+              <label class="check-card inline" style="margin-top:12px">
+                <input type="checkbox" id="autoFriendStealPlantBlacklistEnabled" />
+                <div>
+                  <strong>启用作物偷取黑名单</strong>
+                  <small>关闭时会保留已勾选作物，但自动偷菜仍按默认逻辑执行；开启后会跳过这些作物。</small>
+                </div>
+              </label>
+
+              <p class="summary-note" id="txtStealBlacklistSummary">等待黑名单作物表加载。</p>
+
+              <div class="steal-blacklist-panel" id="stealBlacklistPanel" hidden>
+                <div class="steal-blacklist-toolbar">
+                  <input type="text" id="iptStealBlacklistSearch" class="field" placeholder="搜索作物名 / Seed ID / Plant ID" />
+                  <div class="action-row">
+                    <button type="button" class="ghost" id="btnStealBlacklistOnlyUnselected">只看未勾选</button>
+                    <button type="button" class="ghost" id="btnStealBlacklistClearFilter">清空筛选</button>
+                  </div>
+                </div>
+                <div id="stealCropBlacklistOptions" class="steal-blacklist-grid">
+                  <div class="friend-empty">正在加载内置作物表...</div>
+                </div>
               </div>
             </div>
           </div>
@@ -2264,7 +2469,10 @@
               <h2>土地详情</h2>
               <p class="hint">展示当前农场每块土地的作物、土地类型、成熟倒计时、多季信息和实时成熟事件，方便后续把施肥策略和定时操作联动起来。</p>
             </div>
-            <button type="button" class="ghost" id="btnLandRefresh">刷新土地</button>
+            <div class="land-head-actions">
+              <button type="button" class="ghost" id="btnOpenMaturityEvents">成熟事件</button>
+              <button type="button" class="ghost" id="btnLandRefresh">刷新土地</button>
+            </div>
           </div>
           <p class="summary-note" id="txtLandSummary">等待土地状态</p>
           <div class="land-summary-row" id="landSummaryRow">
@@ -2272,7 +2480,7 @@
           </div>
         </article>
 
-        <div class="panel-grid" style="grid-template-columns:minmax(0, 1.15fr) minmax(320px, 0.85fr);gap:16px">
+        <div class="panel-grid">
           <article class="card">
             <div class="card-head">
               <div>
@@ -2282,18 +2490,6 @@
             </div>
             <div class="land-detail-grid" id="landDetailGrid">
               <div class="friend-empty">等待土地数据...</div>
-            </div>
-          </article>
-
-          <article class="card">
-            <div class="card-head">
-              <div>
-                <h2>成熟事件</h2>
-                <p class="hint">这里会记录最近成熟的地块，方便后续把施肥策略、定时收菜和成熟提醒联动起来。</p>
-              </div>
-            </div>
-            <div class="maturity-event-list" id="maturityEventList">
-              <div class="friend-empty">等待成熟事件...</div>
             </div>
           </article>
         </div>
@@ -2428,6 +2624,19 @@
     </div>
   </div>
 
+  <div id="maturityEventOverlay" class="maturity-overlay" hidden>
+    <div class="maturity-modal" role="dialog" aria-modal="true" aria-labelledby="maturityEventTitle">
+      <div class="maturity-modal-head">
+        <h3 id="maturityEventTitle">成熟事件</h3>
+        <button type="button" id="btnMaturityEventClose" class="maturity-modal-close" aria-label="关闭成熟事件弹窗">×</button>
+      </div>
+      <p class="hint">记录最近成熟的地块，便于观察成熟节奏和后续联动策略。</p>
+      <div class="maturity-event-list" id="maturityEventList">
+        <div class="friend-empty">等待成熟事件...</div>
+      </div>
+    </div>
+  </div>
+
   <div id="toastStack" class="toast-stack" aria-live="polite" aria-atomic="true"></div>
 
   <script>
@@ -2468,7 +2677,10 @@
       const txtLandSummary = document.getElementById("txtLandSummary");
       const landSummaryRow = document.getElementById("landSummaryRow");
       const landDetailGrid = document.getElementById("landDetailGrid");
+      const btnOpenMaturityEvents = document.getElementById("btnOpenMaturityEvents");
       const maturityEventList = document.getElementById("maturityEventList");
+      const maturityEventOverlay = document.getElementById("maturityEventOverlay");
+      const btnMaturityEventClose = document.getElementById("btnMaturityEventClose");
       const btnProjectInfo = document.getElementById("btnProjectInfo");
       const projectInfoOverlay = document.getElementById("projectInfoOverlay");
       const btnProjectInfoClose = document.getElementById("btnProjectInfoClose");
@@ -2654,6 +2866,22 @@
         if (mins < 60) return "约 " + Math.ceil(mins) + " 分钟后升级";
         if (mins < 24 * 60) return "约 " + (mins / 60).toFixed(1) + " 小时后升级";
         return "约 " + (mins / 1440).toFixed(1) + " 天后升级";
+      }
+
+      function formatRuntimeUptime(uptimeSeconds) {
+        var total = Number(uptimeSeconds);
+        if (!Number.isFinite(total) || total < 0) return "--";
+        total = Math.floor(total);
+        var days = Math.floor(total / 86400);
+        var hours = Math.floor((total % 86400) / 3600);
+        var minutes = Math.floor((total % 3600) / 60);
+        var seconds = total % 60;
+        var parts = [];
+        if (days > 0) parts.push(days + "天");
+        if (hours > 0 || days > 0) parts.push(hours + "时");
+        if (minutes > 0 || hours > 0 || days > 0) parts.push(minutes + "分");
+        parts.push(seconds + "秒");
+        return parts.join("");
       }
 
       function formatRuntimeTargetLabel(target) {
@@ -4254,17 +4482,21 @@
         else if (metricKey === "level") metricText = "作物等级 " + (item.level == null ? "不限" : item.level);
         else metricText = "经验/小时 " + item.expPerHour;
         return [
-          '<article class="friend-card">',
-          '<div class="friend-main">',
-          '<div class="friend-title-row"><strong>#' + (index + 1) + " " + escapeHtml(item.name || "未知作物") + '</strong></div>',
-          '<div class="friend-meta">seed=' + escapeHtml(item.seedId) + ' | ' + escapeHtml(item.growTimeStr || "-") + ' | ' + escapeHtml(metricText) + "</div>",
-          item.imageUrl ? '<div class="land-card-image" style="min-height:64px;margin:8px 0 2px"><img src="' + escapeHtml(item.imageUrl) + '" alt="' + escapeHtml(item.name || "作物") + '" loading="lazy" /></div>' : "",
-          '<div class="friend-tags">',
-          '<span class="friend-pill">等级 ' + escapeHtml(item.level == null ? "不限" : item.level) + "</span>",
-          '<span class="friend-pill">经验 ' + escapeHtml(item.harvestExp) + "</span>",
-          '<span class="friend-pill">收益 ' + escapeHtml(item.netProfit) + "</span>",
-          '<span class="friend-pill">售价 ' + escapeHtml(item.income) + "</span>",
+          '<article class="crop-analysis-card">',
+          '<div class="crop-analysis-head">',
+          '<div>',
+          '<h3 class="crop-analysis-title">' + escapeHtml(item.name || "未知作物") + "</h3>",
+          '<p class="crop-analysis-sub">Seed ' + escapeHtml(item.seedId) + " · " + escapeHtml(item.growTimeStr || "-") + "</p>",
           "</div>",
+          '<span class="crop-analysis-rank">#' + (index + 1) + "</span>",
+          "</div>",
+          item.imageUrl ? '<div class="land-card-image" style="min-height:64px;margin:2px 0"><img src="' + escapeHtml(item.imageUrl) + '" alt="' + escapeHtml(item.name || "作物") + '" loading="lazy" /></div>' : "",
+          '<p class="crop-analysis-main-metric">' + escapeHtml(metricText) + "</p>",
+          '<div class="crop-analysis-meta-grid">',
+          '<div class="crop-analysis-meta-item"><span class="crop-analysis-meta-k">等级</span><span class="crop-analysis-meta-v">' + escapeHtml(item.level == null ? "不限" : item.level) + "</span></div>",
+          '<div class="crop-analysis-meta-item"><span class="crop-analysis-meta-k">经验</span><span class="crop-analysis-meta-v">' + escapeHtml(item.harvestExp) + "</span></div>",
+          '<div class="crop-analysis-meta-item"><span class="crop-analysis-meta-k">净收益</span><span class="crop-analysis-meta-v">' + escapeHtml(item.netProfit) + "</span></div>",
+          '<div class="crop-analysis-meta-item"><span class="crop-analysis-meta-k">售价</span><span class="crop-analysis-meta-v">' + escapeHtml(item.income) + "</span></div>",
           "</div>",
           "</article>"
         ].join("");
@@ -4310,8 +4542,10 @@
 
         if (analysisList) {
           if (!list.length) {
+            analysisList.classList.remove("crops");
             analysisList.innerHTML = '<div class="friend-empty">当前条件下没有可展示的作物。</div>';
           } else {
+            analysisList.classList.add("crops");
             analysisList.innerHTML = list.slice(0, 18).map(function (item, index) {
               return buildAnalyticsRow(item, index, sort);
             }).join("");
@@ -4320,8 +4554,10 @@
 
         if (analysisStrategies) {
           if (!recommendations.length) {
+            analysisStrategies.classList.remove("strategy");
             analysisStrategies.innerHTML = '<div class="friend-empty">暂无策略推荐。</div>';
           } else {
+            analysisStrategies.classList.add("strategy");
             analysisStrategies.innerHTML = recommendations.map(function (item) {
               var recommended = item && item.recommended;
               var currentRecommended = item && item.currentRecommended ? item.currentRecommended : recommended;
@@ -4334,31 +4570,27 @@
                 currentRecommended && theoreticalRecommended &&
                 String(currentRecommended.seedId || "") !== String(theoreticalRecommended.seedId || "")
               );
-              var metaLines = [];
+              var mainLine = "当前条件下暂无可用作物";
               if (currentRecommended) {
-                metaLines.push('当前可种：' + escapeHtml(currentRecommended.name || "未知作物") + (sourceLabel ? '（' + escapeHtml(sourceLabel) + '）' : ""));
+                mainLine = '当前可种：' + escapeHtml(currentRecommended.name || "未知作物") + (sourceLabel ? '（' + escapeHtml(sourceLabel) + '）' : "");
               } else if (theoreticalRecommended) {
-                metaLines.push('理论最优：' + escapeHtml(theoreticalRecommended.name || "未知作物"));
-                metaLines.push('当前背包/商店里没有这个策略可直接使用的种子');
-              } else {
-                metaLines.push("当前条件下没有可用作物");
+                mainLine = '理论最优：' + escapeHtml(theoreticalRecommended.name || "未知作物") + "（当前不可直接使用）";
               }
+              var diffLine = differs ? ('理论最优：' + escapeHtml(theoreticalRecommended.name || "未知作物")) : "";
               if (differs) {
-                metaLines.push('理论最优：' + escapeHtml(theoreticalRecommended.name || "未知作物"));
+                // 保持简洁：仅在“可种”与“理论最优”不一致时附加第二行说明。
               }
               return [
-                '<article class="friend-card">',
-                '<div class="friend-main">',
-                '<div class="friend-title-row"><strong>' + escapeHtml(item.label || item.value || "策略") + '</strong></div>',
-                '<div class="friend-meta">' + metaLines.join('<br />') + '</div>',
-                recommended && recommended.imageUrl ? '<div class="land-card-image" style="min-height:64px;margin:8px 0 2px"><img src="' + escapeHtml(recommended.imageUrl) + '" alt="' + escapeHtml(recommended.name || "作物") + '" loading="lazy" /></div>' : "",
+                '<article class="strategy-recommend-card">',
+                '<h3 class="strategy-recommend-title">' + escapeHtml(item.label || item.value || "策略") + '</h3>',
+                '<p class="strategy-recommend-main">' + mainLine + (diffLine ? ('<br /><small>' + diffLine + '</small>') : "") + '</p>',
+                recommended && recommended.imageUrl ? '<div class="land-card-image" style="min-height:60px;margin:2px 0"><img src="' + escapeHtml(recommended.imageUrl) + '" alt="' + escapeHtml(recommended.name || "作物") + '" loading="lazy" /></div>' : "",
                 recommended ? '<div class="friend-tags">' +
                   '<span class="friend-pill">seed ' + escapeHtml(recommended.seedId) + '</span>' +
                   '<span class="friend-pill">等级 ' + escapeHtml(recommended.level == null ? "不限" : recommended.level) + '</span>' +
                   '<span class="friend-pill">时长 ' + escapeHtml(recommended.growTimeStr || "-") + '</span>' +
                   '</div>' : "",
                 recommended ? '<div class="action-row" style="margin-top:10px"><button type="button" class="ghost" data-apply-plant-mode="' + escapeHtml(item.value) + '">应用这个策略</button></div>' : "",
-                '</div>',
                 '</article>'
               ].join("");
             }).join("");
@@ -4611,7 +4843,6 @@
               if (item.needWater) tags.push('<span class="land-mini-tag warn">待浇水</span>');
               if (item.needWeed) tags.push('<span class="land-mini-tag warn">待除草</span>');
               if (item.needBug) tags.push('<span class="land-mini-tag warn">待杀虫</span>');
-              if (item.isMultiSeason) tags.push('<span class="land-mini-tag">季数 ' + escapeHtml(item.currentSeason + "/" + item.totalSeason) + '</span>');
               return [
                 '<article class="land-card ' + escapeHtml(item.status || "") + '">',
                 '<div class="land-card-top">',
@@ -5874,7 +6105,7 @@
           .then(function (j) {
             lastHealth = j;
             setDotState(dotHttp, "ok");
-            txtHttp.textContent = "运行中 · " + j.uptimeSec + "s";
+            txtHttp.textContent = "运行中 · " + formatRuntimeUptime(j.uptimeSec);
             renderRuntimeChip(j);
             renderGameSideChip(j);
             renderRuntimePanel(j);
@@ -6512,6 +6743,16 @@
         projectInfoOverlay.hidden = true;
       }
 
+      function openMaturityEventModal() {
+        if (!maturityEventOverlay) return;
+        maturityEventOverlay.hidden = false;
+      }
+
+      function closeMaturityEventModal() {
+        if (!maturityEventOverlay) return;
+        maturityEventOverlay.hidden = true;
+      }
+
       document.getElementById("btnEnterFriend").onclick = function () {
         const manual = String(iptFriendTarget.value || "").trim();
         const target = manual || String(selFriend.value || "").trim();
@@ -6533,6 +6774,12 @@
       if (btnProjectInfoClose) {
         btnProjectInfoClose.onclick = closeProjectInfoModal;
       }
+      if (btnOpenMaturityEvents) {
+        btnOpenMaturityEvents.onclick = openMaturityEventModal;
+      }
+      if (btnMaturityEventClose) {
+        btnMaturityEventClose.onclick = closeMaturityEventModal;
+      }
       if (projectInfoOverlay) {
         projectInfoOverlay.onclick = function (event) {
           if (event.target === projectInfoOverlay) {
@@ -6540,7 +6787,18 @@
           }
         };
       }
+      if (maturityEventOverlay) {
+        maturityEventOverlay.onclick = function (event) {
+          if (event.target === maturityEventOverlay) {
+            closeMaturityEventModal();
+          }
+        };
+      }
       document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape" && maturityEventOverlay && !maturityEventOverlay.hidden) {
+          closeMaturityEventModal();
+          return;
+        }
         if (event.key === "Escape" && projectInfoOverlay && !projectInfoOverlay.hidden) {
           closeProjectInfoModal();
         }

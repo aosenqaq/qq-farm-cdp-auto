@@ -111,13 +111,6 @@ function resolveQqMiniappRoots(options = {}) {
   };
 }
 
-function resolveQqMiniappRootCandidates(options = {}) {
-  const roots = resolveQqMiniappRoots(options);
-  return Array.isArray(roots.candidates) && roots.candidates.length
-    ? roots.candidates
-    : [{ srcRoot: roots.srcRoot, pkgRoot: roots.pkgRoot }];
-}
-
 function collectPkgFiles(pkgRoot, versionPrefix) {
   if (!isDirectory(pkgRoot)) return [];
   return fs
@@ -205,9 +198,9 @@ function findLatestQqMiniappByAppId(options = {}) {
   }
 
   const roots = resolveQqMiniappRoots(options);
-  const rootCandidates = resolveQqMiniappRootCandidates(options);
-  const existingRoots = rootCandidates.filter((item) => item && isDirectory(item.srcRoot));
-  const searchedRoots = rootCandidates.map((item) => item.srcRoot);
+  const rootList = Array.isArray(roots.candidates) ? roots.candidates : [roots];
+  const existingRoots = rootList.filter((item) => item && isDirectory(item.srcRoot));
+  const searchedRoots = rootList.map((item) => item.srcRoot);
 
   if (!existingRoots.length) {
     throw new Error(`QQ miniapp_src 目录不存在: ${searchedRoots.join(" | ")}`);
@@ -232,17 +225,19 @@ function findLatestQqMiniappByAppId(options = {}) {
     srcRoot: roots.srcRoot,
     pkgRoot: isDirectory(roots.pkgRoot) ? roots.pkgRoot : null,
     candidateCount: candidates.length,
-    candidateGameJsPaths: candidates.map((item) => item.gameJsPath),
     selected: summarizeCandidate(selected),
     candidates: candidates.slice(0, 8).map(summarizeCandidate),
   };
 }
 
+/**
+ * 在 miniapp_src 下按「最近活跃」选一个 `{数字}_` 前缀的目录（不指定 appid，用于自动修复/打补丁）。
+ */
 function findLatestQqMiniappAnyApp(options = {}) {
   const roots = resolveQqMiniappRoots(options);
-  const rootCandidates = resolveQqMiniappRootCandidates(options);
-  const existingRoots = rootCandidates.filter((item) => item && isDirectory(item.srcRoot));
-  const searchedRoots = rootCandidates.map((item) => item.srcRoot);
+  const rootList = Array.isArray(roots.candidates) ? roots.candidates : [roots];
+  const existingRoots = rootList.filter((item) => item && isDirectory(item.srcRoot));
+  const searchedRoots = rootList.map((item) => item.srcRoot);
 
   if (!existingRoots.length) {
     throw new Error(`QQ miniapp_src 目录不存在: ${searchedRoots.join(" | ")}`);
@@ -269,7 +264,6 @@ function findLatestQqMiniappAnyApp(options = {}) {
     srcRoot: roots.srcRoot,
     pkgRoot: isDirectory(roots.pkgRoot) ? roots.pkgRoot : null,
     candidateCount: candidates.length,
-    candidateGameJsPaths: candidates.map((item) => item.gameJsPath),
     selected: summarizeCandidate(selected),
     candidates: candidates.slice(0, 8).map(summarizeCandidate),
   };
@@ -283,5 +277,4 @@ module.exports = {
   getDefaultQqMiniappSrcRootCandidates,
   normalizeQqAppId,
   resolveQqMiniappRoots,
-  resolveQqMiniappRootCandidates,
 };

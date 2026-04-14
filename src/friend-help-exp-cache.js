@@ -5,6 +5,7 @@ const path = require("node:path");
 
 const FRIEND_HELP_EXP_CACHE_VERSION = 1;
 const FRIEND_HELP_EXP_DAILY_LIMIT = 1500;
+const FRIEND_HELP_EXP_UTC_OFFSET_MS = 8 * 60 * 60 * 1000;
 
 function resolveProjectRoot(projectRoot) {
   return projectRoot || path.join(__dirname, "..");
@@ -17,9 +18,10 @@ function getFriendHelpExpCachePath(projectRoot) {
 function toLocalDateKey(value) {
   const date = value instanceof Date ? value : new Date(value || Date.now());
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
+  const utc8Date = new Date(date.getTime() + FRIEND_HELP_EXP_UTC_OFFSET_MS);
+  const year = utc8Date.getUTCFullYear();
+  const month = String(utc8Date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(utc8Date.getUTCDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
 
@@ -210,5 +212,6 @@ module.exports = {
   resolveFriendHelpExpLimit,
   serializeFriendHelpExpState,
   syncMutableFriendHelpExpState,
+  toLocalDateKey,
   writeFriendHelpExpCache,
 };

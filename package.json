@@ -18,6 +18,8 @@
     "start:wx:auto": "node run.cjs --wx --auto-farm",
     "gateway": "node src/index.js",
     "qq:bundle": "node scripts/patch-qq-miniapp.cjs --bundle-only",
+    "qq:verify": "node scripts/verify-qq-bundle.cjs",
+    "repair": "node scripts/repair-project.cjs",
     "qq:patch": "node scripts/patch-qq-miniapp.cjs",
     "qq:images": "node scripts/extract-qq-miniapp-images.cjs",
     "wmpf": "node wmpf/src/index.js",

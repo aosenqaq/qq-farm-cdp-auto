@@ -7,21 +7,6 @@ const DEBUG_PORT = 9421;
 // CDP port, change to whatever you like
 // use this port by navigating to devtools://devtools/bundled/inspector.html?ws=127.0.0.1:${CDP_PORT}
 const CDP_PORT = 62000;
-const PARENT_RUNTIME_FLAGS = new Set([
-    "--qq",
-    "--wx",
-]);
-const PARENT_RUNTIME_VALUE_OPTIONS = new Set([
-    "--runtime",
-    "--gateway-port",
-    "--gateway-host",
-    "--cdp-ws",
-    "--qq-game-js",
-    "--qq-appid",
-    "--qq-miniapp-src-root",
-    "--qq-host-ws-url",
-    "--qq-host-version",
-]);
 const print_help = () => {
     console.log(`Usage: node wmpf/src/index.js [options]
 
@@ -40,24 +25,6 @@ Options:
                        Preferred Runtime execution context name (default: gameContext)
   -h, --help           Show this help message`);
 };
-const strip_parent_runtime_args = (argv) => {
-    const filteredArgs = [];
-    for (let index = 0; index < argv.length; index += 1) {
-        const arg = String(argv[index] ?? "");
-        const optionName = arg.startsWith("--") ? arg.split("=")[0] : arg;
-        if (PARENT_RUNTIME_FLAGS.has(optionName)) {
-            continue;
-        }
-        if (PARENT_RUNTIME_VALUE_OPTIONS.has(optionName)) {
-            if (!arg.includes("=")) {
-                index += 1;
-            }
-            continue;
-        }
-        filteredArgs.push(arg);
-    }
-    return filteredArgs;
-};
 const parse_port = (name, value, defaultValue) => {
     if (value === undefined) {
         return defaultValue;
@@ -68,10 +35,8 @@ const parse_port = (name, value, defaultValue) => {
     }
     return port;
 };
-const parse_cli_options = (argv = process.argv.slice(2)) => {
-    const args = strip_parent_runtime_args(argv);
+const parse_cli_options = () => {
     const { values } = (0, node_util_1.parseArgs)({
-        args,
         options: {
             "debug-port": { type: "string" },
             "cdp-port": { type: "string" },

@@ -5,10 +5,10 @@
   }
 
   var mini = root.wx || root.qq || null;
-  var allowedPaths = __QQ_FARM_ALLOWED_RPC_PATHS__;
-  var allowedPathMap = {};
-  for (var i = 0; i < allowedPaths.length; i += 1) {
-    allowedPathMap[allowedPaths[i]] = true;
+  var hostPaths = __QQ_FARM_HOST_RPC_PATHS__;
+  var hostPathMap = {};
+  for (var i = 0; i < hostPaths.length; i += 1) {
+    hostPathMap[hostPaths[i]] = true;
   }
 
   var defaults = {
@@ -123,15 +123,14 @@
   }
 
   function collectAvailableMethods() {
-    var list = ["host.ping", "host.describe"];
+    var list = hostPaths.slice();
     var ctl = getGameCtl();
     if (!ctl) return list;
-    for (var i = 0; i < allowedPaths.length; i += 1) {
-      var pathName = allowedPaths[i];
-      if (pathName.indexOf("gameCtl.") !== 0) continue;
-      var methodName = pathName.slice("gameCtl.".length);
+    var names = typeof Object.keys === "function" ? Object.keys(ctl) : [];
+    for (var i = 0; i < names.length; i += 1) {
+      var methodName = names[i];
       if (typeof ctl[methodName] === "function") {
-        list.push(pathName);
+        list.push("gameCtl." + methodName);
       }
     }
     return list;
@@ -268,20 +267,22 @@
 
   function invokeAllowed(pathName, args) {
     pathName = String(pathName || "");
-    if (!allowedPathMap[pathName]) {
-      throw new Error("call_path_not_allowed: " + pathName);
+    if (hostPathMap[pathName]) {
+      if (pathName === "host.ping") {
+        return {
+          pong: true,
+          now: new Date().toISOString(),
+          gameCtlReady: !!getGameCtl(),
+          phase: state.phase
+        };
+      }
+      if (pathName === "host.describe") {
+        return getStatus();
+      }
     }
 
-    if (pathName === "host.ping") {
-      return {
-        pong: true,
-        now: new Date().toISOString(),
-        gameCtlReady: !!getGameCtl(),
-        phase: state.phase
-      };
-    }
-    if (pathName === "host.describe") {
-      return getStatus();
+    if (pathName.indexOf("gameCtl.") !== 0) {
+      throw new Error("call_path_not_allowed: " + pathName);
     }
 
     var ctl = getGameCtl();
@@ -497,6 +498,10 @@
     closeCurrentSocket();
     setPhase("connecting");
 
+    // QQ/微信小游戏环境：优先走运行时提供的 connectSocket，避免全局 WebSocket 被安全策略拦截导致连不上本机网关
+    if (mini && typeof mini.connectSocket === "function" && openWithMiniSocket(state.url)) {
+      return true;
+    }
     if (openWithWebSocket(state.url)) {
       return true;
     }
