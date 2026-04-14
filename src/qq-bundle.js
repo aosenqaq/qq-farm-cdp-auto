@@ -123,6 +123,7 @@ function resolveQqPatchTarget(options = {}) {
         appId: resolvedAppId || null,
         targetMode: "explicit",
         targetPath: null,
+        targetPaths: [],
         targetResolvable: false,
         targetError: resolvedTarget.targetError,
         discovery: null,
@@ -132,6 +133,7 @@ function resolveQqPatchTarget(options = {}) {
       appId: resolvedAppId || null,
       targetMode: "explicit",
       targetPath: resolvedTarget.targetPath,
+      targetPaths: [resolvedTarget.targetPath],
       targetResolvable: true,
       targetError: null,
       discovery: null,
@@ -144,10 +146,17 @@ function resolveQqPatchTarget(options = {}) {
         appId: resolvedAppId,
         srcRoot: srcRoot || undefined,
       });
+      const targetPaths = [...new Set(
+        [discovery.selected]
+          .concat(Array.isArray(discovery.candidates) ? discovery.candidates : [])
+          .map((item) => item && item.gameJsPath ? String(item.gameJsPath).trim() : "")
+          .filter(Boolean),
+      )];
       return {
         appId: discovery.appId,
         targetMode: "auto",
-        targetPath: discovery.selected.gameJsPath,
+        targetPath: targetPaths[0] || discovery.selected.gameJsPath,
+        targetPaths,
         targetResolvable: true,
         targetError: null,
         discovery,
@@ -158,6 +167,7 @@ function resolveQqPatchTarget(options = {}) {
         appId: resolvedAppId,
         targetMode: "auto",
         targetPath: null,
+        targetPaths: [],
         targetResolvable: false,
         targetError: err.message,
         discovery: null,
@@ -169,6 +179,7 @@ function resolveQqPatchTarget(options = {}) {
     appId: null,
     targetMode: null,
     targetPath: null,
+    targetPaths: [],
     targetResolvable: false,
     targetError: null,
     discovery: null,
@@ -193,6 +204,7 @@ function getQqBundleState(config) {
     targetConfigured: !!config.qqGameJsPath || !!config.qqAppId,
     targetMode: target.targetMode,
     targetPath: target.targetPath,
+    targetPaths: Array.isArray(target.targetPaths) ? target.targetPaths : [],
     canPatch: !!target.targetResolvable,
     targetError: target.targetError,
     discovery: target.discovery,
@@ -319,6 +331,7 @@ ${hostSource}
       outputPath: state.outputPath,
       targetConfigured: state.targetConfigured,
       targetPath: state.targetPath,
+      targetPaths: state.targetPaths,
       targetMode: state.targetMode,
       canPatch: state.canPatch,
       targetError: state.targetError,
@@ -330,6 +343,66 @@ ${hostSource}
 
 function ensureParentDir(targetPath) {
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+}
+
+function inspectPatchedQqGameFile(targetPath, expectedScriptHash) {
+  const absoluteTarget = path.resolve(targetPath);
+  const inspection = {
+    targetPath: absoluteTarget,
+    exists: false,
+    readable: false,
+    patched: false,
+    markerStartFound: false,
+    markerEndFound: false,
+    scriptHash: null,
+    generatedAt: null,
+    expectedScriptHash: expectedScriptHash ? String(expectedScriptHash) : null,
+    matchesExpected: false,
+    error: null,
+  };
+
+  if (!fs.existsSync(absoluteTarget)) {
+    return inspection;
+  }
+
+  inspection.exists = true;
+
+  let source = "";
+  try {
+    source = fs.readFileSync(absoluteTarget, "utf8");
+    inspection.readable = true;
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    inspection.error = err.message;
+    return inspection;
+  }
+
+  inspection.markerStartFound = source.includes(MARKER_START);
+  inspection.markerEndFound = source.includes(MARKER_END);
+  inspection.patched = inspection.markerStartFound && inspection.markerEndFound;
+
+  if (!inspection.patched) {
+    return inspection;
+  }
+
+  const startIndex = source.indexOf(MARKER_START);
+  const endIndex = source.indexOf(MARKER_END, startIndex);
+  const block = endIndex >= 0
+    ? source.slice(startIndex, endIndex + MARKER_END.length)
+    : source.slice(startIndex);
+
+  const scriptHashMatch = block.match(/^\s*\/\/\s*scriptHash=([0-9a-f]+)\s*$/im);
+  const generatedAtMatch = block.match(/^\s*\/\/\s*generatedAt=([^\r\n]+)\s*$/im);
+
+  inspection.scriptHash = scriptHashMatch ? String(scriptHashMatch[1] || "").trim() || null : null;
+  inspection.generatedAt = generatedAtMatch ? String(generatedAtMatch[1] || "").trim() || null : null;
+  inspection.matchesExpected = !!(
+    inspection.scriptHash &&
+    inspection.expectedScriptHash &&
+    inspection.scriptHash === inspection.expectedScriptHash
+  );
+
+  return inspection;
 }
 
 function patchQqGameFile(targetPath, bundleText, options = {}) {
@@ -365,6 +438,18 @@ function patchQqGameFile(targetPath, bundleText, options = {}) {
   };
 }
 
+function patchQqGameFiles(targetPaths, bundleText, options = {}) {
+  const list = Array.isArray(targetPaths) ? targetPaths : [targetPaths];
+  const uniqueTargets = [...new Set(
+    list
+      .map((item) => trimToString(item))
+      .filter(Boolean)
+      .map((item) => path.resolve(item)),
+  )];
+
+  return uniqueTargets.map((targetPath) => patchQqGameFile(targetPath, bundleText, options));
+}
+
 module.exports = {
   MARKER_START,
   MARKER_END,
@@ -372,6 +457,8 @@ module.exports = {
   buildQqBundle,
   ensureParentDir,
   getQqBundleState,
+  inspectPatchedQqGameFile,
   patchQqGameFile,
+  patchQqGameFiles,
   resolveQqPatchTarget,
 };

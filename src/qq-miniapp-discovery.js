@@ -43,18 +43,47 @@ function getDefaultAppDataRoot() {
   return process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming");
 }
 
+function getLocalAppDataRoot() {
+  return process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+}
+
+function dedupePaths(paths) {
+  const seen = new Set();
+  const out = [];
+  for (let i = 0; i < paths.length; i += 1) {
+    const raw = trimToString(paths[i]);
+    if (!raw) continue;
+    const resolved = path.resolve(raw);
+    const key = process.platform === "win32" ? resolved.toLowerCase() : resolved;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(resolved);
+  }
+  return out;
+}
+
+function getDefaultQqMiniappSrcRootCandidates() {
+  const appDataRoots = dedupePaths([
+    getDefaultAppDataRoot(),
+    getLocalAppDataRoot(),
+  ]);
+  const out = [];
+  for (let i = 0; i < appDataRoots.length; i += 1) {
+    const appDataRoot = appDataRoots[i];
+    out.push(path.join(appDataRoot, "QQ", "miniapp", "temps", "miniapp_src"));
+    out.push(path.join(appDataRoot, "QQEX", "miniapp", "temps", "miniapp_src"));
+  }
+  return dedupePaths(out);
+}
+
 function getDefaultQqMiniappSrcRoot() {
-  const appDataRoot = getDefaultAppDataRoot();
-  const candidates = [
-    path.join(appDataRoot, "QQ", "miniapp", "temps", "miniapp_src"),
-    path.join(appDataRoot, "QQEX", "miniapp", "temps", "miniapp_src"),
-  ];
+  const candidates = getDefaultQqMiniappSrcRootCandidates();
   for (let i = 0; i < candidates.length; i += 1) {
     if (isDirectory(candidates[i])) {
       return candidates[i];
     }
   }
-  return candidates[0];
+  return candidates[0] || path.join(getDefaultAppDataRoot(), "QQ", "miniapp", "temps", "miniapp_src");
 }
 
 function getDefaultQqMiniappPkgRoot(srcRoot) {
@@ -62,12 +91,23 @@ function getDefaultQqMiniappPkgRoot(srcRoot) {
 }
 
 function resolveQqMiniappRoots(options = {}) {
-  const srcRootRaw = trimToString(options.srcRoot) || getDefaultQqMiniappSrcRoot();
-  const srcRoot = path.resolve(srcRootRaw);
-  const pkgRoot = path.resolve(getDefaultQqMiniappPkgRoot(srcRoot));
+  const explicitSrcRoot = trimToString(options.srcRoot);
+  const rootCandidates = explicitSrcRoot
+    ? dedupePaths([explicitSrcRoot])
+    : getDefaultQqMiniappSrcRootCandidates();
+  const candidates = rootCandidates.map((srcRoot) => ({
+    srcRoot: path.resolve(srcRoot),
+    pkgRoot: path.resolve(getDefaultQqMiniappPkgRoot(srcRoot)),
+  }));
+  const existingCandidates = candidates.filter((item) => isDirectory(item.srcRoot));
+  const preferred = existingCandidates[0] || candidates[0] || {
+    srcRoot: path.resolve(getDefaultQqMiniappSrcRoot()),
+    pkgRoot: path.resolve(getDefaultQqMiniappPkgRoot(getDefaultQqMiniappSrcRoot())),
+  };
   return {
-    srcRoot,
-    pkgRoot,
+    srcRoot: preferred.srcRoot,
+    pkgRoot: preferred.pkgRoot,
+    candidates: existingCandidates.length ? existingCandidates : candidates,
   };
 }
 
@@ -92,6 +132,8 @@ function collectPkgFiles(pkgRoot, versionPrefix) {
 
 function summarizeCandidate(candidate) {
   return {
+    srcRoot: candidate.srcRoot,
+    pkgRoot: candidate.pkgRoot,
     versionDirName: candidate.versionDirName,
     versionSegment: candidate.versionSegment,
     releaseHash: candidate.releaseHash,
@@ -124,6 +166,8 @@ function buildCandidate(roots, entry) {
   const parts = entry.name.split("_");
 
   return {
+    srcRoot: roots.srcRoot,
+    pkgRoot: roots.pkgRoot,
     versionDirName: entry.name,
     versionSegment: parts[1] || null,
     releaseHash: parts.length >= 3 ? parts.slice(2).join("_") : null,
@@ -142,6 +186,8 @@ function compareCandidates(a, b) {
   if (timeDiff !== 0) return timeDiff;
   const pkgDiff = (b.pkgMatchCount || 0) - (a.pkgMatchCount || 0);
   if (pkgDiff !== 0) return pkgDiff;
+  const rootDiff = String(a.srcRoot || "").localeCompare(String(b.srcRoot || ""));
+  if (rootDiff !== 0) return rootDiff;
   return String(a.versionDirName).localeCompare(String(b.versionDirName));
 }
 
@@ -152,24 +198,30 @@ function findLatestQqMiniappByAppId(options = {}) {
   }
 
   const roots = resolveQqMiniappRoots(options);
-  if (!isDirectory(roots.srcRoot)) {
-    throw new Error(`QQ miniapp_src 目录不存在: ${roots.srcRoot}`);
+  const rootList = Array.isArray(roots.candidates) ? roots.candidates : [roots];
+  const existingRoots = rootList.filter((item) => item && isDirectory(item.srcRoot));
+  const searchedRoots = rootList.map((item) => item.srcRoot);
+
+  if (!existingRoots.length) {
+    throw new Error(`QQ miniapp_src 目录不存在: ${searchedRoots.join(" | ")}`);
   }
 
-  const candidates = fs
-    .readdirSync(roots.srcRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && entry.name.startsWith(appId + "_"))
-    .map((entry) => buildCandidate(roots, entry))
-    .filter(Boolean)
+  const candidates = existingRoots
+    .flatMap((root) => fs
+      .readdirSync(root.srcRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name.startsWith(appId + "_"))
+      .map((entry) => buildCandidate(root, entry))
+      .filter(Boolean))
     .sort(compareCandidates);
 
   if (!candidates.length) {
-    throw new Error(`未找到 appid=${appId} 的可用 QQ 小程序目录`);
+    throw new Error(`未找到 appid=${appId} 的可用 QQ 小程序目录；已检查: ${searchedRoots.join(" | ")}`);
   }
 
   const selected = candidates[0];
   return {
     appId,
+    searchedRoots,
     srcRoot: roots.srcRoot,
     pkgRoot: isDirectory(roots.pkgRoot) ? roots.pkgRoot : null,
     candidateCount: candidates.length,
@@ -183,19 +235,24 @@ function findLatestQqMiniappByAppId(options = {}) {
  */
 function findLatestQqMiniappAnyApp(options = {}) {
   const roots = resolveQqMiniappRoots(options);
-  if (!isDirectory(roots.srcRoot)) {
-    throw new Error(`QQ miniapp_src 目录不存在: ${roots.srcRoot}`);
+  const rootList = Array.isArray(roots.candidates) ? roots.candidates : [roots];
+  const existingRoots = rootList.filter((item) => item && isDirectory(item.srcRoot));
+  const searchedRoots = rootList.map((item) => item.srcRoot);
+
+  if (!existingRoots.length) {
+    throw new Error(`QQ miniapp_src 目录不存在: ${searchedRoots.join(" | ")}`);
   }
 
-  const candidates = fs
-    .readdirSync(roots.srcRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && /^\d+_/.test(entry.name))
-    .map((entry) => buildCandidate(roots, entry))
-    .filter(Boolean)
+  const candidates = existingRoots
+    .flatMap((root) => fs
+      .readdirSync(root.srcRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && /^\d+_/.test(entry.name))
+      .map((entry) => buildCandidate(root, entry))
+      .filter(Boolean))
     .sort(compareCandidates);
 
   if (!candidates.length) {
-    throw new Error(`在 miniapp_src 中未找到符合命名的小程序目录: ${roots.srcRoot}`);
+    throw new Error(`在 miniapp_src 中未找到符合命名的小程序目录: ${searchedRoots.join(" | ")}`);
   }
 
   const selected = candidates[0];
@@ -203,6 +260,7 @@ function findLatestQqMiniappAnyApp(options = {}) {
 
   return {
     appId,
+    searchedRoots,
     srcRoot: roots.srcRoot,
     pkgRoot: isDirectory(roots.pkgRoot) ? roots.pkgRoot : null,
     candidateCount: candidates.length,
@@ -216,6 +274,7 @@ module.exports = {
   findLatestQqMiniappByAppId,
   getDefaultQqMiniappPkgRoot,
   getDefaultQqMiniappSrcRoot,
+  getDefaultQqMiniappSrcRootCandidates,
   normalizeQqAppId,
   resolveQqMiniappRoots,
 };
