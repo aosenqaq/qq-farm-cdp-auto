@@ -26,6 +26,59 @@ function trimToString(value) {
   return String(value == null ? "" : value).trim();
 }
 
+function resolveExplicitGameJsPath(rawTargetPath) {
+  const absoluteTarget = path.resolve(rawTargetPath);
+  if (!fs.existsSync(absoluteTarget)) {
+    return {
+      ok: false,
+      targetPath: null,
+      targetError: `目标路径不存在: ${absoluteTarget}`,
+    };
+  }
+
+  let stat;
+  try {
+    stat = fs.statSync(absoluteTarget);
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    return {
+      ok: false,
+      targetPath: null,
+      targetError: `读取目标路径失败: ${absoluteTarget} (${err.message})`,
+    };
+  }
+
+  if (stat.isDirectory()) {
+    const gameJsPath = path.join(absoluteTarget, "game.js");
+    if (!fs.existsSync(gameJsPath)) {
+      return {
+        ok: false,
+        targetPath: null,
+        targetError: `目标目录缺少 game.js: ${absoluteTarget}`,
+      };
+    }
+    return {
+      ok: true,
+      targetPath: gameJsPath,
+      targetError: null,
+    };
+  }
+
+  if (!stat.isFile()) {
+    return {
+      ok: false,
+      targetPath: null,
+      targetError: `目标路径不是文件: ${absoluteTarget}`,
+    };
+  }
+
+  return {
+    ok: true,
+    targetPath: absoluteTarget,
+    targetError: null,
+  };
+}
+
 function normalizeWsUrl(rawUrl, config) {
   if (rawUrl) return String(rawUrl).trim();
   return `ws://127.0.0.1:${config.gatewayPort}${config.qqWsPath}`;
@@ -64,21 +117,21 @@ function resolveQqPatchTarget(options = {}) {
   const resolvedAppId = explicitAppId || (!resolvedTargetPath ? fallbackAppId : "");
 
   if (resolvedTargetPath) {
-    const absoluteTarget = path.resolve(resolvedTargetPath);
-    if (!fs.existsSync(absoluteTarget)) {
+    const resolvedTarget = resolveExplicitGameJsPath(resolvedTargetPath);
+    if (!resolvedTarget.ok) {
       return {
         appId: resolvedAppId || null,
         targetMode: "explicit",
         targetPath: null,
         targetResolvable: false,
-        targetError: `目标 game.js 不存在: ${absoluteTarget}`,
+        targetError: resolvedTarget.targetError,
         discovery: null,
       };
     }
     return {
       appId: resolvedAppId || null,
       targetMode: "explicit",
-      targetPath: absoluteTarget,
+      targetPath: resolvedTarget.targetPath,
       targetResolvable: true,
       targetError: null,
       discovery: null,
