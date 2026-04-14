@@ -15,6 +15,9 @@ Options:
   --cdp-port <port>    CDP proxy server port (default: ${CDP_PORT})
   --debug-main         Output main process debug messages
   --debug-frida        Output Frida client messages
+  --wx                 Compatibility alias for WeChat / CDP runtime (ignored here)
+  --qq                 Compatibility alias for QQ runtime (ignored here)
+  --runtime <name>     Compatibility runtime selector (ignored here)
   --auto-farm          Inject button.js (仓库根目录) and auto-harvest when mature grids exist
   --auto-inject-script <path>
                        Inject a local JS file into the selected CDP context
@@ -42,6 +45,9 @@ const parse_cli_options = () => {
             "cdp-port": { type: "string" },
             "debug-main": { type: "boolean" },
             "debug-frida": { type: "boolean" },
+            wx: { type: "boolean" },
+            qq: { type: "boolean" },
+            runtime: { type: "string" },
             "auto-farm": { type: "boolean" },
             "auto-inject-script": { type: "string" },
             "auto-run-expression": { type: "string" },

@@ -2140,6 +2140,13 @@
                   <small>默认开启，自动跳过系统生成名为“蒙面偷菜”的低等级小号好友。</small>
                 </div>
               </label>
+              <label class="check-card">
+                <input type="checkbox" id="rewardPopupInterceptorEnabled" />
+                <div>
+                  <strong>奖励弹窗拦截</strong>
+                  <small id="txtRewardPopupInterceptorHint">独立运行时开关。开启后自动拦截并隐藏奖励弹窗与遮罩，不写入自动农场策略配置。</small>
+                </div>
+              </label>
             </div>
           </div>
 
@@ -2744,6 +2751,8 @@
       const autoFriendQuietHoursStart = document.getElementById("autoFriendQuietHoursStart");
       const autoFriendQuietHoursEnd = document.getElementById("autoFriendQuietHoursEnd");
       const autoFriendBlockMaskedStealers = document.getElementById("autoFriendBlockMaskedStealers");
+      const rewardPopupInterceptorEnabled = document.getElementById("rewardPopupInterceptorEnabled");
+      const txtRewardPopupInterceptorHint = document.getElementById("txtRewardPopupInterceptorHint");
       const autoFriendBlacklist = document.getElementById("autoFriendBlacklist");
       const autoFriendBlacklistField = autoFriendBlacklist ? autoFriendBlacklist.closest("label") : null;
       const autoFriendStealPlantBlacklistEnabled = document.getElementById("autoFriendStealPlantBlacklistEnabled");
@@ -2790,6 +2799,8 @@
       let stealBlacklistCollapsed = true;
       let onlyShowUnselectedStealCrops = false;
       let autoFriendListBootRequested = false;
+      let rewardPopupInterceptorState = null;
+      let rewardPopupInterceptorBusy = false;
       const DATA_TRUNCATE_LEN = 200;
       const pendingTags = new Map();
       const autoInject = {
@@ -5124,6 +5135,70 @@
         return { text: "已启用", tone: "on" };
       }
 
+      function buildRewardPopupModuleStatusItem(payload) {
+        if (!payload) {
+          return {
+            name: "奖励弹窗拦截",
+            status: { text: "等待状态", tone: "wait" },
+            nextRunText: "--",
+            detail: "等待运行时状态，稍后会同步当前奖励弹窗拦截开关。",
+          };
+        }
+
+        if (payload.available && payload.state) {
+          var state = payload.state;
+          var running = !!payload.enabled;
+          var busy = !!state.busy;
+          var statusText = busy ? "处理中" : (running ? "已启用" : "未启用");
+          var detail = running
+            ? "自动拦截奖励弹窗与遮罩。"
+            : "独立运行时开关，开启后自动拦截奖励弹窗与遮罩。";
+          if (running && busy) {
+            detail = "自动拦截奖励弹窗与遮罩 · 当前正在执行本轮检查。";
+          }
+          return {
+            name: "奖励弹窗拦截",
+            status: { text: statusText, tone: running ? "on" : "off" },
+            nextRunText: running
+              ? (busy ? "本轮检查中" : ("每 " + (Number(state.intervalMs) || 0) + " ms 检查"))
+              : "--",
+            detail: detail,
+          };
+        }
+
+        var status = { text: "未就绪", tone: "off" };
+        var nextRunText = "--";
+        var detailText = "奖励弹窗拦截暂不可用。";
+        if (payload.reason === "runtime_not_synced") {
+          status = { text: "待重启", tone: "wait" };
+          nextRunText = "重启后可用";
+          detailText = "当前 QQ runtime 还没加载最新补丁，重启小程序后即可使用。";
+        } else if (payload.reason === "runtime_not_ready") {
+          status = { text: "等待连接", tone: "wait" };
+          nextRunText = "宿主就绪后";
+          detailText = "等待 QQ 宿主与 gameCtl 就绪。";
+        } else if (payload.reason === "runtime_missing_method") {
+          status = { text: "待升级", tone: "wait" };
+          nextRunText = "重载后可用";
+          detailText = "当前 runtime 缺少奖励弹窗拦截方法，请重新加载最新补丁。";
+        } else if (payload.reason === "runtime_not_qq_ws") {
+          status = { text: "当前不可用", tone: "off" };
+          detailText = "仅 QQ WS 运行时支持该开关。";
+        } else if (payload.error) {
+          status = { text: "状态异常", tone: "off" };
+          detailText = payload.error;
+        } else if (payload.note) {
+          detailText = payload.note;
+        }
+
+        return {
+          name: "奖励弹窗拦截",
+          status: status,
+          nextRunText: nextRunText,
+          detail: detailText,
+        };
+      }
+
       function buildAutoFarmModuleStatusItems(state) {
         var config = state && state.config && typeof state.config === "object" ? state.config : {};
         var ownEnabled = !!config.autoFarmOwnEnabled;
@@ -5205,16 +5280,17 @@
             }),
             detail: friendHelpDetail,
           },
+          buildRewardPopupModuleStatusItem(rewardPopupInterceptorState),
         ];
       }
 
       function renderAutoFarmModuleStatus(state) {
         if (!autoFarmModuleStatusGrid) return;
-        if (!state) {
+        if (!state && !rewardPopupInterceptorState) {
           autoFarmModuleStatusGrid.innerHTML = '<div class="auto-module-empty">自动化状态加载后，这里会按模块显示当前开关状态和下次预计运行时间。</div>';
           return;
         }
-        var items = buildAutoFarmModuleStatusItems(state);
+        var items = state ? buildAutoFarmModuleStatusItems(state) : [buildRewardPopupModuleStatusItem(rewardPopupInterceptorState)];
         autoFarmModuleStatusGrid.innerHTML = items.map(function (item) {
           var toneClass = "is-off";
           if (item.status && item.status.tone === "on") toneClass = "is-on";
@@ -5346,6 +5422,124 @@
         renderAutoFarmModuleStatus(state);
         updateScrollableLogText(logAutoFarm, buildAutoFarmLogLines(state), "暂无日志");
         renderTodayStats(state.todayStats || null);
+      }
+
+      function renderRewardPopupInterceptorControl(payload) {
+        if (!rewardPopupInterceptorEnabled) return;
+        var checked = !!(payload && payload.available && payload.enabled);
+        var disabled = rewardPopupInterceptorBusy || !(payload && payload.available);
+        rewardPopupInterceptorEnabled.checked = checked;
+        rewardPopupInterceptorEnabled.disabled = disabled;
+
+        if (!txtRewardPopupInterceptorHint) return;
+        if (!payload) {
+          txtRewardPopupInterceptorHint.textContent = "独立运行时开关。等待运行时状态后，这里会同步当前奖励弹窗拦截开关。";
+          return;
+        }
+        if (payload.available && payload.state) {
+          var state = payload.state;
+          if (payload.enabled) {
+            var text = "已开启，约每 " + (Number(state.intervalMs) || 0) + " ms 检查一次奖励弹窗";
+            if (state.busy) {
+              text += "，当前正在执行本轮检查";
+            }
+            text += "。";
+            txtRewardPopupInterceptorHint.textContent = text;
+          } else {
+            txtRewardPopupInterceptorHint.textContent = "独立运行时开关。开启后自动拦截并隐藏奖励弹窗与遮罩，不写入自动农场策略配置。";
+          }
+          return;
+        }
+        if (payload.reason === "runtime_not_synced") {
+          txtRewardPopupInterceptorHint.textContent = "当前 QQ runtime 还没加载最新补丁，重启小程序后可在这里直接开关。";
+          return;
+        }
+        if (payload.reason === "runtime_not_ready") {
+          txtRewardPopupInterceptorHint.textContent = "等待 QQ 宿主与 gameCtl 就绪后，这里会自动同步开关状态。";
+          return;
+        }
+        if (payload.reason === "runtime_missing_method") {
+          txtRewardPopupInterceptorHint.textContent = "当前 runtime 缺少奖励弹窗拦截方法，请重新加载最新补丁。";
+          return;
+        }
+        if (payload.reason === "runtime_not_qq_ws") {
+          txtRewardPopupInterceptorHint.textContent = "仅 QQ WS 运行时支持该开关。";
+          return;
+        }
+        txtRewardPopupInterceptorHint.textContent = payload.error || payload.note || "奖励弹窗拦截状态读取失败，请稍后重试。";
+      }
+
+      function loadRewardPopupInterceptorState(silent) {
+        return fetch("/api/reward-popup-interceptor")
+          .then(readJsonResponse)
+          .then(function (j) {
+            if (!(j && j.ok && j.data)) {
+              throw new Error(j && j.error ? j.error : "reward popup interceptor state unavailable");
+            }
+            rewardPopupInterceptorState = j.data;
+            renderRewardPopupInterceptorControl(rewardPopupInterceptorState);
+            renderAutoFarmModuleStatus(autoFarmState);
+            return j;
+          })
+          .catch(function (e) {
+            var err = String(e && e.message ? e.message : e);
+            rewardPopupInterceptorState = {
+              available: false,
+              enabled: false,
+              state: null,
+              reason: "request_failed",
+              error: err,
+              note: "奖励弹窗拦截状态读取失败",
+            };
+            renderRewardPopupInterceptorControl(rewardPopupInterceptorState);
+            renderAutoFarmModuleStatus(autoFarmState);
+            if (!silent) {
+              appendLine("奖励弹窗拦截状态加载失败", err);
+            }
+            return null;
+          });
+      }
+
+      function setRewardPopupInterceptorEnabledRemote(enabled) {
+        if (!rewardPopupInterceptorEnabled || rewardPopupInterceptorBusy) {
+          return Promise.resolve(null);
+        }
+        rewardPopupInterceptorBusy = true;
+        renderRewardPopupInterceptorControl(rewardPopupInterceptorState);
+        renderAutoFarmModuleStatus(autoFarmState);
+        var actionLabel = enabled ? "开启奖励弹窗拦截" : "关闭奖励弹窗拦截";
+        return fetch("/api/reward-popup-interceptor", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: !!enabled }),
+        })
+          .then(readJsonResponse)
+          .then(function (j) {
+            if (!(j && j.ok && j.data)) {
+              throw new Error(j && j.error ? j.error : "reward popup interceptor update failed");
+            }
+            rewardPopupInterceptorState = j.data;
+            renderRewardPopupInterceptorControl(rewardPopupInterceptorState);
+            renderAutoFarmModuleStatus(autoFarmState);
+            appendLine(actionLabel + "完成", j.data);
+            showToast(
+              actionLabel + "成功",
+              enabled ? "后续奖励弹窗会在出现时自动被拦截并隐藏。" : "后续奖励弹窗将恢复正常弹出。",
+              "ok",
+            );
+            return j;
+          })
+          .catch(function (e) {
+            var err = String(e && e.message ? e.message : e);
+            appendLine(actionLabel + "失败", err);
+            showToast(actionLabel + "失败", err, "bad");
+            return loadRewardPopupInterceptorState(true);
+          })
+          .finally(function () {
+            rewardPopupInterceptorBusy = false;
+            renderRewardPopupInterceptorControl(rewardPopupInterceptorState);
+            renderAutoFarmModuleStatus(autoFarmState);
+          });
       }
 
       function gatherPreviewOptions() {
@@ -6413,6 +6607,12 @@
         });
       }
 
+      if (rewardPopupInterceptorEnabled) {
+        rewardPopupInterceptorEnabled.addEventListener("change", function () {
+          setRewardPopupInterceptorEnabledRemote(!!rewardPopupInterceptorEnabled.checked);
+        });
+      }
+
       if (btnStealBlacklistToggle) {
         btnStealBlacklistToggle.onclick = function () {
           stealBlacklistCollapsed = !stealBlacklistCollapsed;
@@ -6820,6 +7020,7 @@
       renderInjectStatus();
       syncStealBlacklistPanel();
       renderStealCropBlacklistSummary();
+      renderRewardPopupInterceptorControl(null);
       if (getQqAppIdValue()) {
         findQqGameTarget({ silent: true }).catch(function () {});
       }
@@ -6829,6 +7030,7 @@
       loadStealCropOptions();
       loadFarmConfig();
       loadAutoFarmState(false);
+      loadRewardPopupInterceptorState(true);
       loadAnalytics();
       loadLandDetails();
       loadPlantStrategyPreview();
@@ -6837,6 +7039,7 @@
         setInterval(loadLandDetails, 15000);
         setInterval(loadAccountStatus, 15000);
         setInterval(function () { loadAutoFarmState(false); }, AUTO_FARM_POLL_MS);
+        setInterval(function () { loadRewardPopupInterceptorState(true); }, AUTO_FARM_POLL_MS);
     })();
   </script>
 </body>
