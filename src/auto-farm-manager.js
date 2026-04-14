@@ -7,6 +7,7 @@ const {
   markFriendHelpExpLimitReached: applyFriendHelpExpLimitReached,
   normalizeFriendHelpExpState,
   serializeFriendHelpExpState,
+  toLocalDateKey: toFriendHelpExpDateKey,
 } = require("./friend-help-exp-cache");
 
 const AUTO_FARM_RECENT_EVENT_LIMIT = 400;
@@ -280,11 +281,7 @@ function normalizeAutoFarmConfig(raw) {
 }
 
 function getTodayKey(now) {
-  const date = now instanceof Date ? now : new Date(now || Date.now());
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return toFriendHelpExpDateKey(now) || toFriendHelpExpDateKey() || "";
 }
 
 function createEmptyTodayStats(dateKey) {
@@ -1130,6 +1127,10 @@ class AutoFarmManager {
   }
 
   getState() {
+    void this._rolloverFriendHelpExpStateIfNeeded(Date.now(), {
+      reason: "state_read_rollover_check",
+      awaitPersist: false,
+    });
     this._ensureTodayStatsFresh();
     this._pruneFriendVisitCooldowns();
     return {
@@ -1183,7 +1184,31 @@ class AutoFarmManager {
     return snapshot;
   }
 
+  async _rolloverFriendHelpExpStateIfNeeded(now, opts) {
+    const at = now || Date.now();
+    const options = opts && typeof opts === "object" ? opts : {};
+    const beforeSerialized = JSON.stringify(serializeFriendHelpExpState(this.friendHelpExpState, at));
+    const normalized = normalizeFriendHelpExpState(this.friendHelpExpState, at);
+    const afterSerialized = JSON.stringify(serializeFriendHelpExpState(normalized, at));
+    if (beforeSerialized === afterSerialized) {
+      return false;
+    }
+    this.friendHelpExpState = normalized;
+    if (options.persist !== false) {
+      const reason = options.reason ? String(options.reason) : "friend_help_exp_rollover";
+      if (options.awaitPersist === false) {
+        void this._persistFriendHelpExpState(reason);
+      } else {
+        await this._persistFriendHelpExpState(reason);
+      }
+    }
+    return true;
+  }
+
   async recordFriendHelpExpDelta(delta, opts) {
+    await this._rolloverFriendHelpExpStateIfNeeded((opts && opts.at) || Date.now(), {
+      reason: "record_friend_help_exp_rollover_check",
+    });
     const result = addFriendHelpExp(this.friendHelpExpState, delta, opts);
     if (!(opts && opts.persist === false) && result.applied > 0) {
       await this._persistFriendHelpExpState(opts && opts.reason ? opts.reason : "record_friend_help_exp");
@@ -1192,6 +1217,9 @@ class AutoFarmManager {
   }
 
   async markFriendHelpExpLimitReached(opts) {
+    await this._rolloverFriendHelpExpStateIfNeeded((opts && opts.at) || Date.now(), {
+      reason: "mark_friend_help_exp_limit_rollover_check",
+    });
     const result = applyFriendHelpExpLimitReached(this.friendHelpExpState, opts);
     if (!(opts && opts.persist === false)) {
       await this._persistFriendHelpExpState(opts && opts.reason ? opts.reason : "mark_friend_help_exp_limit");
@@ -1547,6 +1575,9 @@ class AutoFarmManager {
 
   async _runCycle(force, dueFlags) {
     const now = Date.now();
+    await this._rolloverFriendHelpExpStateIfNeeded(now, {
+      reason: "cycle_rollover_check",
+    });
     const cycleId = new Date(now).toISOString();
     const beforeAutoFertilizerStateSerialized = JSON.stringify(serializeAutoFertilizerState(this.autoFertilizerState));
     const beforeFriendHelpExpStateSerialized = JSON.stringify(serializeFriendHelpExpState(this.friendHelpExpState));
