@@ -4,7 +4,7 @@
  *
  * 职责：
  *  1. 检测 node_modules 是否完整，缺失则自动 npm install
- *  2. 微信路线额外检测 frida 原生模块是否可用，不可用则重新 rebuild
+ *  2. 微信路线额外检测 frida 原生模块是否可用，不可用则自动修复
  *  3. 启动主程序（node run.cjs <flag>）
  *  4. 主程序就绪后自动打开浏览器控制页
  */
@@ -16,6 +16,7 @@ const fs   = require('fs');
 const path = require('path');
 const http = require('http');
 const https = require('https');
+const { pathToFileURL } = require('url');
 
 // ── 解析运行时参数 ────────────────────────────────────────────────
 const args        = process.argv.slice(2);
@@ -45,6 +46,114 @@ function tryRun(cmd, opts = {}) {
   } catch (_) {
     return false;
   }
+}
+
+function runNpm(argv, opts = {}) {
+  const cmd = ['npm', ...argv].join(' ');
+  run(cmd, opts);
+}
+
+function tryRunNpm(argv, opts = {}) {
+  try {
+    runNpm(argv, opts);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function summarizeError(error) {
+  if (!error) return '未知错误';
+  const raw = error.stack || error.message || error.code || String(error);
+  return String(raw).split(/\r?\n/)[0].trim();
+}
+
+function loadJsonIfExists(filePath) {
+  if (!fs.existsSync(filePath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (_) {
+    return null;
+  }
+}
+
+function getFridaState() {
+  const packageDir = path.join(ROOT, 'node_modules', 'frida');
+  const packageJson = path.join(packageDir, 'package.json');
+  const installScript = path.join(packageDir, 'scripts', 'install.js');
+  const entryFile = path.join(packageDir, 'build', 'src', 'frida.js');
+  const nativeBinding = path.join(packageDir, 'build', 'frida_binding.node');
+  return {
+    packageDir,
+    packageJson,
+    installScript,
+    entryFile,
+    nativeBinding,
+    hasPackageJson: fs.existsSync(packageJson),
+    hasInstallScript: fs.existsSync(installScript),
+    hasEntryFile: fs.existsSync(entryFile),
+    hasNativeBinding: fs.existsSync(nativeBinding),
+  };
+}
+
+function getFridaVersionToInstall() {
+  const lockJson = loadJsonIfExists(path.join(ROOT, 'package-lock.json'));
+  const lockedVersion = lockJson?.packages?.['node_modules/frida']?.version;
+  if (typeof lockedVersion === 'string' && lockedVersion.trim()) {
+    return lockedVersion.trim();
+  }
+
+  const installedVersion = loadJsonIfExists(path.join(ROOT, 'node_modules', 'frida', 'package.json'))?.version;
+  if (typeof installedVersion === 'string' && installedVersion.trim()) {
+    return installedVersion.trim();
+  }
+
+  const projectJson = loadJsonIfExists(path.join(ROOT, 'package.json'));
+  const spec = projectJson?.dependencies?.frida || projectJson?.devDependencies?.frida;
+  if (typeof spec === 'string' && spec.trim()) {
+    return spec.trim().replace(/^[~^]/, '');
+  }
+
+  return '16.7.19';
+}
+
+function removeBrokenFridaDir() {
+  const fridaState = getFridaState();
+  const packageDir = path.resolve(fridaState.packageDir);
+  const nodeModulesDir = path.resolve(path.join(ROOT, 'node_modules')) + path.sep;
+  if (!packageDir.startsWith(nodeModulesDir)) {
+    throw new Error(`拒绝删除异常路径: ${packageDir}`);
+  }
+  if (fs.existsSync(packageDir)) {
+    fs.rmSync(packageDir, { recursive: true, force: true });
+  }
+}
+
+async function verifyFridaModule() {
+  const fridaState = getFridaState();
+  const missing = [];
+  if (!fridaState.hasPackageJson) missing.push('package.json');
+  if (!fridaState.hasEntryFile) missing.push('build/src/frida.js');
+  if (missing.length > 0) {
+    throw new Error(`frida 包文件缺失: ${missing.join(', ')}`);
+  }
+  const bust = fs.statSync(fridaState.entryFile).mtimeMs;
+  await import(`${pathToFileURL(fridaState.entryFile).href}?t=${bust}`);
+}
+
+async function reinstallFrida() {
+  const version = getFridaVersionToInstall();
+  const registry = await pickFastestRegistry();
+  const pkg = `frida@${version}`;
+
+  removeBrokenFridaDir();
+
+  if (tryRunNpm(['install', '--no-save', '--no-package-lock', '--force', pkg, `--registry=${registry}`])) {
+    return;
+  }
+
+  warn('当前镜像安装 frida 失败，尝试使用官方源重试...');
+  runNpm(['install', '--no-save', '--no-package-lock', '--force', pkg, '--registry=https://registry.npmjs.org/']);
 }
 
 function normalizeRegistry(url) {
@@ -100,13 +209,12 @@ async function pickFastestRegistry() {
 
 async function installDepsWithBestRegistry() {
   const registry = await pickFastestRegistry();
-  const installCmd = `npm install --registry=${registry}`;
-  if (tryRun(installCmd)) {
+  if (tryRunNpm(['install', `--registry=${registry}`])) {
     ok('依赖安装完成');
     return;
   }
   warn('当前镜像安装失败，尝试使用官方源重试...');
-  run('npm install --registry=https://registry.npmjs.org/');
+  runNpm(['install', '--registry=https://registry.npmjs.org/']);
   ok('依赖安装完成');
 }
 
@@ -134,25 +242,55 @@ async function checkNodeModules() {
 }
 
 // ── 2. 微信路线：检测 frida 原生模块 ─────────────────────────────
-function checkFrida() {
+async function checkFrida() {
   if (!isWX) return;
 
   log('微信路线：检测 frida 原生模块...');
   try {
-    // frida 有原生 .node 文件，直接 require 测试
-    require(path.join(ROOT, 'node_modules', 'frida'));
+    await verifyFridaModule();
     ok('frida 模块可用');
-  } catch (e) {
-    warn('frida 原生模块不可用，尝试 rebuild...');
-    warn('（首次编译可能需要几分钟，请耐心等待）');
+    return;
+  } catch (initialError) {
+    warn(`frida 模块不可用: ${summarizeError(initialError)}`);
+  }
+
+  const fridaState = getFridaState();
+
+  if (!fridaState.hasPackageJson || !fridaState.hasInstallScript || !fridaState.hasEntryFile) {
+    warn('检测到 frida 包文件不完整，尝试重新安装 frida...');
     try {
-      run('npm rebuild frida');
-      ok('frida rebuild 完成');
-    } catch (rebuildErr) {
-      err('frida rebuild 失败，请检查 Python / node-gyp 环境');
+      await reinstallFrida();
+      ok('frida 重新安装完成');
+    } catch (installError) {
+      err(`frida 重新安装失败: ${summarizeError(installError)}`);
       err('参考：https://github.com/nodejs/node-gyp#installation');
       process.exit(1);
     }
+  } else {
+    warn('尝试重新构建 frida...');
+    warn('（首次编译可能需要几分钟，请耐心等待）');
+    if (tryRunNpm(['rebuild', 'frida'])) {
+      ok('frida rebuild 完成');
+    } else {
+      warn('frida rebuild 失败，尝试重新安装 frida...');
+      try {
+        await reinstallFrida();
+        ok('frida 重新安装完成');
+      } catch (installError) {
+        err(`frida 修复失败: ${summarizeError(installError)}`);
+        err('参考：https://github.com/nodejs/node-gyp#installation');
+        process.exit(1);
+      }
+    }
+  }
+
+  try {
+    await verifyFridaModule();
+    ok('frida 模块已恢复');
+  } catch (finalError) {
+    err(`frida 修复后仍不可用: ${summarizeError(finalError)}`);
+    err('参考：https://github.com/nodejs/node-gyp#installation');
+    process.exit(1);
   }
 }
 
@@ -213,7 +351,7 @@ async function main() {
   console.log();
 
   await checkNodeModules();
-  checkFrida();
+  await checkFrida();
 
   const port = getGatewayPort();
   const url  = `http://127.0.0.1:${port}/`;
