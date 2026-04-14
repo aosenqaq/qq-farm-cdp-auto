@@ -16,6 +16,17 @@
     lastHandledAt: 0,
     lastResult: null
   };
+  const rewardPopupInterceptorState = {
+    timer: null,
+    enabled: false,
+    running: false,
+    generation: 0,
+    intervalMs: 400,
+    waitAfter: 90,
+    lastCheckAt: 0,
+    lastResult: null,
+    targetViewNames: ['view_get_rewards']
+  };
 
   function out(v) {
     try { console.dir(v); } catch (_) {}
@@ -10654,6 +10665,440 @@
     return silent ? lastPayload || { ok: false, reason: 'reward_popup_not_found', detected: lastDetected } : out(lastPayload || { ok: false, reason: 'reward_popup_not_found', detected: lastDetected });
   }
 
+  function getRewardPopupTargetNames(opts) {
+    const list = Array.isArray(opts && opts.targetViewNames)
+      ? opts.targetViewNames
+      : rewardPopupInterceptorState.targetViewNames;
+    return list
+      .map(function (item) { return String(item || '').trim().toLowerCase(); })
+      .filter(Boolean);
+  }
+
+  function findGetRewardsPopupRoots(opts) {
+    opts = opts || {};
+    const roots = [];
+    const includeInactiveDirect = opts.includeInactiveDirect !== false;
+    const directPaths = [
+      'startup/root/ui/LayerDialog/view_get_rewards',
+      'root/ui/LayerDialog/view_get_rewards'
+    ].concat(Array.isArray(opts.paths) ? opts.paths : []);
+    const directSeen = Object.create(null);
+
+    for (let i = 0; i < directPaths.length; i += 1) {
+      const rawPath = String(directPaths[i] || '').trim();
+      if (!rawPath || directSeen[rawPath]) continue;
+      directSeen[rawPath] = true;
+      const node = safeCall(function () { return findNode(rawPath); }, null);
+      if (!node) continue;
+      if (!includeInactiveDirect && !node.activeInHierarchy) continue;
+      if (roots.indexOf(node) >= 0) continue;
+      roots.push(node);
+    }
+    if (roots.length > 0) return roots;
+
+    const targetNames = getRewardPopupTargetNames(opts);
+    return walk(scene()).filter(function (node) {
+      if (!node || !node.activeInHierarchy || typeof node.getComponent !== 'function') return false;
+      const name = String(node.name || '').trim().toLowerCase();
+      if (targetNames.indexOf(name) < 0) return false;
+      const path = String(fullPath(node) || '').toLowerCase();
+      return path.indexOf('/ui/layerdialog/') >= 0 || path.indexOf('/ui/layerpopup/') >= 0;
+    });
+  }
+
+  function resolveRuntimeNodeRef(value) {
+    if (!value || (typeof value !== 'object' && typeof value !== 'function')) return null;
+    if (typeof value.getComponent === 'function') return value;
+    const maybeNode = safeReadKey(value, 'node');
+    if (maybeNode && typeof maybeNode.getComponent === 'function') return maybeNode;
+    return null;
+  }
+
+  function findGetRewardsPopupController(rootNode) {
+    const components = rootNode && Array.isArray(rootNode.components) ? rootNode.components : [];
+    let fallback = null;
+    for (let i = 0; i < components.length; i += 1) {
+      const comp = components[i];
+      if (!comp) continue;
+      if (!fallback) fallback = comp;
+      if (
+        safeReadKey(comp, 'nodeClickEmpty') ||
+        safeReadKey(comp, 'getRewardsItemArr') ||
+        safeReadKey(comp, '_showType') != null ||
+        safeReadKey(comp, 'btnGet') ||
+        safeReadKey(comp, 'btnShare')
+      ) {
+        return comp;
+      }
+    }
+    return fallback;
+  }
+
+  function collectGetRewardsPopupNodes(rootNode, controller) {
+    const nodes = [];
+    function push(value) {
+      const node = resolveRuntimeNodeRef(value);
+      if (!node || nodes.indexOf(node) >= 0) return;
+      nodes.push(node);
+    }
+    push(rootNode);
+    push(safeReadKey(controller, 'root'));
+    push(safeReadKey(controller, 'nodeClickEmpty'));
+    push(safeReadKey(controller, 'nodeBlockAll'));
+    push(safeReadKey(controller, 'nodeShare'));
+    push(safeReadKey(controller, 'nodeTitleRewards'));
+    push(safeReadKey(controller, 'nodeTitleShare'));
+    push(safeReadKey(controller, 'btnGet'));
+    push(safeReadKey(controller, 'btnShare'));
+    return nodes;
+  }
+
+  function collectGetRewardsPopupBackdropNodes(rootNode, controller, steps) {
+    const nodes = [];
+    const parentNode = rootNode && rootNode.parent ? rootNode.parent : null;
+    if (!parentNode || !Array.isArray(parentNode.children) || parentNode.children.length <= 1) {
+      return nodes;
+    }
+
+    const camera = getCamera();
+    const viewport = getViewportInfo();
+    const viewportArea = Math.max(1, Number(viewport.width) * Number(viewport.height) || 0);
+    const rootSiblingIndex = typeof rootNode.getSiblingIndex === 'function'
+      ? safeCall(function () { return rootNode.getSiblingIndex(); }, null)
+      : null;
+
+    for (let i = 0; i < parentNode.children.length; i += 1) {
+      const sibling = parentNode.children[i];
+      if (!sibling || sibling === rootNode || sibling.active !== true) continue;
+
+      const info = describeNode(sibling, {
+        baseNode: parentNode,
+        camera: camera,
+      });
+      const rect = getNodeScreenRect(sibling, { camera: camera });
+      const areaRatio = rect ? rectArea(rect) / viewportArea : 0;
+      const texts = getNodeTextList(sibling, { maxDepth: 2 }).slice(0, 10);
+      const components = componentNames(sibling);
+      const haystack = [info.path, info.relativePath, info.name].concat(components, texts);
+      let score = 0;
+      const reasons = [];
+
+      if (rootSiblingIndex != null && info.siblingIndex != null && info.siblingIndex < rootSiblingIndex) {
+        score += 2;
+        reasons.push('before_popup');
+      }
+      if (areaRatio >= 0.9) {
+        score += 4;
+        reasons.push('fullscreen');
+      } else if (areaRatio >= 0.55) {
+        score += 2;
+        reasons.push('large_area');
+      }
+      if (matchesKeywords(haystack, ['mask', 'block', 'overlay', 'shadow', 'black', 'bg', 'backdrop', 'dialog', 'modal', '遮罩', '蒙层'])) {
+        score += 4;
+        reasons.push('keyword');
+      }
+      if (matchesKeywords(components, ['blockinputevents'])) {
+        score += 4;
+        reasons.push('block_input');
+      }
+      if (texts.length === 0) {
+        score += 1;
+        reasons.push('no_text');
+      }
+      if (info.childCount <= 2) {
+        score += 1;
+        reasons.push('few_children');
+      }
+      if (matchesKeywords(texts, ['恭喜获得', '点击空白处关闭', '奖励', '道具', '种子', '分享', '收下'])) {
+        score -= 3;
+        reasons.push('popup_text_penalty');
+      }
+      if (score < 5) continue;
+
+      steps.push({
+        action: 'backdrop_candidate',
+        path: info.path,
+        relativePath: info.relativePath,
+        score: score,
+        areaRatio: roundNum(areaRatio),
+        siblingIndex: info.siblingIndex,
+        reasons: reasons,
+        texts: texts.slice(0, 6),
+        components: components.slice(0, 10),
+      });
+      if (nodes.indexOf(sibling) >= 0) continue;
+      nodes.push(sibling);
+    }
+
+    return nodes;
+  }
+
+  function tryInvokeRewardPopupClose(controller, rootNode, waitAfter, steps) {
+    let invoked = false;
+    const clickEmptyNode = resolveRuntimeNodeRef(safeReadKey(controller, 'nodeClickEmpty'))
+      || safeCall(function () { return findNode(fullPath(rootNode) + '/root/bottom'); }, null);
+    if (clickEmptyNode && clickEmptyNode.activeInHierarchy) {
+      emitNodeTouch(clickEmptyNode, 60);
+      steps.push({
+        action: 'emit_node_touch',
+        path: fullPath(clickEmptyNode),
+      });
+      invoked = true;
+    }
+
+    const preferredMethods = [
+      'commonClose',
+      'close',
+      'hide',
+      'dismiss',
+      'removeSelf',
+      'destroy',
+      'onClickClose',
+      'onClickEmpty',
+      'onMaskClick',
+      'onBgClose'
+    ];
+    for (let i = 0; i < preferredMethods.length; i += 1) {
+      const name = preferredMethods[i];
+      const fn = controller && safeReadKey(controller, name);
+      if (typeof fn !== 'function') continue;
+      safeCall(function () {
+        return fn.call(controller);
+      }, null);
+      steps.push({
+        action: 'controller_method',
+        name: name,
+      });
+      invoked = true;
+      break;
+    }
+
+    const candidateMethods = controller
+      ? filterMethodNamesByKeywords(controller, ['close', 'hide', 'dismiss', 'remove', 'destroy'])
+      : [];
+    for (let i = 0; i < candidateMethods.length; i += 1) {
+      const name = candidateMethods[i];
+      if (preferredMethods.indexOf(name) >= 0) continue;
+      const fn = safeReadKey(controller, name);
+      if (typeof fn !== 'function') continue;
+      safeCall(function () {
+        return fn.call(controller);
+      }, null);
+      steps.push({
+        action: 'controller_method',
+        name: name,
+      });
+      invoked = true;
+      break;
+    }
+
+    return invoked;
+  }
+
+  function forceHideRewardPopupNodes(nodes, steps) {
+    let changed = false;
+    for (let i = 0; i < nodes.length; i += 1) {
+      const node = nodes[i];
+      if (!node) continue;
+      const info = {
+        action: 'force_hide_node',
+        path: safeCall(function () { return fullPath(node); }, null),
+        beforeActive: safeReadKey(node, 'active'),
+        beforeActiveInHierarchy: safeReadKey(node, 'activeInHierarchy'),
+      };
+      safeCall(function () {
+        if (safeReadKey(node, 'active') !== false) {
+          node.active = false;
+          changed = true;
+        }
+        return true;
+      }, null);
+      safeCall(function () {
+        if (typeof node.opacity === 'number') node.opacity = 0;
+        return true;
+      }, null);
+      info.afterActive = safeReadKey(node, 'active');
+      info.afterActiveInHierarchy = safeReadKey(node, 'activeInHierarchy');
+      steps.push(info);
+    }
+    return changed;
+  }
+
+  async function hideGetRewardsPopup(opts) {
+    opts = opts || {};
+    const silent = !!opts.silent;
+    const waitAfter = Math.max(0, Number(opts.waitAfter) || 0);
+    const roots = findGetRewardsPopupRoots({
+      ...opts,
+      includeInactiveDirect: true,
+    });
+    if (!roots || roots.length <= 0) {
+      const miss = {
+        ok: false,
+        hidden: false,
+        count: 0,
+        hiddenCount: 0,
+        reason: 'reward_popup_not_found',
+        targetViewNames: getRewardPopupTargetNames(opts),
+      };
+      return silent ? miss : out(miss);
+    }
+
+    const list = [];
+    let hiddenCount = 0;
+    for (let i = 0; i < roots.length; i += 1) {
+      const rootNode = roots[i];
+      const before = describeNode(rootNode);
+      const beforeVisible = !!(before.active || before.activeInHierarchy);
+      const controller = findGetRewardsPopupController(rootNode);
+      const steps = [];
+      const controllerMethods = controller
+        ? filterMethodNamesByKeywords(controller, ['close', 'hide', 'dismiss', 'remove', 'destroy'])
+        : [];
+
+      const invokedClose = tryInvokeRewardPopupClose(controller, rootNode, waitAfter, steps);
+      if (invokedClose && waitAfter > 0) {
+        await wait(waitAfter);
+      }
+
+      let after = describeNode(rootNode);
+      let hidden = !after.activeInHierarchy;
+      let nodeChanged = false;
+      if (!hidden) {
+        nodeChanged = forceHideRewardPopupNodes(collectGetRewardsPopupNodes(rootNode, controller), steps) || nodeChanged;
+        after = describeNode(rootNode);
+        hidden = !after.activeInHierarchy || after.active === false;
+      }
+      const backdropChanged = forceHideRewardPopupNodes(
+        collectGetRewardsPopupBackdropNodes(rootNode, controller, steps),
+        steps,
+      );
+      const handled = (beforeVisible && hidden) || nodeChanged || backdropChanged;
+      if (handled) hiddenCount += 1;
+
+      list.push({
+        path: before.path,
+        relativePath: before.relativePath,
+        name: before.name,
+        hidden: hidden,
+        handled: handled,
+        before: {
+          active: before.active,
+          activeInHierarchy: before.activeInHierarchy,
+        },
+        after: {
+          active: after.active,
+          activeInHierarchy: after.activeInHierarchy,
+        },
+        controllerName: controller && controller.constructor ? controller.constructor.name : String(controller || null),
+        controllerMethods: controllerMethods.slice(0, 20),
+        steps: steps,
+      });
+    }
+
+    const payload = {
+      ok: hiddenCount > 0,
+      hidden: hiddenCount > 0,
+      count: list.length,
+      hiddenCount: hiddenCount,
+      list: list,
+      targetViewNames: getRewardPopupTargetNames(opts),
+    };
+    return silent ? payload : out(payload);
+  }
+
+  function getRewardPopupInterceptorState(opts) {
+    opts = opts || {};
+    const payload = {
+      enabled: !!rewardPopupInterceptorState.enabled,
+      running: !!rewardPopupInterceptorState.enabled,
+      scheduled: !!rewardPopupInterceptorState.timer,
+      busy: rewardPopupInterceptorState.running,
+      intervalMs: rewardPopupInterceptorState.intervalMs,
+      waitAfter: rewardPopupInterceptorState.waitAfter,
+      lastCheckAt: rewardPopupInterceptorState.lastCheckAt || null,
+      lastResult: rewardPopupInterceptorState.lastResult || null,
+      targetViewNames: rewardPopupInterceptorState.targetViewNames.slice(),
+    };
+    return opts.silent ? payload : out(payload);
+  }
+
+  function stopRewardPopupInterceptor(opts) {
+    opts = opts || {};
+    rewardPopupInterceptorState.enabled = false;
+    rewardPopupInterceptorState.generation += 1;
+    if (rewardPopupInterceptorState.timer) {
+      clearTimeout(rewardPopupInterceptorState.timer);
+      rewardPopupInterceptorState.timer = null;
+    }
+    return getRewardPopupInterceptorState(opts);
+  }
+
+  function startRewardPopupInterceptor(opts) {
+    opts = opts || {};
+    rewardPopupInterceptorState.intervalMs = opts.intervalMs == null
+      ? rewardPopupInterceptorState.intervalMs
+      : Math.max(120, Number(opts.intervalMs) || rewardPopupInterceptorState.intervalMs);
+    rewardPopupInterceptorState.waitAfter = opts.waitAfter == null
+      ? rewardPopupInterceptorState.waitAfter
+      : Math.max(0, Number(opts.waitAfter) || rewardPopupInterceptorState.waitAfter);
+    rewardPopupInterceptorState.targetViewNames = getRewardPopupTargetNames(opts);
+    rewardPopupInterceptorState.enabled = true;
+    rewardPopupInterceptorState.generation += 1;
+    const generation = rewardPopupInterceptorState.generation;
+
+    if (rewardPopupInterceptorState.timer) {
+      clearTimeout(rewardPopupInterceptorState.timer);
+      rewardPopupInterceptorState.timer = null;
+    }
+
+    const schedule = function (delayMs) {
+      if (!rewardPopupInterceptorState.enabled || rewardPopupInterceptorState.generation !== generation) {
+        return;
+      }
+      rewardPopupInterceptorState.timer = setTimeout(async function () {
+        rewardPopupInterceptorState.timer = null;
+        if (!rewardPopupInterceptorState.enabled || rewardPopupInterceptorState.generation !== generation) {
+          return;
+        }
+        if (rewardPopupInterceptorState.running) {
+          schedule(rewardPopupInterceptorState.intervalMs);
+          return;
+        }
+
+        rewardPopupInterceptorState.running = true;
+        rewardPopupInterceptorState.lastCheckAt = Date.now();
+        try {
+          const result = await hideGetRewardsPopup({
+            silent: true,
+            targetViewNames: rewardPopupInterceptorState.targetViewNames,
+            waitAfter: rewardPopupInterceptorState.waitAfter,
+          });
+          rewardPopupInterceptorState.lastResult = result;
+        } catch (error) {
+          rewardPopupInterceptorState.lastResult = {
+            ok: false,
+            hidden: false,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        } finally {
+          rewardPopupInterceptorState.running = false;
+          if (rewardPopupInterceptorState.enabled && rewardPopupInterceptorState.generation === generation) {
+            schedule(rewardPopupInterceptorState.intervalMs);
+          }
+        }
+      }, Math.max(50, Number(delayMs) || rewardPopupInterceptorState.intervalMs));
+    };
+
+    schedule(opts.delayMs == null ? 60 : opts.delayMs);
+    return getRewardPopupInterceptorState(opts);
+  }
+
+  function setRewardPopupInterceptorEnabled(enabled, opts) {
+    return enabled === false ? stopRewardPopupInterceptor(opts) : startRewardPopupInterceptor(opts);
+  }
+
   function farmNodes(opts) {
     opts = opts || {};
     const root = findFarmRoot(opts.root || opts.path);
@@ -11107,6 +11552,11 @@
     inspectRewardPopupTarget,
     dismissActiveOverlay,
     dismissRewardPopup,
+    hideGetRewardsPopup,
+    getRewardPopupInterceptorState,
+    startRewardPopupInterceptor,
+    stopRewardPopupInterceptor,
+    setRewardPopupInterceptorEnabled,
     snapshotNode,
     diffSnapshots,
     tapAndSnapshot,
@@ -11133,6 +11583,11 @@
       'gameCtl.detectActiveOverlays(opts)',
       'gameCtl.dismissActiveOverlay(opts)',
       'gameCtl.dismissRewardPopup(opts)',
+      'gameCtl.hideGetRewardsPopup(opts)',
+      'gameCtl.getRewardPopupInterceptorState()',
+      'gameCtl.startRewardPopupInterceptor(opts)',
+      'gameCtl.stopRewardPopupInterceptor()',
+      'gameCtl.setRewardPopupInterceptorEnabled(enabled, opts)',
       'gameCtl.dumpFarmNodes(keyword, opts)',
       'gameCtl.dumpFarmCandidates(keyword, opts)',
       'gameCtl.getFarmOwnership()',

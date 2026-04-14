@@ -1575,6 +1575,173 @@ function createGateway(config) {
     );
   }
 
+  function isRewardPopupInterceptorStateEnabled(state) {
+    if (!state || typeof state !== "object") return false;
+    if (typeof state.enabled === "boolean") return state.enabled;
+    return !!(state.running || state.busy);
+  }
+
+  function applyRewardPopupInterceptorUiState(status, state) {
+    status.available = true;
+    status.enabled = isRewardPopupInterceptorStateEnabled(state);
+    status.state = state || null;
+    status.reason = null;
+    status.note = null;
+    status.error = null;
+    status.missingMethods = [];
+    return status;
+  }
+
+  async function inspectRewardPopupInterceptorForUi(options = {}) {
+    const timeoutMs = Math.max(1000, Number(options.timeoutMs) || 4000);
+    const resolvedTarget = resolveAutomationRuntimeTarget();
+    const bundle = resolvedTarget === "qq_ws" ? getQqBundleSnapshot() : null;
+    const sync = bundle && bundle.sync ? bundle.sync : null;
+    const payload = {
+      resolvedTarget,
+      available: false,
+      enabled: false,
+      state: null,
+      runtimeReady: false,
+      scriptHash: sync && typeof sync.runtimeScriptHash === "string" ? sync.runtimeScriptHash : null,
+      sync,
+      reason: null,
+      note: null,
+      error: null,
+      missingMethods: [],
+    };
+
+    if (resolvedTarget !== "qq_ws") {
+      payload.reason = "runtime_not_qq_ws";
+      payload.note = "仅 QQ WS 运行时支持奖励弹窗拦截开关";
+      return payload;
+    }
+
+    if (!qqWsSession.isReady()) {
+      payload.reason = "runtime_not_ready";
+      payload.note = "QQ 宿主尚未就绪";
+      return payload;
+    }
+
+    if (sync && sync.runtimeScriptHash && sync.expectedScriptHash && !sync.inSync) {
+      payload.reason = "runtime_not_synced";
+      payload.note = "当前 QQ runtime 尚未加载最新补丁";
+      return payload;
+    }
+
+    let describe = null;
+    try {
+      describe = await qqWsSession.call("host.describe", [], { timeoutMs });
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      payload.reason = "runtime_describe_failed";
+      payload.error = err.message;
+      payload.note = "读取 QQ 宿主方法列表失败";
+      return payload;
+    }
+
+    payload.runtimeReady = !!(describe && describe.gameCtlReady);
+    if (describe && typeof describe.scriptHash === "string") {
+      payload.scriptHash = describe.scriptHash;
+    }
+
+    const availableMethods = Array.isArray(describe && describe.availableMethods) ? describe.availableMethods : [];
+    const requiredMethods = [
+      "gameCtl.getRewardPopupInterceptorState",
+      "gameCtl.setRewardPopupInterceptorEnabled",
+    ];
+    payload.missingMethods = requiredMethods.filter((name) => !availableMethods.includes(name));
+
+    if (!payload.runtimeReady) {
+      payload.reason = "runtime_not_ready";
+      payload.note = "gameCtl 尚未 ready";
+      return payload;
+    }
+
+    if (payload.missingMethods.length > 0) {
+      payload.reason = "runtime_missing_method";
+      payload.note = "当前 runtime 未暴露奖励弹窗拦截方法";
+      return payload;
+    }
+
+    try {
+      const state = await qqWsSession.call(
+        "gameCtl.getRewardPopupInterceptorState",
+        [{ silent: true }],
+        { timeoutMs },
+      );
+      return applyRewardPopupInterceptorUiState(payload, state);
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      payload.reason = "runtime_state_failed";
+      payload.error = err.message;
+      payload.note = "读取奖励弹窗拦截状态失败";
+      return payload;
+    }
+  }
+
+  async function setRewardPopupInterceptorForUi(input = {}) {
+    const timeoutMs = Math.max(1000, Number(input.timeoutMs) || 6000);
+    const status = await inspectRewardPopupInterceptorForUi({ timeoutMs });
+    if (status.resolvedTarget !== "qq_ws") {
+      throw new Error("奖励弹窗拦截仅支持 qq_ws 运行时");
+    }
+    if (status.reason === "runtime_not_ready") {
+      throw new Error("QQ 宿主尚未就绪");
+    }
+    if (status.reason === "runtime_not_synced") {
+      const sync = status.sync || {};
+      throw new Error(
+        `qq_ws runtime scriptHash mismatch: runtime=${sync.runtimeScriptHash || "unknown"} expected=${sync.expectedScriptHash || "unknown"}`,
+      );
+    }
+    if (status.reason === "runtime_missing_method") {
+      throw new Error("当前 runtime 缺少奖励弹窗拦截方法，请重新加载最新补丁");
+    }
+    if (!status.available && status.error) {
+      throw new Error(status.error);
+    }
+
+    const opts = { silent: true };
+    if (input.intervalMs != null) {
+      opts.intervalMs = Math.max(120, Number(input.intervalMs) || 0);
+    }
+    if (input.waitAfter != null) {
+      opts.waitAfter = Math.max(0, Number(input.waitAfter) || 0);
+    }
+
+    const state = await qqWsSession.call(
+      "gameCtl.setRewardPopupInterceptorEnabled",
+      [input.enabled === true, opts],
+      { timeoutMs },
+    );
+
+    if (input.enabled === false) {
+      const settleDelayMs = Math.max(
+        320,
+        (Number(state && state.intervalMs) || 180) + (Number(state && state.waitAfter) || 0) + 180,
+      );
+      let next = applyRewardPopupInterceptorUiState({ ...status }, state);
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await sleep(settleDelayMs);
+        next = await inspectRewardPopupInterceptorForUi({ timeoutMs });
+        if (!next.available || !next.enabled) {
+          return next;
+        }
+        const stoppedState = await qqWsSession.call(
+          "gameCtl.setRewardPopupInterceptorEnabled",
+          [false, opts],
+          { timeoutMs },
+        );
+        next = applyRewardPopupInterceptorUiState({ ...next }, stoppedState);
+      }
+      return next;
+    }
+
+    const next = await inspectRewardPopupInterceptorForUi({ timeoutMs });
+    return applyRewardPopupInterceptorUiState(next, state);
+  }
+
   const playerProfileCache = {
     clientKey: null,
     lockedGid: null,
@@ -2382,6 +2549,38 @@ function createGateway(config) {
       } catch (e) {
         const err = e instanceof Error ? e : new Error(String(e));
         res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+      return;
+    }
+
+    if (req.method === "GET" && urlPath === "/api/reward-popup-interceptor") {
+      try {
+        const data = await inspectRewardPopupInterceptorForUi({
+          timeoutMs: parsedUrl.searchParams.get("timeoutMs"),
+        });
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, data }));
+      } catch (e) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+      return;
+    }
+
+    if (req.method === "POST" && urlPath === "/api/reward-popup-interceptor") {
+      try {
+        const parsed = await readJsonBody(req);
+        if (typeof parsed.enabled !== "boolean") {
+          throw new Error("enabled must be boolean");
+        }
+        const data = await setRewardPopupInterceptorForUi(parsed);
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, data }));
+      } catch (e) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: false, error: err.message }));
       }
       return;
