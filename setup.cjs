@@ -15,6 +15,7 @@ const { execSync, spawn } = require('child_process');
 const fs   = require('fs');
 const path = require('path');
 const http = require('http');
+const https = require('https');
 
 // ── 解析运行时参数 ────────────────────────────────────────────────
 const args        = process.argv.slice(2);
@@ -24,6 +25,7 @@ const runtimeFlag = isQQ ? '--qq' : '--wx';
 const runtimeName = isQQ ? 'QQ' : '微信';
 
 const ROOT = __dirname;
+const SHOW_REGISTRY_BENCH = /^(1|true|yes|on)$/i.test(String(process.env.FARM_SHOW_REGISTRY_BENCH || ''));
 
 // ── 工具函数 ──────────────────────────────────────────────────────
 function log(msg)  { console.log(`  [setup] ${msg}`); }
@@ -36,15 +38,85 @@ function run(cmd, opts = {}) {
   execSync(cmd, { stdio: 'inherit', cwd: ROOT, ...opts });
 }
 
+function tryRun(cmd, opts = {}) {
+  try {
+    run(cmd, opts);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function normalizeRegistry(url) {
+  return url.endsWith('/') ? url : `${url}/`;
+}
+
+function probeRegistry(registry, timeoutMs = 2500) {
+  return new Promise(resolve => {
+    const startedAt = Date.now();
+    const url = `${normalizeRegistry(registry)}-/ping`;
+    const req = https.get(url, res => {
+      res.resume();
+      const elapsed = Date.now() - startedAt;
+      if (res.statusCode && res.statusCode >= 200 && res.statusCode < 500) {
+        resolve({ registry, ok: true, elapsed });
+      } else {
+        resolve({ registry, ok: false, elapsed: Number.MAX_SAFE_INTEGER });
+      }
+    });
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error('timeout'));
+    });
+    req.on('error', () => {
+      resolve({ registry, ok: false, elapsed: Number.MAX_SAFE_INTEGER });
+    });
+  });
+}
+
+async function pickFastestRegistry() {
+  const registries = [
+    'https://registry.npmmirror.com/',
+    'https://mirrors.cloud.tencent.com/npm/',
+    'https://registry.npmjs.org/',
+  ];
+  log('检测 npm 镜像速度（自动选择最快可用源）...');
+  const results = await Promise.all(registries.map(r => probeRegistry(r)));
+  if (SHOW_REGISTRY_BENCH) {
+    results.forEach(item => {
+      const cost = item.elapsed === Number.MAX_SAFE_INTEGER ? 'timeout' : `${item.elapsed}ms`;
+      const state = item.ok ? 'ok' : 'fail';
+      log(`镜像测速: ${item.registry} -> ${state}, ${cost}`);
+    });
+  }
+  const available = results.filter(r => r.ok).sort((a, b) => a.elapsed - b.elapsed);
+  if (available.length === 0) {
+    warn('未检测到可用镜像，回退使用官方源');
+    return 'https://registry.npmjs.org/';
+  }
+  const picked = available[0];
+  ok(`已选择镜像: ${picked.registry} (${picked.elapsed}ms)`);
+  return picked.registry;
+}
+
+async function installDepsWithBestRegistry() {
+  const registry = await pickFastestRegistry();
+  const installCmd = `npm install --registry=${registry}`;
+  if (tryRun(installCmd)) {
+    ok('依赖安装完成');
+    return;
+  }
+  warn('当前镜像安装失败，尝试使用官方源重试...');
+  run('npm install --registry=https://registry.npmjs.org/');
+  ok('依赖安装完成');
+}
+
 // ── 1. 检测 node_modules ──────────────────────────────────────────
-function checkNodeModules() {
+async function checkNodeModules() {
   const nmPath = path.join(ROOT, 'node_modules');
-  const pkgLock = path.join(ROOT, 'package-lock.json');
 
   if (!fs.existsSync(nmPath)) {
     log('node_modules 不存在，开始安装依赖...');
-    run('npm install');
-    ok('依赖安装完成');
+    await installDepsWithBestRegistry();
     return;
   }
 
@@ -54,8 +126,7 @@ function checkNodeModules() {
 
   if (missing.length > 0) {
     log(`缺少依赖: ${missing.join(', ')}，重新安装...`);
-    run('npm install');
-    ok('依赖安装完成');
+    await installDepsWithBestRegistry();
     return;
   }
 
@@ -141,7 +212,7 @@ async function main() {
   console.log(`  ▶ 路线：${runtimeName}`);
   console.log();
 
-  checkNodeModules();
+  await checkNodeModules();
   checkFrida();
 
   const port = getGatewayPort();
