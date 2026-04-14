@@ -26,6 +26,59 @@ function trimToString(value) {
   return String(value == null ? "" : value).trim();
 }
 
+function resolveExplicitGameJsPath(rawTargetPath) {
+  const absoluteTarget = path.resolve(rawTargetPath);
+  if (!fs.existsSync(absoluteTarget)) {
+    return {
+      ok: false,
+      targetPath: null,
+      targetError: `目标路径不存在: ${absoluteTarget}`,
+    };
+  }
+
+  let stat;
+  try {
+    stat = fs.statSync(absoluteTarget);
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    return {
+      ok: false,
+      targetPath: null,
+      targetError: `读取目标路径失败: ${absoluteTarget} (${err.message})`,
+    };
+  }
+
+  if (stat.isDirectory()) {
+    const gameJsPath = path.join(absoluteTarget, "game.js");
+    if (!fs.existsSync(gameJsPath)) {
+      return {
+        ok: false,
+        targetPath: null,
+        targetError: `目标目录缺少 game.js: ${absoluteTarget}`,
+      };
+    }
+    return {
+      ok: true,
+      targetPath: gameJsPath,
+      targetError: null,
+    };
+  }
+
+  if (!stat.isFile()) {
+    return {
+      ok: false,
+      targetPath: null,
+      targetError: `目标路径不是文件: ${absoluteTarget}`,
+    };
+  }
+
+  return {
+    ok: true,
+    targetPath: absoluteTarget,
+    targetError: null,
+  };
+}
+
 function normalizeWsUrl(rawUrl, config) {
   if (rawUrl) return String(rawUrl).trim();
   return `ws://127.0.0.1:${config.gatewayPort}${config.qqWsPath}`;
@@ -68,22 +121,23 @@ function resolveQqPatchTarget(options = {}) {
   const resolvedAppId = explicitAppId || (!resolvedTargetPath ? fallbackAppId : "");
 
   if (resolvedTargetPath) {
-    const absoluteTarget = path.resolve(resolvedTargetPath);
-    if (!fs.existsSync(absoluteTarget)) {
+    const resolvedTarget = resolveExplicitGameJsPath(resolvedTargetPath);
+    if (!resolvedTarget.ok) {
       return {
         appId: resolvedAppId || null,
         targetMode: "explicit",
         targetPath: null,
+        targetPaths: [],
         targetResolvable: false,
-        targetError: `目标 game.js 不存在: ${absoluteTarget}`,
+        targetError: resolvedTarget.targetError,
         discovery: null,
       };
     }
     return {
       appId: resolvedAppId || null,
       targetMode: "explicit",
-      targetPath: absoluteTarget,
-      targetPaths: [absoluteTarget],
+      targetPath: resolvedTarget.targetPath,
+      targetPaths: [resolvedTarget.targetPath],
       targetResolvable: true,
       targetError: null,
       discovery: null,
@@ -96,13 +150,14 @@ function resolveQqPatchTarget(options = {}) {
         appId: resolvedAppId,
         srcRoot: srcRoot || undefined,
       });
+      const targetPaths = Array.isArray(discovery.candidateGameJsPaths) && discovery.candidateGameJsPaths.length > 0
+        ? [...new Set(discovery.candidateGameJsPaths.map((item) => path.resolve(item)))]
+        : [path.resolve(discovery.selected.gameJsPath)];
       return {
         appId: discovery.appId,
         targetMode: "auto",
-        targetPath: discovery.selected.gameJsPath,
-        targetPaths: Array.isArray(discovery.candidateGameJsPaths) && discovery.candidateGameJsPaths.length > 0
-          ? [...new Set(discovery.candidateGameJsPaths.map((item) => path.resolve(item)))]
-          : [path.resolve(discovery.selected.gameJsPath)],
+        targetPath: targetPaths[0] || discovery.selected.gameJsPath,
+        targetPaths,
         targetResolvable: true,
         targetError: null,
         discovery,
@@ -113,6 +168,7 @@ function resolveQqPatchTarget(options = {}) {
         appId: resolvedAppId,
         targetMode: "auto",
         targetPath: null,
+        targetPaths: [],
         targetResolvable: false,
         targetError: err.message,
         discovery: null,
@@ -124,6 +180,7 @@ function resolveQqPatchTarget(options = {}) {
     appId: null,
     targetMode: null,
     targetPath: null,
+    targetPaths: [],
     targetResolvable: false,
     targetError: null,
     discovery: null,
@@ -249,6 +306,7 @@ ${hostSource}
       outputPath: state.outputPath,
       targetConfigured: state.targetConfigured,
       targetPath: state.targetPath,
+      targetPaths: state.targetPaths,
       targetMode: state.targetMode,
       canPatch: state.canPatch,
       targetError: state.targetError,
@@ -264,32 +322,40 @@ function ensureParentDir(targetPath) {
 
 function inspectPatchedQqGameFile(targetPath, expectedScriptHash) {
   const absoluteTarget = path.resolve(String(targetPath || ""));
+  const inspection = {
+    targetPath: absoluteTarget || null,
+    exists: false,
+    hasMarkers: false,
+    scriptHash: null,
+    inSync: false,
+    error: null,
+  };
+
   if (!absoluteTarget || !fs.existsSync(absoluteTarget)) {
-    return {
-      targetPath: absoluteTarget || null,
-      exists: false,
-      hasMarkers: false,
-      scriptHash: null,
-      inSync: false,
-    };
+    return inspection;
   }
 
-  const original = fs.readFileSync(absoluteTarget, "utf8");
+  inspection.exists = true;
+
+  let original = "";
+  try {
+    original = fs.readFileSync(absoluteTarget, "utf8");
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    inspection.error = err.message;
+    return inspection;
+  }
+
   const startIndex = original.indexOf(MARKER_START);
   const endIndex = original.indexOf(MARKER_END);
-  const hasMarkers = startIndex >= 0 && endIndex >= 0 && endIndex > startIndex;
-  const injectedText = hasMarkers
+  inspection.hasMarkers = startIndex >= 0 && endIndex >= 0 && endIndex > startIndex;
+  const injectedText = inspection.hasMarkers
     ? original.slice(startIndex, endIndex + MARKER_END.length)
     : "";
-  const scriptHash = extractBundleScriptHash(injectedText || original);
+  inspection.scriptHash = extractBundleScriptHash(injectedText || original);
   const expected = expectedScriptHash ? String(expectedScriptHash).toLowerCase() : null;
-  return {
-    targetPath: absoluteTarget,
-    exists: true,
-    hasMarkers,
-    scriptHash,
-    inSync: !!(expected && scriptHash && scriptHash === expected),
-  };
+  inspection.inSync = !!(expected && inspection.scriptHash && inspection.scriptHash === expected);
+  return inspection;
 }
 
 function patchQqGameFile(targetPath, bundleText, options = {}) {
@@ -326,16 +392,14 @@ function patchQqGameFile(targetPath, bundleText, options = {}) {
 }
 
 function patchQqGameFiles(targetPaths, bundleText, options = {}) {
-  const seen = new Set();
   const list = Array.isArray(targetPaths) ? targetPaths : [targetPaths];
-  const results = [];
-  for (const item of list) {
-    const absoluteTarget = path.resolve(String(item || ""));
-    if (!absoluteTarget || seen.has(absoluteTarget)) continue;
-    seen.add(absoluteTarget);
-    results.push(patchQqGameFile(absoluteTarget, bundleText, options));
-  }
-  return results;
+  const uniqueTargets = [...new Set(
+    list
+      .map((item) => trimToString(item))
+      .filter(Boolean)
+      .map((item) => path.resolve(item)),
+  )];
+  return uniqueTargets.map((targetPath) => patchQqGameFile(targetPath, bundleText, options));
 }
 
 module.exports = {
@@ -347,7 +411,7 @@ module.exports = {
   ensureParentDir,
   getQqBundleState,
   inspectPatchedQqGameFile,
-  patchQqGameFiles,
   patchQqGameFile,
+  patchQqGameFiles,
   resolveQqPatchTarget,
 };

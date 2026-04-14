@@ -1534,13 +1534,15 @@ function createGateway(config) {
     const target = resolveQqPatchTarget({
       targetPath: options.targetPath,
       appId: options.appId,
-      fallbackTargetPath: snapshot && snapshot.targetPath ? snapshot.targetPath : config.qqGameJsPath,
+      fallbackTargetPath: config.qqGameJsPath,
       fallbackAppId: snapshot && snapshot.appId ? snapshot.appId : config.qqAppId,
       srcRoot: options.srcRoot || config.qqMiniappSrcRoot,
     });
     const targetPaths = Array.isArray(target && target.targetPaths) && target.targetPaths.length > 0
       ? target.targetPaths
-      : (target && target.targetPath ? [target.targetPath] : []);
+      : (Array.isArray(snapshot && snapshot.targetPaths) && snapshot.targetPaths.length > 0
+          ? snapshot.targetPaths
+          : (target && target.targetPath ? [target.targetPath] : []));
     const targetInspections = targetPaths
       .slice(0, 8)
       .map((targetPath) => inspectPatchedQqGameFile(targetPath, snapshot && snapshot.scriptHash))
