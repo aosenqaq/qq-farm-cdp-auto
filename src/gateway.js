@@ -70,6 +70,10 @@ const {
   MessagePushManager,
   normalizeMessagePushConfig,
 } = require("./message-push-manager");
+const {
+  getBackpackSeedPlantability,
+  pickBackpackSeed,
+} = require("./backpack-seed-priority");
 
 const WS_PATH = "/ws";
 const REQUIRED_GAME_CTL_METHODS = [...QQ_RPC_GAME_CTL_METHODS];
@@ -79,6 +83,7 @@ const DEFAULT_PLANT_IMAGE_PATH = path.join(__dirname, "..", DEFAULT_PLANT_IMAGE_
 const UI_SCHEDULER_TASK_IDS = ["health", "autoFarm", "rewardPopup", "lands", "account"];
 const WAREHOUSE_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const WAREHOUSE_AUTO_SELL_DEFAULT_HOURS = 12;
+const WAREHOUSE_SELL_CATEGORY_OPTIONS = ["fruit", "seed", "tool", "material"];
 const WAREHOUSE_AUTOFARM_WAIT_TIMEOUT_MS = 90 * 1000;
 const WAREHOUSE_BUSY_RETRY_DELAY_MS = 20 * 1000;
 
@@ -183,10 +188,13 @@ const FARM_CONFIG_DEFAULT = {
   autoFarmPlantPrimaryMode: "none",
   autoFarmPlantSecondaryMode: "none",
   autoFarmPlantSeedId: 0,
+  autoFarmPlantBackpackSeedPriority: [],
+  autoFarmPlantBackpackForcePriority: false,
   autoFarmPlantMaxLevel: 0,
   autoFarmFertilizerEnabled: false,
   autoFarmFertilizerMode: "none",
   autoFarmFertilizerMultiSeason: false,
+  autoFarmFertilizerHarvestLinkEnabled: false,
   autoFarmFertilizerLandTypes: ["gold", "black", "red", "normal"],
   autoFarmFertilizerRushThresholdSec: 300,
   autoFarmFriendQuietHoursEnabled: false,
@@ -198,6 +206,7 @@ const FARM_CONFIG_DEFAULT = {
   autoFarmFriendStealPlantBlacklistStrategy: 1,
   autoFarmFriendStealPlantBlacklist: [],
   autoWarehouseSellIntervalHour: WAREHOUSE_AUTO_SELL_DEFAULT_HOURS,
+  autoWarehouseSellCategories: [...WAREHOUSE_SELL_CATEGORY_OPTIONS],
   uiSchedulerEnabled: true,
   uiSchedulerMinGapMs: 350,
   uiSchedulerTasks: buildDefaultUiSchedulerTasks(),
@@ -401,8 +410,11 @@ async function loadFarmConfig() {
       merged.autoFarmFriendStealPlantBlacklistStrategy = [1, 2].includes(Number(merged.autoFarmFriendStealPlantBlacklistStrategy))
         ? Number(merged.autoFarmFriendStealPlantBlacklistStrategy)
         : 1;
+      merged.autoFarmPlantBackpackSeedPriority = normalizePositiveIntList(merged.autoFarmPlantBackpackSeedPriority);
+      merged.autoFarmPlantBackpackForcePriority = merged.autoFarmPlantBackpackForcePriority === true;
       merged.autoFarmFriendStealPlantBlacklist = normalizePositiveIntList(merged.autoFarmFriendStealPlantBlacklist);
       merged.autoWarehouseSellIntervalHour = normalizeAutoWarehouseSellIntervalHour(merged.autoWarehouseSellIntervalHour);
+      merged.autoWarehouseSellCategories = normalizeWarehouseSellCategoryList(merged.autoWarehouseSellCategories);
       Object.assign(merged, normalizeUiSchedulerConfig(merged));
       merged.messagePush = normalizeMessagePushConfig(parsed.messagePush);
       return merged;
@@ -432,8 +444,11 @@ async function saveFarmConfig(partial) {
   next.autoFarmFriendStealPlantBlacklistStrategy = [1, 2].includes(Number(next.autoFarmFriendStealPlantBlacklistStrategy))
     ? Number(next.autoFarmFriendStealPlantBlacklistStrategy)
     : 1;
+  next.autoFarmPlantBackpackSeedPriority = normalizePositiveIntList(next.autoFarmPlantBackpackSeedPriority);
+  next.autoFarmPlantBackpackForcePriority = next.autoFarmPlantBackpackForcePriority === true;
   next.autoFarmFriendStealPlantBlacklist = normalizePositiveIntList(next.autoFarmFriendStealPlantBlacklist);
   next.autoWarehouseSellIntervalHour = normalizeAutoWarehouseSellIntervalHour(next.autoWarehouseSellIntervalHour);
+  next.autoWarehouseSellCategories = normalizeWarehouseSellCategoryList(next.autoWarehouseSellCategories);
   Object.assign(next, normalizeUiSchedulerConfig(next));
   next.messagePush = normalizeMessagePushConfig(next.messagePush);
   const dir = path.join(__dirname, "..", "data");
@@ -547,6 +562,22 @@ function normalizeAutoWarehouseSellIntervalHour(value) {
   const num = Number(value);
   if (!Number.isFinite(num)) return WAREHOUSE_AUTO_SELL_DEFAULT_HOURS;
   return Math.min(24 * 30, Math.max(0, Math.round(num)));
+}
+
+function normalizeWarehouseSellCategoryList(value) {
+  if (value == null) return [...WAREHOUSE_SELL_CATEGORY_OPTIONS];
+  const source = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(/[\r\n,，;；]+/)
+      : [];
+  const next = [];
+  for (const item of source) {
+    const text = String(item == null ? "" : item).trim().toLowerCase();
+    if (!text || !WAREHOUSE_SELL_CATEGORY_OPTIONS.includes(text) || next.includes(text)) continue;
+    next.push(text);
+  }
+  return next;
 }
 
 function buildFriendSearchFields(friend) {
@@ -1207,6 +1238,85 @@ function buildAvailableSeedMaps(seedList, shopList) {
     if (seedId > 0) shopBySeedId.set(seedId, item);
   });
   return { backpackBySeedId, shopBySeedId };
+}
+
+function buildBackpackSeedPriorityOptions(seedList, opts) {
+  const options = opts && typeof opts === "object" ? opts : {};
+  const forcePriority = options.forcePriority === true;
+  const selectedSeedIds = normalizePositiveIntList(options.selectedSeedIds);
+  const runtimeSeedList = (Array.isArray(seedList) ? seedList : []).filter((item) => (Number(item && item.count) || 0) > 0);
+  const optionList = runtimeSeedList.map((item) => {
+    const seedId = Number(item && (item.seedId || item.itemId || item.id)) || 0;
+    const analytics = getPlantAnalyticsList().find((row) => Number(row && row.seedId) === seedId) || null;
+    const row = analytics ? enrichAnalyticsRowForUi(analytics) : null;
+    const plantability = getBackpackSeedPlantability(seedId);
+    return {
+      seedId,
+      name: row && row.name
+        ? row.name
+        : (item && item.name ? String(item.name).replace(/种子$/, "") : `seed=${seedId}`),
+      level: row && row.level != null ? Number(row.level) : (Number(item && item.level) || null),
+      backpackCount: Number(item && item.count) || 0,
+      inBackpack: true,
+      growTimeStr: row && row.growTimeStr ? row.growTimeStr : null,
+      imageUrl: row && row.imageUrl ? row.imageUrl : buildPlantImageUrl(seedId),
+      plantable: plantability.plantable === true,
+      plantableReason: plantability.reason,
+      plantableMessage: plantability.message || "",
+      retainedByForcePriority: false,
+    };
+  }).filter((item) => item.seedId > 0);
+
+  if (forcePriority) {
+    const currentSeedIdSet = new Set(optionList.map((item) => item.seedId));
+    selectedSeedIds.forEach((seedId) => {
+      if (currentSeedIdSet.has(seedId)) return;
+      const analytics = getPlantAnalyticsList().find((row) => Number(row && row.seedId) === seedId) || null;
+      const row = analytics ? enrichAnalyticsRowForUi(analytics) : null;
+      const plant = getPlantBySeedId(seedId);
+      const plantability = getBackpackSeedPlantability(seedId);
+      optionList.push({
+        seedId,
+        name: row && row.name
+          ? row.name
+          : (plant && plant.name ? String(plant.name) : `seed=${seedId}`),
+        level: row && row.level != null ? Number(row.level) : (Number(plant && plant.land_level_need) || null),
+        backpackCount: 0,
+        inBackpack: false,
+        growTimeStr: row && row.growTimeStr ? row.growTimeStr : (plant ? formatGrowTime(getPlantGrowTimeSec(plant)) : null),
+        imageUrl: row && row.imageUrl ? row.imageUrl : buildPlantImageUrl(seedId),
+        plantable: plantability.plantable === true,
+        plantableReason: plantability.reason,
+        plantableMessage: plantability.message || "",
+        retainedByForcePriority: true,
+      });
+    });
+  }
+
+  return optionList.sort((a, b) => {
+    if (!!a.retainedByForcePriority !== !!b.retainedByForcePriority) return a.retainedByForcePriority ? -1 : 1;
+    if (a.plantable !== b.plantable) return a.plantable ? -1 : 1;
+    const levelDiff = (Number(a.level) || 0) - (Number(b.level) || 0);
+    if (levelDiff !== 0) return levelDiff;
+    return String(a.name || "").localeCompare(String(b.name || ""), "zh-CN");
+  });
+}
+
+function pickBackpackPreview(seedList, prioritySeedIds) {
+  const picked = pickBackpackSeed(seedList, prioritySeedIds);
+  if (!picked || !picked.item || !picked.seedId) return null;
+  const analytics = getPlantAnalyticsList().find((item) => Number(item && item.seedId) === picked.seedId) || null;
+  const enrichedPlant = enrichAnalyticsRowForUi(analytics || {
+    seedId: picked.seedId,
+    name: picked.item && picked.item.name ? String(picked.item.name).replace(/种子$/, "") : `seed=${picked.seedId}`,
+    level: Number(picked.item && picked.item.level) || null,
+  });
+  return {
+    seedId: picked.seedId,
+    item: picked.item,
+    plant: enrichedPlant,
+    usedPriority: picked.usedPriority === true,
+  };
 }
 
 async function fetchSeedAvailabilityForUi({ ensureAutomationSession, ensureAutomationGameCtl, callAutomationGameCtl }) {
@@ -2140,6 +2250,7 @@ function createGateway(config) {
       : FARM_CONFIG_DEFAULT;
     return {
       autoWarehouseSellIntervalHour: normalizeAutoWarehouseSellIntervalHour(configData.autoWarehouseSellIntervalHour),
+      autoWarehouseSellCategories: normalizeWarehouseSellCategoryList(configData.autoWarehouseSellCategories),
     };
   }
 
@@ -2163,6 +2274,8 @@ function createGateway(config) {
       refreshCount: warehouseRuntimeState.refreshCount,
       busy: warehouseRuntimeState.busy,
       autoSellIntervalHour: cfg.autoWarehouseSellIntervalHour,
+      autoSellCategories: cfg.autoWarehouseSellCategories,
+      autoSellCategoryLabels: cfg.autoWarehouseSellCategories.map((category) => getWarehouseCategoryLabel(category)),
       nextAutoSellAt: getWarehouseNextAutoSellAt(cfg),
       lastSellAt: warehouseRuntimeState.lastSellAt || null,
       lastSellReason: warehouseRuntimeState.lastSellReason || null,
@@ -2181,6 +2294,8 @@ function createGateway(config) {
       capabilities: buildWarehouseCapabilities({
         ...(base.capabilities || {}),
         autoSellIntervalHour: scheduler.autoSellIntervalHour,
+        autoSellCategories: scheduler.autoSellCategories,
+        autoSellCategoryLabels: scheduler.autoSellCategoryLabels,
       }),
       scheduler,
       cache: {
@@ -2307,9 +2422,15 @@ function createGateway(config) {
     };
   }
 
-  function getWarehouseAutoSellCandidateIds(items) {
+  function getWarehouseAutoSellCandidateIds(items, configData) {
+    const cfg = configData || getWarehouseConfig();
+    const allowedCategories = new Set(normalizeWarehouseSellCategoryList(cfg.autoWarehouseSellCategories));
     return (Array.isArray(items) ? items : [])
-      .filter((item) => item && item.canSell !== false && item.canEstimateSale === true && (Number(item.estimatedSellPrice) || 0) > 0)
+      .filter((item) => item
+        && item.canSell !== false
+        && item.canEstimateSale === true
+        && (Number(item.estimatedSellPrice) || 0) > 0
+        && allowedCategories.has(String(item.category || "").trim().toLowerCase()))
       .map((item) => Number(item.itemId) || 0)
       .filter((itemId, index, list) => itemId > 0 && list.indexOf(itemId) === index);
   }
@@ -2427,7 +2548,7 @@ function createGateway(config) {
       });
 
       const cfg = getWarehouseConfig();
-      const candidateIds = getWarehouseAutoSellCandidateIds(normalizedItems);
+      const candidateIds = getWarehouseAutoSellCandidateIds(normalizedItems, cfg);
       if (allowAutoSell && candidateIds.length > 0 && isWarehouseAutoSellDue(cfg)) {
         try {
           autoSellResult = await executeWarehouseSellOperation({
@@ -3463,6 +3584,39 @@ function createGateway(config) {
       return;
     }
 
+    if (req.method === "GET" && urlPath === "/api/backpack-seed-options") {
+      try {
+        const selectedSeedIds = normalizePositiveIntList(parsedUrl.searchParams.get("selected"));
+        const forcePriority = parsedUrl.searchParams.get("forcePriority") === "1";
+        let availability = { seedList: [], shopList: [] };
+        try {
+          availability = await fetchSeedAvailabilityForUi({
+            ensureAutomationSession,
+            ensureAutomationGameCtl,
+            callAutomationGameCtl,
+          });
+        } catch (_) {
+          availability = { seedList: [], shopList: [] };
+        }
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({
+          ok: true,
+          data: {
+            updatedAt: Date.now(),
+            list: buildBackpackSeedPriorityOptions(availability.seedList, {
+              selectedSeedIds,
+              forcePriority,
+            }),
+          },
+        }));
+      } catch (e) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+      return;
+    }
+
     if (req.method === "GET" && urlPath === "/api/steal-crop-options") {
       try {
         const configData = await loadFarmConfig();
@@ -3566,6 +3720,7 @@ function createGateway(config) {
       try {
         const mode = normalizePreviewMode(parsedUrl.searchParams.get("mode"));
         const specifiedSeedId = Number(parsedUrl.searchParams.get("seedId") || "0");
+        const backpackPrioritySeedIds = normalizePositiveIntList(parsedUrl.searchParams.get("backpackPriority"));
         const requestedMaxLevel = Number(parsedUrl.searchParams.get("maxLevel") || "0");
         let profile = null;
         try {
@@ -3614,11 +3769,33 @@ function createGateway(config) {
         if (mode === "none") {
           response.preview = { mode, label: "当前不会自动种植", reason: "disabled" };
         } else if (mode === "backpack_first") {
-          response.preview = {
-            mode,
-            label: "背包优先，具体作物取决于背包库存",
-            reason: "backpack_first",
-          };
+          const backpackPreview = availability
+            ? pickBackpackPreview(availability.seedList, backpackPrioritySeedIds)
+            : null;
+          if (backpackPreview && backpackPreview.plant) {
+            response.preview = {
+              mode,
+              seedId: backpackPreview.seedId,
+              plant: backpackPreview.plant,
+              source: "backpack",
+              usedBackpackPriority: backpackPreview.usedPriority,
+              label: backpackPreview.usedPriority
+                ? `背包优先，按自定义顺序当前会先种 ${backpackPreview.plant.name}`
+                : `背包优先，当前会先种 ${backpackPreview.plant.name}`,
+              reason: "resolved",
+            };
+          } else {
+            const blockedBackpackSeeds = availability
+              ? buildBackpackSeedPriorityOptions(availability.seedList).filter((item) => item && item.plantable === false)
+              : [];
+            response.preview = {
+              mode,
+              label: blockedBackpackSeeds.length > 0
+                ? ("背包优先，但当前背包只有不可种植种子：" + blockedBackpackSeeds.map((item) => item.name || `seed=${item.seedId}`).join("、"))
+                : "背包优先，但当前背包没有可用种子",
+              reason: "no_seeds_in_backpack",
+            };
+          }
         } else if (mode === "specified_seed") {
           const plant = getPlantBySeedId(specifiedSeedId);
           response.preview = {

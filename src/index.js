@@ -6,8 +6,10 @@ require("../apply-cli-overrides.cjs").applyCliOverrides(process.argv.slice(2));
 const path = require("node:path");
 const { getConfig } = require("./config");
 const { createGateway, WS_PATH } = require("./gateway");
+const { installLogFileMirror } = require("./log-file-mirror");
 
 const config = getConfig();
+installLogFileMirror(path.join(__dirname, ".."));
 
 let wmpfBridgeOk = false;
 if (config.runtimeTarget !== "qq_ws" && config.useWmpfCdpBridge !== false) {

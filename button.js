@@ -9682,7 +9682,9 @@
     } else if (mode === 'backpack_first') {
       // 优先使用背包中已有的种子（按等级降序选第一个有库存的）
       const seeds = getAllSeeds(3);
-      const available = seeds.filter(function (s) { return s.count > 0; });
+      const available = seeds.filter(function (s) {
+        return s.count > 0 && Number(s && s.id) !== 20046;
+      });
       if (available.length > 0) {
         seedId = available[0].id;
         seedName = available[0].name || 'unknown';

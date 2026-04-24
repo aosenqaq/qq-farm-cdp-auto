@@ -16,6 +16,11 @@ const {
   writePlayerProfileCache,
 } = require("./player-profile-cache");
 const { getPlantById, getPlantByFruitId, getPlantBySeedId } = require("./game-config");
+const {
+  buildBackpackSeedPlan,
+  normalizePositiveIntList: normalizeBackpackPrioritySeedIds,
+  pickBackpackSeed,
+} = require("./backpack-seed-priority");
 
 function wait(ms) {
   const delayMs = Math.max(0, Number(ms) || 0);
@@ -485,6 +490,10 @@ function getAutoFertilizerRushThresholdSec(opts) {
   return Math.floor(threshold);
 }
 
+function shouldRunAutoFertilizerHarvestLink(opts) {
+  return !!(shouldRunAutoFertilizer(opts) && opts && opts.autoFertilizerHarvestLinkEnabled === true);
+}
+
 function getAutoFertilizerStateStore(opts) {
   const target = opts && typeof opts === "object" ? opts : {};
   if (!target.autoFertilizerState || typeof target.autoFertilizerState !== "object") {
@@ -747,6 +756,74 @@ function canUseAutoFertilizerOnGrid(grid, opts) {
 function isAutoFertilizerRushReady(grid, rushThresholdSec) {
   const matureInSec = Number(grid && grid.matureInSec);
   return Number.isFinite(matureInSec) && matureInSec > 5 && matureInSec <= rushThresholdSec;
+}
+
+function collectAutoFertilizerRushWatchEntries(status, opts) {
+  const rushThresholdSec = getAutoFertilizerRushThresholdSec(opts);
+  const grids = Array.isArray(status && status.grids) ? status.grids : [];
+  const seen = new Set();
+  const entries = [];
+
+  for (let i = 0; i < grids.length; i += 1) {
+    const grid = grids[i];
+    const landId = Number(grid && grid.landId);
+    if (!Number.isFinite(landId) || landId <= 0 || seen.has(landId)) continue;
+    if (!canUseAutoFertilizerOnGrid(grid, opts)) continue;
+    if (!isAutoFertilizerRushReady(grid, rushThresholdSec)) continue;
+    seen.add(landId);
+    entries.push({
+      landId,
+      matureInSec: Number.isFinite(Number(grid && grid.matureInSec))
+        ? Math.max(0, Math.floor(Number(grid.matureInSec)))
+        : null,
+    });
+  }
+
+  entries.sort((a, b) => a.landId - b.landId);
+  return entries;
+}
+
+function buildAutoFertilizerHarvestLinkWatch(status, opts) {
+  const rushReadyEntries = collectAutoFertilizerRushWatchEntries(status, opts);
+  const matureLandIds = collectMatureLandIds(status).sort((a, b) => a - b);
+  const activeLandIdSet = new Set();
+  rushReadyEntries.forEach((entry) => activeLandIdSet.add(entry.landId));
+  matureLandIds.forEach((landId) => activeLandIdSet.add(landId));
+  const activeLandIds = Array.from(activeLandIdSet).sort((a, b) => a - b);
+
+  return {
+    rushReadyEntries,
+    rushReadyLandIds: rushReadyEntries.map((entry) => entry.landId),
+    rushReadyCount: rushReadyEntries.length,
+    matureLandIds,
+    matureCount: matureLandIds.length,
+    activeLandIds,
+    activeCount: activeLandIds.length,
+    signature: JSON.stringify({
+      rushReady: rushReadyEntries.map((entry) => [entry.landId, entry.matureInSec]),
+      mature: matureLandIds,
+    }),
+  };
+}
+
+function countCollectProgressFromTasks(tasks) {
+  const src = tasks && typeof tasks === "object" ? tasks : {};
+  const actions = Array.isArray(src.actions) ? src.actions : [];
+  let total = 0;
+  actions.forEach((action) => {
+    if (!action || action.ok !== true || action.key !== "collect") return;
+    total += normalizeDelta(action.beforeCount, action.afterCount);
+  });
+  const specialCollect = src.specialCollect && typeof src.specialCollect === "object"
+    ? src.specialCollect
+    : null;
+  if (specialCollect && specialCollect.ok === true) {
+    const successCount = Array.isArray(specialCollect.actions)
+      ? specialCollect.actions.filter((item) => item && item.ok === true).length
+      : Math.max(0, (Number(specialCollect.candidateCount) || 0) - (Number(specialCollect.remainingCount) || 0));
+    total += successCount;
+  }
+  return total;
 }
 
 function isAutoFertilizerFollowUpSeason(grid) {
@@ -1312,39 +1389,191 @@ async function runOwnFarmFertilizerTasks(session, callGameCtl, opts) {
     };
   }
   const rushThresholdSec = getAutoFertilizerRushThresholdSec(opts);
-  const phasesToRun = mode === "both"
-    ? ["season_start", "rush_organic"]
-    : mode === "normal"
-      ? ["rush_normal"]
-      : ["rush_organic"];
+  const seasonStartPhases = mode === "both" ? ["season_start"] : [];
+  const rushPhases = mode === "normal"
+    ? ["rush_normal"]
+    : mode === "both" || mode === "organic"
+      ? ["rush_organic"]
+      : [];
   const phaseResults = [];
   const actions = [];
   const actionWaitMs = Math.max(0, Number(opts && opts.actionWaitMs) || 0);
   let before = null;
   let after = null;
   let abortedReason = null;
+  let linkedHarvest = null;
 
   getAutoFertilizerStateStore(opts);
 
-  for (let i = 0; i < phasesToRun.length; i += 1) {
-    throwIfAutomationStopped(opts);
-    const phase = phasesToRun[i];
-    if (i > 0 && actionWaitMs > 0) {
-      await waitWithAutomationControl(actionWaitMs, opts);
+  async function runPhaseSequence(phases) {
+    const source = Array.isArray(phases) ? phases : [];
+    const executed = [];
+    for (let i = 0; i < source.length; i += 1) {
+      throwIfAutomationStopped(opts);
+      const phase = source[i];
+      if (i > 0 && actionWaitMs > 0) {
+        await waitWithAutomationControl(actionWaitMs, opts);
+      }
+      const phaseResult = await runOwnFarmFertilizerPhase(session, callGameCtl, opts, phase);
+      executed.push(phaseResult);
+      phaseResults.push(phaseResult);
+      if (!before) before = phaseResult.before || null;
+      after = phaseResult.after || after;
+      if (Array.isArray(phaseResult.actions)) {
+        actions.push(...phaseResult.actions);
+      }
+      if (phaseResult.aborted) {
+        abortedReason = phaseResult.abortedReason || phase;
+        break;
+      }
+      if (opts && opts.stopOnError && phaseResult.failureCount > 0) {
+        break;
+      }
     }
-    const phaseResult = await runOwnFarmFertilizerPhase(session, callGameCtl, opts, phase);
-    phaseResults.push(phaseResult);
-    if (!before) before = phaseResult.before || null;
-    after = phaseResult.after || after;
-    if (Array.isArray(phaseResult.actions)) {
-      actions.push(...phaseResult.actions);
+    return executed;
+  }
+
+  async function runAutoFertilizerHarvestLinkLoop(phases) {
+    const phaseList = Array.isArray(phases) ? phases.filter(Boolean) : [];
+    if (!shouldRunAutoFertilizerHarvestLink(opts) || phaseList.length === 0) {
+      return {
+        enabled: shouldRunAutoFertilizerHarvestLink(opts),
+        ok: true,
+        skipped: true,
+        reason: "disabled",
+        roundCount: 0,
+        collectCount: 0,
+        rounds: [],
+      };
     }
-    if (phaseResult.aborted) {
-      abortedReason = phaseResult.abortedReason || phase;
-      break;
+
+    const rounds = [];
+    const linkWaitMs = Math.max(500, actionWaitMs || 0);
+    const maxRounds = Math.max(6, Math.ceil(((rushThresholdSec + 15) * 1000) / linkWaitMs));
+    let lastWatchSignature = null;
+    let stagnantRounds = 0;
+    let collectCount = 0;
+    let stopReason = "no_rush_targets";
+    let ok = true;
+
+    for (let roundIndex = 0; roundIndex < maxRounds; roundIndex += 1) {
+      throwIfAutomationStopped(opts);
+      const statusBefore = await getFarmStatus(session, callGameCtl, {
+        includeGrids: true,
+        includeLandIds: true,
+      });
+      const watchBefore = buildAutoFertilizerHarvestLinkWatch(statusBefore, opts);
+      if (watchBefore.activeCount <= 0) {
+        stopReason = rounds.length > 0 ? "watch_cleared" : "no_rush_targets";
+        break;
+      }
+
+      const beforePhaseCount = phaseResults.length;
+      await runPhaseSequence(phaseList);
+      const roundPhaseResults = phaseResults.slice(beforePhaseCount);
+      const roundPhaseSuccessCount = roundPhaseResults.reduce((sum, item) => sum + (Number(item && item.successCount) || 0), 0);
+      const roundPhaseFailureCount = roundPhaseResults.reduce((sum, item) => sum + (Number(item && item.failureCount) || 0), 0);
+
+      if (abortedReason) {
+        ok = false;
+        stopReason = abortedReason;
+        break;
+      }
+
+      const harvestResult = await runCurrentFarmOneClickTasks(session, callGameCtl, {
+        includeCollect: true,
+        includeWater: false,
+        includeEraseGrass: false,
+        includeKillBug: false,
+        includeSpecialCollect: true,
+        actionWaitMs,
+        stopOnError: !!(opts && opts.stopOnError),
+        runContext: opts && opts.runContext,
+      });
+      const roundCollectCount = countCollectProgressFromTasks(harvestResult);
+      collectCount += roundCollectCount;
+
+      const statusAfter = await getFarmStatus(session, callGameCtl, {
+        includeGrids: true,
+        includeLandIds: true,
+      });
+      const watchAfter = buildAutoFertilizerHarvestLinkWatch(statusAfter, opts);
+      const progressMade = roundPhaseSuccessCount > 0
+        || roundCollectCount > 0
+        || watchAfter.signature !== watchBefore.signature;
+
+      rounds.push({
+        index: roundIndex + 1,
+        watchBefore,
+        watchAfter,
+        phaseSuccessCount: roundPhaseSuccessCount,
+        phaseFailureCount: roundPhaseFailureCount,
+        collectCount: roundCollectCount,
+        progressMade,
+        harvestResult,
+      });
+
+      after = summarizeFarmStatus(statusAfter) || after;
+
+      if (opts && opts.stopOnError) {
+        const harvestFailed = Array.isArray(harvestResult && harvestResult.actions)
+          && harvestResult.actions.some((item) => item && item.ok === false);
+        const specialCollectFailed = !!(harvestResult && harvestResult.specialCollect && harvestResult.specialCollect.ok === false);
+        if (harvestFailed || specialCollectFailed || roundPhaseFailureCount > 0) {
+          ok = false;
+          stopReason = "stop_on_error";
+          break;
+        }
+      }
+
+      if (watchAfter.activeCount <= 0) {
+        stopReason = "watch_cleared";
+        break;
+      }
+
+      if (watchAfter.signature === lastWatchSignature && !progressMade) {
+        stagnantRounds += 1;
+      } else if (!progressMade) {
+        stagnantRounds = 1;
+      } else {
+        stagnantRounds = 0;
+      }
+      lastWatchSignature = watchAfter.signature;
+
+      if (stagnantRounds >= 3) {
+        ok = false;
+        stopReason = "no_progress";
+        break;
+      }
+
+      await waitWithAutomationControl(linkWaitMs, opts);
     }
-    if (opts && opts.stopOnError && phaseResult.failureCount > 0) {
-      break;
+
+    if (rounds.length >= maxRounds && stopReason === "no_rush_targets") {
+      ok = false;
+      stopReason = "round_limit_reached";
+    }
+
+    return {
+      enabled: true,
+      ok,
+      skipped: false,
+      reason: stopReason,
+      roundCount: rounds.length,
+      collectCount,
+      rounds,
+    };
+  }
+
+  await runPhaseSequence(seasonStartPhases);
+  if (!abortedReason) {
+    if (shouldRunAutoFertilizerHarvestLink(opts) && rushPhases.length > 0) {
+      linkedHarvest = await runAutoFertilizerHarvestLinkLoop(rushPhases);
+      if (linkedHarvest && linkedHarvest.ok === false && !abortedReason) {
+        abortedReason = linkedHarvest.reason || abortedReason;
+      }
+    } else {
+      await runPhaseSequence(rushPhases);
     }
   }
 
@@ -1352,9 +1581,11 @@ async function runOwnFarmFertilizerTasks(session, callGameCtl, opts) {
   const successCount = actions.filter((item) => item && item.ok === true && item.skipped !== true).length;
   const failureCount = actions.filter((item) => item && item.ok === false).length;
   const skippedCount = actions.filter((item) => item && item.skipped === true).length;
+  const batchUnavailableReason = phaseResults.find((item) => item && item.batchUnavailableReason)?.batchUnavailableReason || null;
+  const runtimeScriptHash = phaseResults.find((item) => item && item.runtimeScriptHash)?.runtimeScriptHash || null;
 
   return {
-    ok: failureCount === 0,
+    ok: failureCount === 0 && !(linkedHarvest && linkedHarvest.ok === false),
     skipped: false,
     requestedMode: mode,
     executedMode: mode,
@@ -1367,6 +1598,9 @@ async function runOwnFarmFertilizerTasks(session, callGameCtl, opts) {
     after,
     aborted: !!abortedReason,
     reason: abortedReason,
+    batchUnavailableReason,
+    runtimeScriptHash,
+    linkedHarvest,
     phases: phaseResults,
     actions,
   };
@@ -1755,6 +1989,7 @@ async function resolvePlantStrategy(session, callGameCtl, opts) {
   const { backpackBySeedId, shopBySeedId } = normalizeSeedCandidates(seedList, shopList);
   const effectiveLevel = await resolveEffectivePlantLevel(session, callGameCtl, opts);
   const analyticsList = filterAnalyticsByLevel(getPlantAnalyticsList(), effectiveLevel.maxLevel);
+  const backpackPrioritySeedIds = normalizeBackpackPrioritySeedIds(opts && opts.autoPlantBackpackSeedPriority);
   const decisionLog = [];
 
   function buildDecisionEntry(mode, phase, extra) {
@@ -1770,10 +2005,11 @@ async function resolvePlantStrategy(session, callGameCtl, opts) {
   async function resolvePlantStrategyForMode(mode) {
     if (!mode || mode === "none") return null;
     if (mode === "backpack_first") {
-      const availableBackpackSeed = (Array.isArray(seedList) ? seedList : [])
-        .find((item) => (Number(item && item.count) || 0) > 0);
-      if (availableBackpackSeed) {
-        const selectedSeedId = Number(availableBackpackSeed.seedId || availableBackpackSeed.itemId) || 0;
+      const backpackPlan = buildBackpackSeedPlan(seedList, backpackPrioritySeedIds);
+      const selectedBackpackSeed = pickBackpackSeed(seedList, backpackPrioritySeedIds);
+      if (selectedBackpackSeed && selectedBackpackSeed.item) {
+        const availableBackpackSeed = selectedBackpackSeed.item;
+        const selectedSeedId = Number(availableBackpackSeed.seedId || availableBackpackSeed.itemId || availableBackpackSeed.id) || 0;
         const selectedPlant = selectedSeedId > 0 ? getPlantBySeedId(selectedSeedId) : null;
         const selectedStrategy = selectedSeedId > 0
           ? (analyticsList.find((item) => Number(item && item.seedId) === selectedSeedId) || null)
@@ -1786,6 +2022,16 @@ async function resolvePlantStrategy(session, callGameCtl, opts) {
           seedName: availableBackpackSeed.name || (selectedPlant && selectedPlant.name) || null,
           plantId: selectedPlant ? (Number(selectedPlant.id) || null) : null,
           strategy: selectedStrategy,
+          backpackPlan: backpackPlan.map((entry) => {
+            const planPlant = getPlantBySeedId(entry.seedId);
+            return {
+              seedId: entry.seedId,
+              seedName: entry.item && entry.item.name ? entry.item.name : (planPlant && planPlant.name) || null,
+              plantId: planPlant ? (Number(planPlant.id) || null) : null,
+              backpackCount: Number(entry.count) || 0,
+              usedPriority: entry.usedPriority === true,
+            };
+          }),
           decision: buildDecisionEntry(mode, "resolved", {
             reason: "backpack_seed_available",
             selectedSeedId: selectedSeedId || null,
@@ -1793,6 +2039,8 @@ async function resolvePlantStrategy(session, callGameCtl, opts) {
             selectedPlantId: selectedPlant ? (Number(selectedPlant.id) || null) : null,
             source: "backpack",
             backpackCount: Number(availableBackpackSeed.count) || 0,
+            usedBackpackPriority: selectedBackpackSeed.usedPriority === true,
+            backpackPrioritySeedIds,
           }),
         };
       }
@@ -1803,6 +2051,7 @@ async function resolvePlantStrategy(session, callGameCtl, opts) {
         decision: buildDecisionEntry(mode, "failed", {
           reason: "no_seeds_in_backpack",
           source: "backpack",
+          backpackPrioritySeedIds,
         }),
       };
     }
@@ -2082,6 +2331,65 @@ async function resolvePlantStrategy(session, callGameCtl, opts) {
   };
 }
 
+async function executeBackpackPriorityPlantPlan(session, callGameCtl, resolved, opts) {
+  const requestedLandIds = Array.isArray(opts && opts.emptyLandIds) ? [...opts.emptyLandIds] : [];
+  let remainingLandIds = requestedLandIds;
+  if (remainingLandIds.length === 0) {
+    const status = await getFarmStatus(session, callGameCtl, {
+      includeGrids: true,
+      includeLandIds: false,
+    });
+    remainingLandIds = status && status.farmType === "own" ? collectEmptyLandIds(status) : [];
+  }
+  const targetLandIdSet = new Set(remainingLandIds);
+  const plan = Array.isArray(resolved && resolved.backpackPlan) ? resolved.backpackPlan : [];
+  const attempts = [];
+  let lastResult = null;
+  let plantedAny = false;
+
+  for (let i = 0; i < plan.length; i += 1) {
+    const candidate = plan[i];
+    if (!candidate || !candidate.seedId || remainingLandIds.length <= 0) continue;
+    const result = await autoPlant(session, callGameCtl, resolved.mode || "backpack_first", {
+      ...resolved,
+      seedId: candidate.seedId,
+      seedName: candidate.seedName,
+      plantId: candidate.plantId,
+      emptyLandIds: [...remainingLandIds],
+    });
+    lastResult = result;
+    plantedAny = plantedAny || !!(result && result.ok);
+    attempts.push({
+      seedId: candidate.seedId,
+      seedName: candidate.seedName || null,
+      backpackCount: candidate.backpackCount || 0,
+      usedPriority: candidate.usedPriority === true,
+      result,
+    });
+    const status = await getFarmStatus(session, callGameCtl, {
+      includeGrids: true,
+      includeLandIds: false,
+    });
+    const emptyLandIds = status && status.farmType === "own" ? collectEmptyLandIds(status) : [];
+    remainingLandIds = emptyLandIds.filter((landId) => targetLandIdSet.has(landId));
+  }
+
+  const primaryAttempt = attempts.find((item) => item && item.result && item.result.ok) || attempts[0] || null;
+  const primaryResult = primaryAttempt && primaryAttempt.result ? primaryAttempt.result : lastResult;
+  return {
+    ...(primaryResult && typeof primaryResult === "object" ? primaryResult : {}),
+    ok: plantedAny,
+    mode: resolved && resolved.mode ? resolved.mode : "backpack_first",
+    action: plantedAny ? "planted" : "plant_failed",
+    seedId: primaryAttempt ? primaryAttempt.seedId : (primaryResult && primaryResult.seedId) || null,
+    seedName: primaryAttempt ? (primaryAttempt.seedName || null) : (primaryResult && primaryResult.seedName) || null,
+    seedSource: plantedAny ? "backpack_priority_plan" : ((primaryResult && primaryResult.seedSource) || "unavailable"),
+    backpackPlanAttempts: attempts,
+    remainingEmptyLandIds: remainingLandIds,
+    plannedSeedCount: plan.length,
+  };
+}
+
 async function runOwnFarmAutomation(session, callGameCtl, opts) {
   const enterWaitMs = Math.max(0, Number(opts && opts.enterWaitMs) || 0);
   const actionWaitMs = Math.max(0, Number(opts && opts.actionWaitMs) || 0);
@@ -2183,6 +2491,23 @@ async function runOwnFarmAutomation(session, callGameCtl, opts) {
         const resolved = await resolvePlantStrategy(session, callGameCtl, resolveOpts);
         if (resolved && resolved.ok === false) {
           plantResult = resolved;
+        } else if (resolved && Array.isArray(resolved.backpackPlan) && resolved.backpackPlan.length > 0) {
+          plantResult = await executeBackpackPriorityPlantPlan(session, callGameCtl, resolved, {
+            ...(opts || {}),
+            emptyLandIds: Array.isArray(emptyLandIds) ? [...emptyLandIds] : undefined,
+          });
+          if (plantResult && typeof plantResult === "object") {
+            plantResult.strategy = resolved.strategy || null;
+            plantResult.primaryMode = resolved.primaryMode || plantPrimaryMode;
+            plantResult.secondaryMode = resolved.secondaryMode || plantSecondaryMode;
+            plantResult.resolvedMode = resolved.resolvedMode || resolved.mode || plantPrimaryMode;
+            plantResult.fallbackUsed = !!resolved.fallbackUsed;
+            plantResult.strategyAttempts = Array.isArray(resolved.attempts) ? resolved.attempts : [];
+            plantResult.decisionLog = Array.isArray(resolved.decisionLog) ? resolved.decisionLog : [];
+            plantResult.executionSummary = plantResult.ok
+              ? `背包优先已按优先级顺序完成种植，尝试了 ${plantResult.plannedSeedCount || 0} 个种子`
+              : "背包优先执行失败";
+          }
         } else if (resolved && resolved.seedId) {
           plantResult = await autoPlant(session, callGameCtl, resolved.mode || plantPrimaryMode, {
             ...resolved,
@@ -2795,6 +3120,10 @@ async function runAutoFarmCycle({ session, callGameCtl, options }) {
       autoPlantPrimaryMode: opts.autoPlantPrimaryMode || opts.autoPlantMode || "none",
       autoPlantSecondaryMode: opts.autoPlantSecondaryMode || "none",
       autoPlantSeedId: opts.autoPlantSeedId,
+      autoPlantBackpackSeedPriority: Array.isArray(opts.autoPlantBackpackSeedPriority)
+        ? [...opts.autoPlantBackpackSeedPriority]
+        : [],
+      autoPlantBackpackForcePriority: opts.autoPlantBackpackForcePriority === true,
       autoPlantMaxLevel: opts.autoPlantMaxLevel,
       autoFertilizerEnabled: opts.autoFertilizerEnabled === true,
       autoFertilizerMode: opts.autoFertilizerMode || "none",

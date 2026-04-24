@@ -932,6 +932,166 @@
       padding-right: 4px;
     }
 
+    .backpack-priority-box {
+      margin-top: 12px;
+      padding: 14px;
+      border-radius: var(--radius-lg);
+      border: 1px solid rgba(109, 81, 50, 0.14);
+      background: rgba(255, 251, 244, 0.92);
+    }
+
+    .backpack-priority-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .backpack-priority-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .backpack-priority-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 28px;
+      padding: 0 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(109, 81, 50, 0.14);
+      background: rgba(255, 255, 255, 0.92);
+      color: var(--accent-strong);
+      font-size: 0.8rem;
+      font-weight: 700;
+    }
+
+    .backpack-priority-panel {
+      margin-top: 12px;
+    }
+
+    .backpack-priority-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .backpack-priority-toolbar .field {
+      flex: 1 1 260px;
+      max-width: none;
+    }
+
+    .backpack-priority-grid {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      max-height: 380px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .backpack-seed-card {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 12px;
+      border-radius: var(--radius-md);
+      border: 1px solid rgba(109, 81, 50, 0.12);
+      background: rgba(255, 253, 248, 0.98);
+    }
+
+    .backpack-seed-card.selected {
+      border-color: rgba(79, 138, 60, 0.3);
+      box-shadow: 0 10px 24px rgba(79, 138, 60, 0.08);
+    }
+
+    .backpack-seed-main {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+    }
+
+    .backpack-seed-main input {
+      width: 16px;
+      height: 16px;
+      margin: 2px 0 0;
+      accent-color: var(--accent);
+      flex: 0 0 auto;
+    }
+
+    .backpack-seed-meta {
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+
+    .backpack-seed-name {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 6px;
+    }
+
+    .backpack-seed-name strong {
+      font-size: 0.94rem;
+      color: var(--accent-strong);
+    }
+
+    .backpack-seed-desc {
+      color: var(--muted);
+      font-size: 0.82rem;
+      line-height: 1.5;
+    }
+
+    .backpack-seed-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 24px;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: rgba(109, 81, 50, 0.08);
+      color: var(--text);
+      font-size: 0.76rem;
+      white-space: nowrap;
+    }
+
+    .backpack-seed-badge.available {
+      background: rgba(79, 138, 60, 0.12);
+      color: var(--accent-strong);
+    }
+
+    .backpack-seed-badge.priority {
+      background: rgba(243, 198, 35, 0.16);
+      color: #8a6508;
+      font-weight: 700;
+    }
+
+    .backpack-seed-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .backpack-seed-move {
+      display: inline-flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .ghost.tiny {
+      min-height: 30px;
+      padding: 0 10px;
+      font-size: 0.78rem;
+    }
+
     .steal-crop-card {
       display: flex;
       align-items: center;
@@ -1769,9 +1929,62 @@
 
     .warehouse-toolbar {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 220px 220px;
+      grid-template-columns: minmax(0, 1fr) 220px;
       gap: 12px;
       margin-top: 12px;
+    }
+
+    .warehouse-sale-settings {
+      display: grid;
+      gap: 14px;
+      margin-top: 12px;
+    }
+
+    .warehouse-sale-types {
+      display: grid;
+      gap: 10px;
+    }
+
+    .warehouse-sale-summary {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.88rem;
+      line-height: 1.7;
+    }
+
+    .warehouse-sale-interval-field {
+      max-width: 280px;
+    }
+
+    .warehouse-sell-category-row {
+      gap: 10px;
+      min-height: 0;
+      padding: 0;
+    }
+
+    .warehouse-sell-category-option {
+      min-height: 44px;
+      padding: 0 14px;
+      border-radius: 14px;
+      border: 1px solid rgba(109, 81, 50, 0.12);
+      background: rgba(255, 253, 248, 0.9);
+      transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
+    }
+
+    .warehouse-sell-category-option:hover {
+      border-color: rgba(79, 138, 60, 0.24);
+      background: rgba(250, 248, 242, 0.98);
+    }
+
+    .warehouse-sell-category-option.is-active {
+      border-color: rgba(79, 138, 60, 0.28);
+      background: rgba(79, 138, 60, 0.1);
+      color: var(--accent-strong);
+    }
+
+    .warehouse-sell-category-option input {
+      width: 15px;
+      height: 15px;
     }
 
     .warehouse-grid {
@@ -2968,6 +3181,39 @@
                 <input type="number" min="0" id="autoPlantMaxLevel" placeholder="0 表示跟随当前等级" />
               </label>
             </div>
+            <div class="backpack-priority-box" id="backpackPriorityBox" hidden>
+              <div class="backpack-priority-head">
+                <div>
+                  <div class="backpack-priority-title">
+                    <h3>背包种子优先级</h3>
+                    <span class="backpack-priority-count" id="txtBackpackPriorityCount">0 项已设优先</span>
+                  </div>
+                  <p class="hint">勾选后会按从上到下优先尝试；未勾选的种子仍按默认背包顺序补位，不会直接失效。</p>
+                  <label class="check-card inline" style="margin-top:10px">
+                    <input type="checkbox" id="autoPlantBackpackForcePriority" />
+                    <div>
+                      <strong>强制保留优先级</strong>
+                      <small>开启后，即便背包暂时没有该种子，也会保留在优先级列表中；关闭后刷新背包会移除这些无库存优先级。</small>
+                    </div>
+                  </label>
+                </div>
+                <button type="button" class="ghost" id="btnBackpackPriorityToggle">收起排序</button>
+              </div>
+              <p class="summary-note" id="txtBackpackPrioritySummary">等待背包种子列表加载。</p>
+              <div class="backpack-priority-panel" id="backpackPriorityPanel">
+                <div class="backpack-priority-toolbar">
+                  <input type="text" id="autoPlantBackpackSeedSearch" class="field" placeholder="搜索种子名称 / Seed ID" />
+                  <div class="action-row" style="margin-top:0">
+                    <button type="button" class="ghost tiny" id="btnBackpackPriorityRefresh">刷新背包</button>
+                    <button type="button" class="ghost tiny" id="btnBackpackPrioritySelectVisible">勾选当前筛选结果</button>
+                    <button type="button" class="ghost tiny" id="btnBackpackPriorityClear">清空优先级</button>
+                  </div>
+                </div>
+                <div id="backpackSeedPriorityList" class="backpack-priority-grid">
+                  <div class="friend-empty">等待背包种子列表。</div>
+                </div>
+              </div>
+            </div>
             <p class="summary-note" id="txtPlantStrategyPreview">等待策略分析，稍后会显示当前会自动种植的作物。</p>
           </div>
 
@@ -2992,6 +3238,13 @@
                 <div>
                   <strong>多季补肥</strong>
                   <small>多季作物从第 2 季开始也会在临近成熟时按当前策略补肥。</small>
+                </div>
+              </label>
+              <label class="check-card">
+                <input type="checkbox" id="autoFertilizerHarvestLinkEnabled" />
+                <div>
+                  <strong>催熟联动收获</strong>
+                  <small>开启后，进入催熟阈值的作物会在自动施肥阶段持续尝试自动收获，直到当前没有可催熟或已成熟待收地块。</small>
                 </div>
               </label>
             </div>
@@ -3216,11 +3469,8 @@
         <article class="card span-full">
           <div class="card-head">
             <div>
-              <h2>筛选与能力说明</h2>
+              <h2>浏览筛选与能力说明</h2>
               <p class="hint" id="txtWarehouseCapability">等待仓库能力检测</p>
-            </div>
-            <div class="action-row">
-              <button type="button" class="action secondary" id="btnWarehouseBatchSell">出售当前多选</button>
             </div>
           </div>
           <div class="warehouse-toolbar">
@@ -3242,15 +3492,36 @@
                 <option value="other">其他</option>
               </select>
             </label>
-            <label class="field-block">
+          </div>
+          <div class="friend-pill-row" id="warehouseCategorySummary">
+            <span class="friend-empty">等待仓库分类...</span>
+          </div>
+        </article>
+
+        <article class="card span-full">
+          <div class="card-head">
+            <div>
+              <h2>出售设置</h2>
+              <p class="hint">只保留实际可出售的类别：果实、种子、道具、材料；即使当前仓库没有该类物品，这里也会保留选项。</p>
+            </div>
+            <div class="action-row">
+              <button type="button" class="ghost" id="btnWarehouseSelectAutoSell">按出售范围选中</button>
+              <button type="button" class="action secondary" id="btnWarehouseBatchSell">出售当前多选</button>
+            </div>
+          </div>
+          <div class="warehouse-sale-settings">
+            <div class="warehouse-sale-types">
+              <p class="warehouse-sale-summary" id="txtWarehouseSellCategorySummary">等待仓库出售设置...</p>
+              <div class="tag-row warehouse-sell-category-row" id="warehouseSellCategoryOptions">
+                <span class="friend-empty">等待可出售类别...</span>
+              </div>
+            </div>
+            <label class="field-block warehouse-sale-interval-field">
               <span>自动出售(小时)</span>
               <input type="number" id="iptWarehouseAutoSellInterval" min="0" max="720" step="1" placeholder="默认 12，填 0 表示每次刷新都卖" />
             </label>
           </div>
           <p class="summary-note" id="txtWarehouseSchedule">后台每 5 分钟会隐藏打开一次仓库并刷新缓存；自动出售默认每 12 小时检查一次，填 0 表示每次后台刷新后都出售可预估物品。</p>
-          <div class="friend-pill-row" id="warehouseCategorySummary">
-            <span class="friend-empty">等待仓库分类...</span>
-          </div>
         </article>
 
         <article class="card span-full">
@@ -3424,7 +3695,7 @@
               <input type="checkbox" id="messagePushAbnormalEnabled" />
               <div>
                 <strong>异常通知</strong>
-                <small>日志中出现连接超时并累计达到阈值后，推送到指定渠道。</small>
+                <small>日志或自动农场事件出现连接、运行时、调度等异常时，推送到已勾选渠道；超时类会按阈值累计触发。</small>
               </div>
             </label>
             <label class="check-card">
@@ -3438,7 +3709,7 @@
               <input type="checkbox" id="messagePushLogMonitorEnabled" />
               <div>
                 <strong>日志监控</strong>
-                <small>持续读取 `logs/gateway-out.log` 与 `logs/gateway-err.log`，用于识别连接超时异常。</small>
+                <small>持续读取 `logs/gateway-out.log` 与 `logs/gateway-err.log`，用于识别连接、运行时、协议、调度等异常日志。</small>
               </div>
             </label>
           </div>
@@ -3720,9 +3991,11 @@
       const btnWarehouseRefresh = document.getElementById("btnWarehouseRefresh");
       const btnWarehouseSelectAll = document.getElementById("btnWarehouseSelectAll");
       const btnWarehouseClearSelection = document.getElementById("btnWarehouseClearSelection");
+      const btnWarehouseSelectAutoSell = document.getElementById("btnWarehouseSelectAutoSell");
       const btnWarehouseBatchSell = document.getElementById("btnWarehouseBatchSell");
       const txtWarehouseSummary = document.getElementById("txtWarehouseSummary");
       const txtWarehouseCapability = document.getElementById("txtWarehouseCapability");
+      const txtWarehouseSellCategorySummary = document.getElementById("txtWarehouseSellCategorySummary");
       const txtWarehouseSchedule = document.getElementById("txtWarehouseSchedule");
       const txtWarehouseSelectionSummary = document.getElementById("txtWarehouseSelectionSummary");
       const warehouseMetricDistinct = document.getElementById("warehouseMetricDistinct");
@@ -3731,6 +4004,7 @@
       const warehouseMetricSelected = document.getElementById("warehouseMetricSelected");
       const warehouseMetricEstimate = document.getElementById("warehouseMetricEstimate");
       const warehouseCategorySummary = document.getElementById("warehouseCategorySummary");
+      const warehouseSellCategoryOptions = document.getElementById("warehouseSellCategoryOptions");
       const iptWarehouseSearch = document.getElementById("iptWarehouseSearch");
       const selWarehouseFilter = document.getElementById("selWarehouseFilter");
       const iptWarehouseAutoSellInterval = document.getElementById("iptWarehouseAutoSellInterval");
@@ -3799,9 +4073,21 @@
       const autoPlantSeedId = document.getElementById("autoPlantSeedId");
       const autoPlantMaxLevel = document.getElementById("autoPlantMaxLevel");
       const plantStrategyFields = document.getElementById("plantStrategyFields");
+      const backpackPriorityBox = document.getElementById("backpackPriorityBox");
+      const btnBackpackPriorityToggle = document.getElementById("btnBackpackPriorityToggle");
+      const txtBackpackPriorityCount = document.getElementById("txtBackpackPriorityCount");
+      const txtBackpackPrioritySummary = document.getElementById("txtBackpackPrioritySummary");
+      const backpackPriorityPanel = document.getElementById("backpackPriorityPanel");
+      const autoPlantBackpackForcePriority = document.getElementById("autoPlantBackpackForcePriority");
+      const autoPlantBackpackSeedSearch = document.getElementById("autoPlantBackpackSeedSearch");
+      const btnBackpackPriorityRefresh = document.getElementById("btnBackpackPriorityRefresh");
+      const btnBackpackPrioritySelectVisible = document.getElementById("btnBackpackPrioritySelectVisible");
+      const btnBackpackPriorityClear = document.getElementById("btnBackpackPriorityClear");
+      const backpackSeedPriorityList = document.getElementById("backpackSeedPriorityList");
       const autoFertilizerEnabled = document.getElementById("autoFertilizerEnabled");
       const autoFertilizerMode = document.getElementById("autoFertilizerMode");
       const autoFertilizerMultiSeason = document.getElementById("autoFertilizerMultiSeason");
+      const autoFertilizerHarvestLinkEnabled = document.getElementById("autoFertilizerHarvestLinkEnabled");
       const autoFertilizerRushThresholdSec = document.getElementById("autoFertilizerRushThresholdSec");
       const autoFertilizerLandTypes = document.getElementById("autoFertilizerLandTypes");
       const fertilizerStrategyFields = document.getElementById("fertilizerStrategyFields");
@@ -3892,6 +4178,11 @@
       let todayStatsPresetDays = 1;
       let todayStatsSelectedDateKey = "";
       let plantStrategyPreviewState = null;
+      let backpackSeedOptionList = [];
+      let backpackSeedPrioritySelection = [];
+      let backpackSeedOptionsLoaded = false;
+      let backpackPriorityCollapsed = false;
+      let backpackPriorityTouched = false;
       let debugMode = false;
       let qqLookupState = null;
       let analyticsState = null;
@@ -3899,6 +4190,8 @@
       let warehouseState = null;
       let warehouseSelection = new Set();
       let warehouseActionBusy = false;
+      const WAREHOUSE_SELL_CATEGORY_OPTIONS = ["fruit", "seed", "tool", "material"];
+      let warehouseAutoSellCategorySelection = WAREHOUSE_SELL_CATEGORY_OPTIONS.slice();
       let landSnapshotMap = {};
       let landMaturityEvents = [];
       const landFertilizePending = new Set();
@@ -5449,6 +5742,31 @@
         sendFriendAction(action, { target: friendTarget });
       }
 
+      function getWarehouseCategoryLabelText(category) {
+        var key = String(category == null ? "" : category).trim().toLowerCase();
+        if (key === "fruit") return "果实";
+        if (key === "seed") return "种子";
+        if (key === "currency") return "货币";
+        if (key === "fertilizer") return "化肥";
+        if (key === "tool") return "道具";
+        if (key === "material") return "材料";
+        return "其他";
+      }
+
+      function normalizeWarehouseSellCategoryList(input) {
+        if (input == null) return WAREHOUSE_SELL_CATEGORY_OPTIONS.slice();
+        var source = Array.isArray(input)
+          ? input
+          : String(input).split(/[\r\n,，;；]+/);
+        var next = [];
+        source.forEach(function (item) {
+          var value = String(item == null ? "" : item).trim().toLowerCase();
+          if (!value || WAREHOUSE_SELL_CATEGORY_OPTIONS.indexOf(value) < 0 || next.indexOf(value) >= 0) return;
+          next.push(value);
+        });
+        return next;
+      }
+
       function applyAutoFarmConfigToForm(cfg) {
         cfg = cfg || {};
         autoOwnEnabled.checked = !!cfg.autoFarmOwnEnabled;
@@ -5479,10 +5797,17 @@
         autoPlantPrimaryMode.value = cfg.autoFarmPlantPrimaryMode || cfg.autoFarmPlantMode || "none";
         autoPlantSecondaryMode.value = cfg.autoFarmPlantSecondaryMode || "none";
         autoPlantSeedId.value = cfg.autoFarmPlantSeedId != null ? String(cfg.autoFarmPlantSeedId) : "0";
+        backpackSeedPrioritySelection = normalizeBackpackPrioritySelection(cfg.autoFarmPlantBackpackSeedPriority);
+        if (autoPlantBackpackForcePriority) {
+          autoPlantBackpackForcePriority.checked = !!cfg.autoFarmPlantBackpackForcePriority;
+        }
         autoPlantMaxLevel.value = cfg.autoFarmPlantMaxLevel != null ? cfg.autoFarmPlantMaxLevel : 0;
         autoFertilizerEnabled.checked = !!cfg.autoFarmFertilizerEnabled;
         autoFertilizerMode.value = cfg.autoFarmFertilizerMode || "none";
         autoFertilizerMultiSeason.checked = !!cfg.autoFarmFertilizerMultiSeason;
+        if (autoFertilizerHarvestLinkEnabled) {
+          autoFertilizerHarvestLinkEnabled.checked = !!cfg.autoFarmFertilizerHarvestLinkEnabled;
+        }
         autoFertilizerRushThresholdSec.value = cfg.autoFarmFertilizerRushThresholdSec != null ? cfg.autoFarmFertilizerRushThresholdSec : 300;
         setCheckedFertilizerLandTypes(cfg.autoFarmFertilizerLandTypes);
         autoFriendQuietHoursEnabled.checked = !!cfg.autoFarmFriendQuietHoursEnabled;
@@ -5503,9 +5828,12 @@
             ? cfg.autoWarehouseSellIntervalHour
             : 12;
         }
+        renderWarehouseSellCategoryOptions(normalizeWarehouseSellCategoryList(cfg.autoWarehouseSellCategories));
         stealCropBlacklistSelection = normalizePositiveIntList(cfg.autoFarmFriendStealPlantBlacklist);
         syncOwnTaskToggleState();
         syncPlantStrategyFields();
+        renderBackpackSeedPriority();
+        loadBackpackSeedOptions();
         syncFertilizerStrategyFields();
         loadPlantStrategyPreview();
         renderFertilizerStrategyPreview();
@@ -6066,10 +6394,13 @@
           autoFarmPlantPrimaryMode: autoPlantPrimaryMode.value || "none",
           autoFarmPlantSecondaryMode: autoPlantSecondaryMode.value || "none",
           autoFarmPlantSeedId: Number(autoPlantSeedId && autoPlantSeedId.value || 0),
+          autoFarmPlantBackpackSeedPriority: normalizeBackpackPrioritySelection(backpackSeedPrioritySelection),
+          autoFarmPlantBackpackForcePriority: isBackpackForcePriorityEnabled(),
           autoFarmPlantMaxLevel: Number(autoPlantMaxLevel && autoPlantMaxLevel.value || 0),
           autoFarmFertilizerEnabled: !!autoFertilizerEnabled.checked,
           autoFarmFertilizerMode: autoFertilizerMode.value || "none",
           autoFarmFertilizerMultiSeason: !!autoFertilizerMultiSeason.checked,
+          autoFarmFertilizerHarvestLinkEnabled: !!(autoFertilizerHarvestLinkEnabled && autoFertilizerHarvestLinkEnabled.checked),
           autoFarmFertilizerLandTypes: getCheckedFertilizerLandTypes(),
           autoFarmFertilizerRushThresholdSec: Number(autoFertilizerRushThresholdSec.value || 300),
           autoFarmFriendQuietHoursEnabled: !!autoFriendQuietHoursEnabled.checked,
@@ -6081,6 +6412,7 @@
           autoFarmFriendStealPlantBlacklistEnabled: !!(autoFriendStealPlantBlacklistEnabled && autoFriendStealPlantBlacklistEnabled.checked),
           autoFarmFriendStealPlantBlacklist: normalizePositiveIntList(stealCropBlacklistSelection),
           autoWarehouseSellIntervalHour: Number(iptWarehouseAutoSellInterval && iptWarehouseAutoSellInterval.value || 12),
+          autoWarehouseSellCategories: getSelectedWarehouseAutoSellCategories(),
           messagePush: gatherMessagePushConfig(),
         }, gatherSchedulerConfig());
       }
@@ -6112,10 +6444,13 @@
           autoFarmPlantPrimaryMode: src.autoFarmPlantPrimaryMode || src.autoFarmPlantMode || "none",
           autoFarmPlantSecondaryMode: src.autoFarmPlantSecondaryMode || "none",
           autoFarmPlantSeedId: Number(src.autoFarmPlantSeedId || 0),
+          autoFarmPlantBackpackSeedPriority: normalizePositiveIntList(src.autoFarmPlantBackpackSeedPriority),
+          autoFarmPlantBackpackForcePriority: !!src.autoFarmPlantBackpackForcePriority,
           autoFarmPlantMaxLevel: Number(src.autoFarmPlantMaxLevel || 0),
           autoFarmFertilizerEnabled: !!src.autoFarmFertilizerEnabled,
           autoFarmFertilizerMode: src.autoFarmFertilizerMode || "none",
           autoFarmFertilizerMultiSeason: !!src.autoFarmFertilizerMultiSeason,
+          autoFarmFertilizerHarvestLinkEnabled: !!src.autoFarmFertilizerHarvestLinkEnabled,
           autoFarmFertilizerLandTypes: normalizeFertilizerLandTypeList(src.autoFarmFertilizerLandTypes),
           autoFarmFertilizerRushThresholdSec: Number(src.autoFarmFertilizerRushThresholdSec != null ? src.autoFarmFertilizerRushThresholdSec : 300),
           autoFarmFriendQuietHoursEnabled: !!src.autoFarmFriendQuietHoursEnabled,
@@ -6129,6 +6464,7 @@
           autoFarmFriendStealPlantBlacklistEnabled: !!src.autoFarmFriendStealPlantBlacklistEnabled,
           autoFarmFriendStealPlantBlacklist: normalizePositiveIntList(src.autoFarmFriendStealPlantBlacklist),
           autoWarehouseSellIntervalHour: Number(src.autoWarehouseSellIntervalHour != null ? src.autoWarehouseSellIntervalHour : 12),
+          autoWarehouseSellCategories: normalizeWarehouseSellCategoryList(src.autoWarehouseSellCategories),
           messagePush: {
             enabled: !!messagePush.enabled,
             abnormalEnabled: messagePush.abnormalEnabled !== false,
@@ -6251,6 +6587,9 @@
         if (autoFertilizerMultiSeason && autoFertilizerMultiSeason.checked) {
           summary.push("多季作物第 2 季起也会在成熟前阈值内补肥");
         }
+        if (autoFertilizerHarvestLinkEnabled && autoFertilizerHarvestLinkEnabled.checked) {
+          summary.push("催熟阶段会联动连续收获，直到当前无可催熟或已成熟待收地块");
+        }
         txtFertilizerStrategyPreview.textContent = summary.join("，");
       }
 
@@ -6263,6 +6602,221 @@
         var date = value instanceof Date ? value : new Date(value);
         if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
         return date.toLocaleTimeString("zh-CN", { hour12: false });
+      }
+
+      function hasBackpackPlantStrategy() {
+        var primaryMode = String(autoPlantPrimaryMode && autoPlantPrimaryMode.value || "none");
+        var secondaryMode = String(autoPlantSecondaryMode && autoPlantSecondaryMode.value || "none");
+        return primaryMode === "backpack_first" || secondaryMode === "backpack_first";
+      }
+
+      function isBackpackForcePriorityEnabled() {
+        return !!(autoPlantBackpackForcePriority && autoPlantBackpackForcePriority.checked);
+      }
+
+      function normalizeBackpackPrioritySelection(selection) {
+        return normalizePositiveIntList(selection);
+      }
+
+      function pruneBackpackPrioritySelection() {
+        if (backpackSeedOptionsLoaded !== true) return false;
+        if (isBackpackForcePriorityEnabled()) return false;
+        var validSeedIdSet = new Set((Array.isArray(backpackSeedOptionList) ? backpackSeedOptionList : [])
+          .filter(function (item) { return item && item.plantable !== false; })
+          .map(function (item) { return Number(item && item.seedId) || 0; })
+          .filter(function (seedId) { return seedId > 0; }));
+        var next = normalizeBackpackPrioritySelection(backpackSeedPrioritySelection).filter(function (seedId) {
+          return validSeedIdSet.has(seedId);
+        });
+        var changed = next.length !== normalizeBackpackPrioritySelection(backpackSeedPrioritySelection).length;
+        if (!changed) {
+          for (var i = 0; i < next.length; i += 1) {
+            if (next[i] !== backpackSeedPrioritySelection[i]) {
+              changed = true;
+              break;
+            }
+          }
+        }
+        backpackSeedPrioritySelection = next;
+        return changed;
+      }
+
+      function getRenderableBackpackSeedOptions() {
+        return (Array.isArray(backpackSeedOptionList) ? backpackSeedOptionList : []).map(function (item) {
+          var seedId = Number(item && item.seedId) || 0;
+          return {
+            seedId: seedId,
+            name: item && item.name ? String(item.name) : ("seed=" + seedId),
+            level: item && item.level != null ? Number(item.level) : null,
+            backpackCount: Number(item && item.backpackCount) || 0,
+            inBackpack: !!item.inBackpack,
+            growTimeStr: item && item.growTimeStr ? String(item.growTimeStr) : "",
+            imageUrl: item && item.imageUrl ? String(item.imageUrl) : "",
+            plantable: item && item.plantable !== false,
+            plantableReason: item && item.plantableReason ? String(item.plantableReason) : "",
+            plantableMessage: item && item.plantableMessage ? String(item.plantableMessage) : "",
+            retainedByForcePriority: item && item.retainedByForcePriority === true,
+          };
+        });
+      }
+
+      function getBackpackSeedOrder(seedId) {
+        return normalizeBackpackPrioritySelection(backpackSeedPrioritySelection).indexOf(Number(seedId) || 0);
+      }
+
+      function sortBackpackSeedOptionsForRender(list) {
+        return (Array.isArray(list) ? list.slice() : []).sort(function (a, b) {
+          var aOrder = getBackpackSeedOrder(a && a.seedId);
+          var bOrder = getBackpackSeedOrder(b && b.seedId);
+          var aSelected = aOrder >= 0;
+          var bSelected = bOrder >= 0;
+          if (aSelected && bSelected && aOrder !== bOrder) return aOrder - bOrder;
+          if (aSelected !== bSelected) return aSelected ? -1 : 1;
+          if (!!(a && a.retainedByForcePriority) !== !!(b && b.retainedByForcePriority)) {
+            return a && a.retainedByForcePriority ? -1 : 1;
+          }
+          if (!!(a && a.inBackpack) !== !!(b && b.inBackpack)) return a && a.inBackpack ? -1 : 1;
+          var countDiff = (Number(b && b.backpackCount) || 0) - (Number(a && a.backpackCount) || 0);
+          if (countDiff !== 0) return countDiff;
+          var levelDiff = (Number(a && a.level) || 0) - (Number(b && b.level) || 0);
+          if (levelDiff !== 0) return levelDiff;
+          return String(a && a.name || "").localeCompare(String(b && b.name || ""), "zh-CN");
+        });
+      }
+
+      function buildBackpackSeedPriorityRow(item) {
+        if (!item) return "";
+        var seedId = Number(item.seedId) || 0;
+        var selectedOrder = getBackpackSeedOrder(seedId);
+        var selected = selectedOrder >= 0;
+        var backpackCount = Number(item.backpackCount) || 0;
+        var badges = [];
+        if (selected) {
+          badges.push('<span class="backpack-seed-badge priority">优先级 #' + (selectedOrder + 1) + "</span>");
+        }
+        badges.push(
+          '<span class="backpack-seed-badge' + (backpackCount > 0 ? " available" : "") + '">' +
+          "数量 " + escapeHtml(String(backpackCount)) +
+          "</span>"
+        );
+        if (item.level != null) {
+          badges.push('<span class="backpack-seed-badge">Lv.' + escapeHtml(String(item.level)) + "</span>");
+        }
+        if (item.growTimeStr) {
+          badges.push('<span class="backpack-seed-badge">' + escapeHtml(item.growTimeStr) + "</span>");
+        }
+        if (item.plantable === false) {
+          badges.push('<span class="backpack-seed-badge priority">不可种植</span>');
+        }
+        if (item.retainedByForcePriority) {
+          badges.push('<span class="backpack-seed-badge">强制保留</span>');
+        }
+        return [
+          '<article class="backpack-seed-card' + (selected ? " selected" : "") + '">',
+          '<div class="backpack-seed-main">',
+          '<input type="checkbox" data-backpack-seed-check="' + seedId + '"' + (selected ? " checked" : "") + (item.plantable === false ? " disabled" : "") + " />",
+          '<div class="backpack-seed-meta">',
+          '<div class="backpack-seed-name">',
+          "<strong>" + escapeHtml(item.name || ("seed=" + seedId)) + "</strong>",
+          badges.join(""),
+          "</div>",
+          '<div class="backpack-seed-desc">Seed ' + escapeHtml(String(seedId)) + (item.plantable === false
+            ? (" · " + escapeHtml(item.plantableMessage || "当前不可种植"))
+            : (item.inBackpack ? " · 当前背包可直接使用" : (item.retainedByForcePriority ? " · 当前背包暂无库存，但已强制保留优先级" : " · 当前背包暂无库存"))) + "</div>",
+          "</div>",
+          "</div>",
+          '<div class="backpack-seed-actions">',
+          '<span class="backpack-seed-desc">' + (item.plantable === false
+            ? "该种子会在背包策略里被自动跳过"
+            : (selected ? "会按当前顺序优先尝试" : "未勾选时按默认背包顺序补位")) + "</span>",
+          '<div class="backpack-seed-move">',
+          '<button type="button" class="ghost tiny" data-backpack-seed-move="up" data-seed-id="' + seedId + '"' + (!selected || item.plantable === false || selectedOrder <= 0 ? " disabled" : "") + ">上移</button>",
+          '<button type="button" class="ghost tiny" data-backpack-seed-move="down" data-seed-id="' + seedId + '"' + (!selected || item.plantable === false || selectedOrder >= (normalizeBackpackPrioritySelection(backpackSeedPrioritySelection).length - 1) ? " disabled" : "") + ">下移</button>",
+          "</div>",
+          "</div>",
+          "</article>",
+        ].join("");
+      }
+
+      function renderBackpackSeedPriority() {
+        if (!backpackSeedPriorityList) return;
+        pruneBackpackPrioritySelection();
+        var keyword = String(autoPlantBackpackSeedSearch && autoPlantBackpackSeedSearch.value || "").trim().toLowerCase();
+        var list = sortBackpackSeedOptionsForRender(getRenderableBackpackSeedOptions()).filter(function (item) {
+          if (!keyword) return true;
+          var haystack = [
+            item && item.name ? item.name : "",
+            item && item.seedId != null ? String(item.seedId) : "",
+          ].join(" ").toLowerCase();
+          return haystack.indexOf(keyword) >= 0;
+        });
+        if (!list.length) {
+          backpackSeedPriorityList.innerHTML = '<div class="friend-empty">当前筛选条件下没有匹配种子。</div>';
+        } else {
+          backpackSeedPriorityList.innerHTML = list.map(buildBackpackSeedPriorityRow).join("");
+        }
+        if (txtBackpackPriorityCount) {
+          txtBackpackPriorityCount.textContent = normalizeBackpackPrioritySelection(backpackSeedPrioritySelection).length + " 项已设优先";
+        }
+        if (txtBackpackPrioritySummary) {
+          var selectedCount = normalizeBackpackPrioritySelection(backpackSeedPrioritySelection).length;
+          var backpackAvailableCount = getRenderableBackpackSeedOptions().filter(function (item) { return !!item.inBackpack; }).length;
+          var blockedCount = getRenderableBackpackSeedOptions().filter(function (item) { return item && item.plantable === false; }).length;
+          var retainedCount = getRenderableBackpackSeedOptions().filter(function (item) { return item && item.retainedByForcePriority; }).length;
+          txtBackpackPrioritySummary.textContent = selectedCount > 0
+            ? ("已设置 " + selectedCount + " 个优先种子，当前背包里有 " + backpackAvailableCount + " 个真实种子" + (retainedCount > 0 ? ("，另保留 " + retainedCount + " 个无库存优先级") : "") + (blockedCount > 0 ? ("，其中 " + blockedCount + " 个不可种植") : "") + "。")
+            : ("当前还没设置自定义优先级，背包策略会按默认背包顺序选择。当前背包里有 " + backpackAvailableCount + " 个真实种子" + (retainedCount > 0 ? ("，另保留 " + retainedCount + " 个无库存优先级") : "") + (blockedCount > 0 ? ("，其中 " + blockedCount + " 个不可种植") : "") + "。");
+        }
+      }
+
+      function syncBackpackPriorityPanel() {
+        var visible = hasBackpackPlantStrategy();
+        if (backpackPriorityBox) backpackPriorityBox.hidden = !visible;
+        if (!visible) {
+          if (backpackPriorityPanel) backpackPriorityPanel.hidden = true;
+          if (btnBackpackPriorityToggle) btnBackpackPriorityToggle.textContent = "展开排序";
+          return;
+        }
+        if (!backpackPriorityTouched) backpackPriorityCollapsed = false;
+        if ((!Array.isArray(backpackSeedOptionList) || backpackSeedOptionList.length === 0) && backpackSeedPriorityList) {
+          loadBackpackSeedOptions();
+        }
+        if (backpackPriorityPanel) backpackPriorityPanel.hidden = !!backpackPriorityCollapsed;
+        if (btnBackpackPriorityToggle) btnBackpackPriorityToggle.textContent = backpackPriorityCollapsed ? "展开排序" : "收起排序";
+      }
+
+      function updateBackpackPrioritySelection(nextSelection) {
+        backpackSeedPrioritySelection = normalizeBackpackPrioritySelection(nextSelection);
+        pruneBackpackPrioritySelection();
+        renderBackpackSeedPriority();
+        syncFarmConfigDirtyState();
+        loadPlantStrategyPreview();
+      }
+
+      function loadBackpackSeedOptions() {
+        var selected = normalizeBackpackPrioritySelection(backpackSeedPrioritySelection);
+        var forcePriority = isBackpackForcePriorityEnabled();
+        var query = "?_ts=" + Date.now()
+          + "&selected=" + encodeURIComponent(selected.join(","))
+          + "&forcePriority=" + (forcePriority ? "1" : "0");
+        return fetch("/api/backpack-seed-options" + query, { cache: "no-store" })
+          .then(readJsonResponse)
+          .then(function (j) {
+            if (j && j.ok && j.data) {
+              backpackSeedOptionList = Array.isArray(j.data.list) ? j.data.list : [];
+              backpackSeedOptionsLoaded = true;
+            } else {
+              backpackSeedOptionList = Array.isArray(backpackSeedOptionList) ? backpackSeedOptionList : [];
+            }
+            var pruned = pruneBackpackPrioritySelection();
+            renderBackpackSeedPriority();
+            if (pruned) syncFarmConfigDirtyState();
+            return j;
+          })
+          .catch(function () {
+            backpackSeedOptionList = Array.isArray(backpackSeedOptionList) ? backpackSeedOptionList : [];
+            renderBackpackSeedPriority();
+          });
       }
 
       function syncPlantStrategyFields() {
@@ -6297,6 +6851,7 @@
             ) ? "" : "none";
           }
         }
+        syncBackpackPriorityPanel();
       }
 
       function renderPlantStrategyPreview() {
@@ -6333,12 +6888,15 @@
       function loadPlantStrategyPreview() {
         var primaryMode = String(autoPlantPrimaryMode && autoPlantPrimaryMode.value || "none");
         var secondaryMode = String(autoPlantSecondaryMode && autoPlantSecondaryMode.value || "none");
+        var effectivePreviewMode = primaryMode !== "none" ? primaryMode : secondaryMode;
         var seedId = Number(autoPlantSeedId && autoPlantSeedId.value || 0);
+        var backpackPriority = normalizeBackpackPrioritySelection(backpackSeedPrioritySelection);
         var maxLevel = Number(autoPlantMaxLevel && autoPlantMaxLevel.value || 0);
-        var query = "?mode=" + encodeURIComponent(primaryMode) +
+        var query = "?mode=" + encodeURIComponent(effectivePreviewMode) +
           "&primaryMode=" + encodeURIComponent(primaryMode) +
           "&secondaryMode=" + encodeURIComponent(secondaryMode) +
           "&seedId=" + encodeURIComponent(seedId) +
+          "&backpackPriority=" + encodeURIComponent(backpackPriority.join(",")) +
           "&maxLevel=" + encodeURIComponent(maxLevel);
         return fetch("/api/plant-strategy-preview" + query)
           .then(readJsonResponse)
@@ -6963,6 +7521,9 @@
           btnWarehouseRefresh.disabled = warehouseActionBusy;
           btnWarehouseRefresh.textContent = getWarehouseActionButtonLabel("refresh");
         }
+        if (btnWarehouseSelectAutoSell) {
+          btnWarehouseSelectAutoSell.disabled = warehouseActionBusy || getWarehouseAutoSellCandidateItems().length <= 0;
+        }
         if (btnWarehouseBatchSell) {
           btnWarehouseBatchSell.disabled = warehouseActionBusy;
           btnWarehouseBatchSell.textContent = getWarehouseActionButtonLabel("batch");
@@ -7019,6 +7580,110 @@
         return "每 " + value + " 小时检查一次可预估物品";
       }
 
+      function readWarehouseSellCategorySelectionFromDom() {
+        if (!warehouseSellCategoryOptions) return null;
+        var inputs = Array.prototype.slice.call(warehouseSellCategoryOptions.querySelectorAll('input[data-warehouse-sell-category]'));
+        if (!inputs.length) return null;
+        return normalizeWarehouseSellCategoryList(inputs.filter(function (node) {
+          return !!node.checked;
+        }).map(function (node) {
+          return node.value;
+        }));
+      }
+
+      function getSelectedWarehouseAutoSellCategories() {
+        var domSelection = readWarehouseSellCategorySelectionFromDom();
+        if (domSelection !== null) {
+          warehouseAutoSellCategorySelection = normalizeWarehouseSellCategoryList(domSelection);
+          return warehouseAutoSellCategorySelection.slice();
+        }
+        if (Array.isArray(warehouseAutoSellCategorySelection)) {
+          return normalizeWarehouseSellCategoryList(warehouseAutoSellCategorySelection);
+        }
+        var scheduler = getWarehouseScheduler();
+        if (scheduler && Array.isArray(scheduler.autoSellCategories)) {
+          return normalizeWarehouseSellCategoryList(scheduler.autoSellCategories);
+        }
+        if (farmConfig && farmConfig.autoWarehouseSellCategories != null) {
+          return normalizeWarehouseSellCategoryList(farmConfig.autoWarehouseSellCategories);
+        }
+        return normalizeWarehouseSellCategoryList(null);
+      }
+
+      function getWarehouseAutoSellCandidateItems(selectedCategories) {
+        var selected = Array.isArray(selectedCategories)
+          ? normalizeWarehouseSellCategoryList(selectedCategories)
+          : getSelectedWarehouseAutoSellCategories();
+        var selectedSet = new Set(selected);
+        return getWarehouseItems().filter(function (item) {
+          return !!(item
+            && item.canEstimateSale
+            && (Number(item.estimatedSellPrice) || 0) > 0
+            && selectedSet.has(String(item.category || "").trim().toLowerCase()));
+        });
+      }
+
+      function getWarehouseAvailableAutoSellCategories() {
+        var map = Object.create(null);
+        getWarehouseItems().forEach(function (item) {
+          if (!item || !item.canEstimateSale || (Number(item.estimatedSellPrice) || 0) <= 0) return;
+          var key = String(item.category || "").trim().toLowerCase();
+          if (!key || WAREHOUSE_SELL_CATEGORY_OPTIONS.indexOf(key) < 0) return;
+          if (!map[key]) {
+            map[key] = {
+              key: key,
+              label: getWarehouseCategoryLabelText(key),
+              distinct: 0,
+              count: 0,
+              estimate: 0,
+            };
+          }
+          map[key].distinct += 1;
+          map[key].count += Number(item.count) || 0;
+          map[key].estimate += Number(item.estimatedSellPrice) || 0;
+        });
+        return WAREHOUSE_SELL_CATEGORY_OPTIONS.map(function (key) {
+          return map[key] || {
+            key: key,
+            label: getWarehouseCategoryLabelText(key),
+            distinct: 0,
+            count: 0,
+            estimate: 0,
+          };
+        });
+      }
+
+      function syncWarehouseSellCategoryOptionState() {
+        if (!warehouseSellCategoryOptions) return;
+        Array.prototype.forEach.call(warehouseSellCategoryOptions.querySelectorAll(".warehouse-sell-category-option"), function (node) {
+          var input = node.querySelector('input[data-warehouse-sell-category]');
+          node.classList.toggle("is-active", !!(input && input.checked));
+        });
+      }
+
+      function renderWarehouseSellCategoryOptions(selectedCategoriesOverride) {
+        if (!warehouseSellCategoryOptions) return;
+        var available = getWarehouseAvailableAutoSellCategories();
+        var selected = Array.isArray(selectedCategoriesOverride)
+          ? normalizeWarehouseSellCategoryList(selectedCategoriesOverride)
+          : getSelectedWarehouseAutoSellCategories();
+        warehouseAutoSellCategorySelection = selected.slice();
+        var selectedSet = new Set(selected);
+        warehouseSellCategoryOptions.innerHTML = available.map(function (item) {
+          var checked = selectedSet.has(item.key);
+          return '<label class="tag-check warehouse-sell-category-option' + (checked ? ' is-active' : '') + '">' +
+            '<input type="checkbox" data-warehouse-sell-category="' + escapeHtml(item.key) + '" value="' + escapeHtml(item.key) + '"' + (checked ? " checked" : "") + ' />' +
+            escapeHtml(item.label) +
+            ' ' +
+            escapeHtml(formatWarehouseNumber(item.distinct)) +
+            ' 种 / ' +
+            escapeHtml(formatWarehouseNumber(item.count)) +
+            ' 件</label>';
+        }).join("");
+        syncWarehouseSellCategoryOptionState();
+        syncWarehouseActionButtons();
+      }
+
       function getWarehouseFilteredItems() {
         var list = getWarehouseItems();
         var keyword = String(iptWarehouseSearch && iptWarehouseSearch.value || "").trim().toLowerCase();
@@ -7073,6 +7738,42 @@
         }).join("");
       }
 
+      function renderWarehouseSellCategorySummary() {
+        if (!txtWarehouseSellCategorySummary) return;
+        if (!warehouseState) {
+          txtWarehouseSellCategorySummary.textContent = "等待仓库出售设置...";
+          return;
+        }
+        var available = getWarehouseAvailableAutoSellCategories();
+        var selected = getSelectedWarehouseAutoSellCategories();
+        var selectedSet = new Set(selected);
+        var selectedItems = getWarehouseAutoSellCandidateItems(selected);
+        var selectedLabels = available.filter(function (item) {
+          return selectedSet.has(item.key);
+        }).map(function (item) {
+          return item.label;
+        });
+        var selectedDistinct = selectedItems.length;
+        var selectedCount = selectedItems.reduce(function (sum, item) {
+          return sum + (Number(item && item.count) || 0);
+        }, 0);
+        var selectedEstimate = selectedItems.reduce(function (sum, item) {
+          return sum + (Number(item && item.estimatedSellPrice) || 0);
+        }, 0);
+        if (!selectedLabels.length) {
+          txtWarehouseSellCategorySummary.textContent = "当前未勾选任何自动出售类别，后台定时出售不会卖出仓库物品。";
+          return;
+        }
+        txtWarehouseSellCategorySummary.textContent = [
+          "已勾选 " + selectedLabels.join(" / "),
+          "覆盖 " + formatWarehouseNumber(selectedDistinct) + " 种",
+          "库存 " + formatWarehouseNumber(selectedCount) + " 件",
+          selectedEstimate > 0
+            ? ("预计约 " + formatWarehouseNumber(selectedEstimate) + " 金币")
+            : "当前没有可预估售价",
+        ].join(" · ");
+      }
+
       function renderWarehouseMetrics() {
         var summary = warehouseState && warehouseState.summary ? warehouseState.summary : null;
         var selectedItems = getSelectedWarehouseItems();
@@ -7112,6 +7813,7 @@
             txtWarehouseSelectionSummary.textContent = parts.join(" · ");
           }
         }
+        renderWarehouseSellCategorySummary();
       }
 
       function renderWarehouseList() {
@@ -7192,6 +7894,7 @@
           if (txtWarehouseCapability) txtWarehouseCapability.textContent = "当前无法确认仓库能力。";
           if (txtWarehouseSchedule) txtWarehouseSchedule.textContent = "后台仓库调度状态暂时不可用：" + errorText;
           if (warehouseCategorySummary) warehouseCategorySummary.innerHTML = '<span class="friend-empty">仓库分类加载失败。</span>';
+          renderWarehouseSellCategoryOptions();
           if (warehouseState && Array.isArray(warehouseState.items) && warehouseState.items.length) {
             renderWarehouseCategorySummary(warehouseState.summary || {});
             renderWarehouseList();
@@ -7235,9 +7938,13 @@
         }
 
         if (txtWarehouseSchedule) {
+          var autoSellLabels = Array.isArray(scheduler && scheduler.autoSellCategoryLabels)
+            ? scheduler.autoSellCategoryLabels.filter(Boolean)
+            : [];
           var scheduleParts = [
             "后台每 5 分钟会隐藏打开仓库并刷新一次缓存",
-            "自动出售：" + formatWarehouseAutoSellText(scheduler && scheduler.autoSellIntervalHour)
+            "自动出售：" + formatWarehouseAutoSellText(scheduler && scheduler.autoSellIntervalHour),
+            "出售种类：" + (autoSellLabels.length ? autoSellLabels.join(" / ") : "未勾选")
           ];
           if (scheduler && scheduler.lastRefreshAt) {
             scheduleParts.push("上次刷新 " + formatClockTime(scheduler.lastRefreshAt));
@@ -7261,6 +7968,7 @@
         }
 
         renderWarehouseCategorySummary(summary);
+        renderWarehouseSellCategoryOptions();
         renderWarehouseList();
       }
 
@@ -7843,6 +8551,7 @@
         var fertilizerMode = String(config.autoFarmFertilizerMode || "none");
         var fertilizerConfigured = !!config.autoFarmFertilizerEnabled && fertilizerMode !== "none";
         var fertilizerEnabled = ownEnabled && fertilizerConfigured;
+        var fertilizerHarvestLinkEnabled = fertilizerConfigured && !!config.autoFarmFertilizerHarvestLinkEnabled;
         var friendEnabled = !!config.autoFarmFriendEnabled;
         var friendHelpEnabled = !!config.autoFarmFriendHelpEnabled;
         var friendHelpModuleEnabled = friendHelpEnabled;
@@ -7857,6 +8566,9 @@
         var fertilizerDetail = fertilizerConfigured ? getFertilizerModeLabel(fertilizerMode) : "未配置施肥策略";
         if (fertilizerConfigured && !ownEnabled) {
           fertilizerDetail += " · 需启用自己农场";
+        }
+        if (fertilizerHarvestLinkEnabled) {
+          fertilizerDetail += " · 已开启催熟联动收获";
         }
 
         return [
@@ -9372,10 +10084,101 @@
         });
       }
 
+      if (btnBackpackPriorityToggle) {
+        btnBackpackPriorityToggle.addEventListener("click", function () {
+          backpackPriorityTouched = true;
+          backpackPriorityCollapsed = !backpackPriorityCollapsed;
+          syncBackpackPriorityPanel();
+        });
+      }
+
+      if (autoPlantBackpackSeedSearch) {
+        autoPlantBackpackSeedSearch.addEventListener("input", function () {
+          renderBackpackSeedPriority();
+        });
+      }
+
+      if (autoPlantBackpackForcePriority) {
+        autoPlantBackpackForcePriority.addEventListener("change", function () {
+          loadBackpackSeedOptions();
+          syncFarmConfigDirtyState();
+          renderBackpackSeedPriority();
+          loadPlantStrategyPreview();
+        });
+      }
+
+      if (btnBackpackPriorityRefresh) {
+        btnBackpackPriorityRefresh.addEventListener("click", function () {
+          loadBackpackSeedOptions();
+          loadPlantStrategyPreview();
+        });
+      }
+
+      if (btnBackpackPriorityClear) {
+        btnBackpackPriorityClear.addEventListener("click", function () {
+          updateBackpackPrioritySelection([]);
+        });
+      }
+
+      if (btnBackpackPrioritySelectVisible) {
+        btnBackpackPrioritySelectVisible.addEventListener("click", function () {
+          var keyword = String(autoPlantBackpackSeedSearch && autoPlantBackpackSeedSearch.value || "").trim().toLowerCase();
+          var visibleIds = sortBackpackSeedOptionsForRender(getRenderableBackpackSeedOptions())
+            .filter(function (item) {
+              if (!keyword) return true;
+              var haystack = [
+                item && item.name ? item.name : "",
+                item && item.seedId != null ? String(item.seedId) : "",
+              ].join(" ").toLowerCase();
+              return haystack.indexOf(keyword) >= 0;
+            })
+            .map(function (item) { return Number(item && item.seedId) || 0; })
+            .filter(function (seedId) { return seedId > 0; });
+          visibleIds = visibleIds.filter(function (seedId) {
+            return getRenderableBackpackSeedOptions().some(function (item) {
+              return Number(item && item.seedId) === seedId && item.plantable !== false;
+            });
+          });
+          var merged = normalizeBackpackPrioritySelection(backpackSeedPrioritySelection.concat(visibleIds));
+          updateBackpackPrioritySelection(merged);
+        });
+      }
+
+      if (backpackSeedPriorityList) {
+        backpackSeedPriorityList.addEventListener("change", function (event) {
+          var target = event && event.target;
+          if (!target || !target.matches("[data-backpack-seed-check]")) return;
+          var seedId = Number(target.getAttribute("data-backpack-seed-check")) || 0;
+          if (seedId <= 0) return;
+          var next = normalizeBackpackPrioritySelection(backpackSeedPrioritySelection);
+          var index = next.indexOf(seedId);
+          if (target.checked && index < 0) next.push(seedId);
+          if (!target.checked && index >= 0) next.splice(index, 1);
+          updateBackpackPrioritySelection(next);
+        });
+        backpackSeedPriorityList.addEventListener("click", function (event) {
+          var target = event && event.target;
+          if (!target || !target.matches("[data-backpack-seed-move]")) return;
+          var seedId = Number(target.getAttribute("data-seed-id")) || 0;
+          var direction = String(target.getAttribute("data-backpack-seed-move") || "");
+          if (seedId <= 0 || !direction) return;
+          var next = normalizeBackpackPrioritySelection(backpackSeedPrioritySelection);
+          var index = next.indexOf(seedId);
+          if (index < 0) return;
+          var swapIndex = direction === "up" ? index - 1 : index + 1;
+          if (swapIndex < 0 || swapIndex >= next.length) return;
+          var temp = next[index];
+          next[index] = next[swapIndex];
+          next[swapIndex] = temp;
+          updateBackpackPrioritySelection(next);
+        });
+      }
+
       [
         autoFertilizerEnabled,
         autoFertilizerMode,
         autoFertilizerMultiSeason,
+        autoFertilizerHarvestLinkEnabled,
         autoFertilizerRushThresholdSec,
       ].forEach(function (node) {
         if (!node) return;
@@ -9582,6 +10385,21 @@
         };
       }
 
+      if (btnWarehouseSelectAutoSell) {
+        btnWarehouseSelectAutoSell.onclick = function () {
+          var matchedItems = getWarehouseAutoSellCandidateItems();
+          if (!matchedItems.length) {
+            showToast("没有匹配项", "当前出售范围下没有可自动出售的仓库物品。", "warn");
+            return;
+          }
+          matchedItems.forEach(function (item) {
+            var itemId = String(Number(item && item.itemId) || 0);
+            if (itemId !== "0") warehouseSelection.add(itemId);
+          });
+          renderWarehouseList();
+        };
+      }
+
       if (btnWarehouseBatchSell) {
         btnWarehouseBatchSell.onclick = function () {
           var selected = Array.from(warehouseSelection);
@@ -9602,6 +10420,27 @@
       if (selWarehouseFilter) {
         selWarehouseFilter.addEventListener("change", function () {
           renderWarehouseList();
+        });
+      }
+
+      if (iptWarehouseAutoSellInterval) {
+        ["input", "change"].forEach(function (eventName) {
+          iptWarehouseAutoSellInterval.addEventListener(eventName, function () {
+            syncAutoFarmConfigPreview();
+          });
+        });
+      }
+
+      if (warehouseSellCategoryOptions) {
+        warehouseSellCategoryOptions.addEventListener("change", function (event) {
+          var target = event && event.target && typeof event.target.closest === "function"
+            ? event.target.closest("input[data-warehouse-sell-category]")
+            : null;
+          if (!target || !warehouseSellCategoryOptions.contains(target)) return;
+          syncWarehouseSellCategoryOptionState();
+          renderWarehouseMetrics();
+          syncWarehouseActionButtons();
+          syncAutoFarmConfigPreview();
         });
       }
 
@@ -10127,6 +10966,7 @@
       loadFarmConfig();
       loadMessagePushState();
       loadAnalytics();
+      loadBackpackSeedOptions();
       loadPlantStrategyPreview();
       requestSchedulerTaskNow("health", "boot");
       requestSchedulerTaskNow("autoFarm", "boot");

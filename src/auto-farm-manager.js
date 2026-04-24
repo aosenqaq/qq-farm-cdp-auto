@@ -18,6 +18,7 @@ const {
 
 const AUTO_FARM_RECENT_EVENT_LIMIT = 400;
 const AUTO_FERTILIZER_STATE_VERSION = 2;
+const WAREHOUSE_SELL_CATEGORY_OPTIONS = ["fruit", "seed", "tool", "material"];
 
 function toPositiveInt(value) {
   const n = Number.parseInt(String(value ?? ""), 10);
@@ -213,6 +214,22 @@ function normalizeFertilizerLandTypes(value) {
   return next.length ? next : [...allLandTypes];
 }
 
+function normalizeWarehouseSellCategoryList(value) {
+  if (value == null) return [...WAREHOUSE_SELL_CATEGORY_OPTIONS];
+  const source = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(/[\r\n,，;；]+/)
+      : [];
+  const next = [];
+  for (const item of source) {
+    const text = String(item == null ? "" : item).trim().toLowerCase();
+    if (!text || !WAREHOUSE_SELL_CATEGORY_OPTIONS.includes(text) || next.includes(text)) continue;
+    next.push(text);
+  }
+  return next;
+}
+
 function normalizeClockText(value, defaultValue) {
   const text = String(value == null ? "" : value).trim();
   if (!text) return defaultValue;
@@ -249,10 +266,13 @@ function normalizeAutoFarmConfig(raw) {
     autoFarmPlantPrimaryMode: toPlantMode(src.autoFarmPlantPrimaryMode ?? src.autoFarmPlantMode, "none"),
     autoFarmPlantSecondaryMode: toPlantMode(src.autoFarmPlantSecondaryMode, "none"),
     autoFarmPlantSeedId: toInt(src.autoFarmPlantSeedId, 0, 0, 99999999),
+    autoFarmPlantBackpackSeedPriority: normalizePositiveIntList(src.autoFarmPlantBackpackSeedPriority),
+    autoFarmPlantBackpackForcePriority: toBool(src.autoFarmPlantBackpackForcePriority, false),
     autoFarmPlantMaxLevel: toInt(src.autoFarmPlantMaxLevel, 0, 0, 999),
     autoFarmFertilizerEnabled: toBool(src.autoFarmFertilizerEnabled, false),
     autoFarmFertilizerMode: toFertilizerMode(src.autoFarmFertilizerMode, "none"),
     autoFarmFertilizerMultiSeason: toBool(src.autoFarmFertilizerMultiSeason, false),
+    autoFarmFertilizerHarvestLinkEnabled: toBool(src.autoFarmFertilizerHarvestLinkEnabled, false),
     autoFarmFertilizerLandTypes: normalizeFertilizerLandTypes(src.autoFarmFertilizerLandTypes),
     autoFarmFertilizerRushThresholdSec: toInt(src.autoFarmFertilizerRushThresholdSec, 300, 0, 999999),
     autoFarmFriendQuietHoursEnabled: toBool(src.autoFarmFriendQuietHoursEnabled, false),
@@ -264,6 +284,7 @@ function normalizeAutoFarmConfig(raw) {
     autoFarmFriendStealPlantBlacklistStrategy: toInt(src.autoFarmFriendStealPlantBlacklistStrategy, 1, 1, 2),
     autoFarmFriendStealPlantBlacklist: normalizePositiveIntList(src.autoFarmFriendStealPlantBlacklist),
     autoWarehouseSellIntervalHour: toInt(src.autoWarehouseSellIntervalHour, 12, 0, 24 * 30),
+    autoWarehouseSellCategories: normalizeWarehouseSellCategoryList(src.autoWarehouseSellCategories),
   };
 }
 
@@ -384,6 +405,12 @@ function mergeCycleResultIntoTodayStats(stats, cycle) {
     : null;
   if (fertilizerResult && fertilizerResult.skipped !== true) {
     target.fertilize += Math.max(0, Number(fertilizerResult.successCount) || 0);
+    const linkedHarvest = fertilizerResult.linkedHarvest && typeof fertilizerResult.linkedHarvest === "object"
+      ? fertilizerResult.linkedHarvest
+      : null;
+    if (linkedHarvest && linkedHarvest.skipped !== true) {
+      target.collect += Math.max(0, Number(linkedHarvest.collectCount) || 0);
+    }
   }
 
   const friendSteal = result.friendSteal && typeof result.friendSteal === "object" ? result.friendSteal : null;
@@ -894,6 +921,20 @@ function buildAutoFarmCycleLogMessages({ due, injectState, result, cooldownAppli
           message: `自动农场 / 自己农场 / 自动施肥：${parts.join(" · ")}`,
         });
       });
+      const linkedHarvest = fertilizerResult.linkedHarvest && typeof fertilizerResult.linkedHarvest === "object"
+        ? fertilizerResult.linkedHarvest
+        : null;
+      if (linkedHarvest && linkedHarvest.enabled === true && linkedHarvest.skipped !== true) {
+        const detailParts = [
+          `轮次 ${Number(linkedHarvest.roundCount) || 0}`,
+          `收获 ${Number(linkedHarvest.collectCount) || 0} 块`,
+        ];
+        if (linkedHarvest.reason) detailParts.push(`结束 ${linkedHarvest.reason}`);
+        messages.push({
+          level: linkedHarvest.ok === false ? "warn" : "info",
+          message: `自动农场 / 自己农场 / 催熟联动收获：${detailParts.join(" · ")}`,
+        });
+      }
     }
 
     if (ownFarm && ownFarm.tasks) {
@@ -1825,10 +1866,15 @@ class AutoFarmManager {
         autoPlantPrimaryMode: this.config.autoFarmPlantPrimaryMode || this.config.autoFarmPlantMode || "none",
         autoPlantSecondaryMode: this.config.autoFarmPlantSecondaryMode || "none",
         autoPlantSeedId: this.config.autoFarmPlantSeedId || 0,
+        autoPlantBackpackSeedPriority: Array.isArray(this.config.autoFarmPlantBackpackSeedPriority)
+          ? [...this.config.autoFarmPlantBackpackSeedPriority]
+          : [],
+        autoPlantBackpackForcePriority: !!this.config.autoFarmPlantBackpackForcePriority,
         autoPlantMaxLevel: this.config.autoFarmPlantMaxLevel || 0,
         autoFertilizerEnabled: !!this.config.autoFarmFertilizerEnabled,
         autoFertilizerMode: this.config.autoFarmFertilizerMode || "none",
         autoFertilizerMultiSeason: !!this.config.autoFarmFertilizerMultiSeason,
+        autoFertilizerHarvestLinkEnabled: !!this.config.autoFarmFertilizerHarvestLinkEnabled,
         autoFertilizerLandTypes: Array.isArray(this.config.autoFarmFertilizerLandTypes)
           ? [...this.config.autoFarmFertilizerLandTypes]
           : ["gold", "black", "red", "normal"],

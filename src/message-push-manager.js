@@ -31,6 +31,12 @@ const CHANNEL_LABELS = {
   webhook: "通用 Webhook",
 };
 
+const ABNORMAL_EVENT_LEVELS = new Set(["warn", "error"]);
+
+function stripAnsiText(value) {
+  return String(value == null ? "" : value).replace(/\u001b\[[0-9;]*m/g, "");
+}
+
 function toBool(value, defaultValue) {
   if (value == null) return defaultValue;
   if (typeof value === "boolean") return value;
@@ -275,6 +281,10 @@ function buildTimeoutRegexList() {
     /CDP timeout/i,
     /qq ws call timed out/i,
     /等待小游戏 .*超时/i,
+    /等待自动农场空闲超时/i,
+    /AUTO_FARM_RUNTIME_BUSY_TIMEOUT/i,
+    /request timeout/i,
+    /\bETIMEDOUT\b/i,
   ];
 }
 
@@ -285,19 +295,157 @@ function buildRecoveryRegexList() {
     /execution context.*就绪/i,
     /已连接/i,
     /recovered/i,
+    /autoReconnectIfNeeded/i,
+  ];
+}
+
+function buildIgnoredAbnormalRegexList() {
+  return [
+    /自动化已停止[:：]\s*manual/i,
+    /automation_stopped/i,
+    /自动农场 \/ 当前轮已停止/i,
+  ];
+}
+
+function buildGenericErrorNameRegexList() {
+  return [
+    /\b(?:Error|TypeError|RangeError|ReferenceError|SyntaxError|URIError|EvalError|AggregateError|AbortError|ProtocolError)\b/,
+    /\bERR_[A-Z_]+\b/,
+    /\b(?:ECONNRESET|ECONNREFUSED|ENOTFOUND|EPIPE|ETIMEDOUT)\b/i,
+  ];
+}
+
+function buildAbnormalRegexRules() {
+  return [
+    {
+      type: "network",
+      label: "网络 / 连接异常",
+      patterns: [
+        /网络异常/i,
+        /网络连接/i,
+        /WebSocket/i,
+        /\bqq ws\b/i,
+        /\bclient error\b/i,
+        /\bnot connected\b/i,
+        /\bdisconnected\b/i,
+        /\bconnect(?:ion)? (?:failed|error|closed|lost)\b/i,
+        /连接(?:失败|异常|断开|已断开)/,
+        /重连(?:失败|异常)?/,
+        /\bsocket\b/i,
+      ],
+    },
+    {
+      type: "runtime",
+      label: "运行时 / 上下文异常",
+      patterns: [
+        /\bexecutionContextId\b/i,
+        /\bgameCtl\b/i,
+        /\bCDP\b/i,
+        /\bminiapp\b/i,
+        /\bqq host\b/i,
+        /\bqq bundle\b/i,
+        /小游戏调试桥/,
+        /上下文探测失败/,
+        /context .*未就绪/,
+        /运行时.*(?:未就绪|不可用|缺少|缺失)/,
+        /\bnot ready\b/i,
+      ],
+    },
+    {
+      type: "request",
+      label: "请求 / 协议异常",
+      patterns: [
+        /\bHTTP\s*[45]\d{2}\b/i,
+        /invalid body/i,
+        /invalid_json/i,
+        /\bProtocolError\b/i,
+        /\bunsupported\b/i,
+        /\bdenied\b/i,
+        /\brejected\b/i,
+        /格式不正确/,
+        /参数.*(?:错误|无效)/,
+        /路径.*不允许/,
+      ],
+    },
+    {
+      type: "storage",
+      label: "持久化 / 状态异常",
+      patterns: [
+        /持久化失败/,
+        /state_load_failed/i,
+        /state.*failed/i,
+        /config_load_failed/i,
+        /today_stats_load_failed/i,
+      ],
+    },
+    {
+      type: "automation",
+      label: "调度 / 执行异常",
+      patterns: [
+        /调度异常/,
+        /调度失败/,
+        /init failed/i,
+        /refresh_failed/i,
+        /warehouse_refresh_failed/i,
+        /auto start skipped/i,
+        /失败/,
+        /异常/,
+      ],
+    },
+    {
+      type: "resource",
+      label: "资源 / 数据异常",
+      patterns: [
+        /\bmissing\b/i,
+        /\bnot found\b/i,
+        /\brequired\b/i,
+        /\binvalid\b/i,
+        /\bunavailable\b/i,
+        /未找到/,
+        /不存在/,
+        /缺少/,
+        /缺失/,
+        /为空/,
+        /无效/,
+        /不可用/,
+        /不支持/,
+      ],
+    },
   ];
 }
 
 function isTimeoutLogLine(line) {
-  const text = String(line || "").trim();
+  const text = stripAnsiText(line).trim();
   if (!text) return false;
   return buildTimeoutRegexList().some((pattern) => pattern.test(text));
 }
 
 function isRecoveryLogLine(line) {
-  const text = String(line || "").trim();
+  const text = stripAnsiText(line).trim();
   if (!text) return false;
   return buildRecoveryRegexList().some((pattern) => pattern.test(text));
+}
+
+function matchAbnormalLogLine(line) {
+  const text = stripAnsiText(line).trim();
+  if (!text) return null;
+  if (buildIgnoredAbnormalRegexList().some((pattern) => pattern.test(text))) return null;
+  if (/["']error["']\s*:\s*null/i.test(text)) return null;
+  for (const rule of buildAbnormalRegexRules()) {
+    if (rule.patterns.some((pattern) => pattern.test(text))) {
+      return {
+        type: rule.type,
+        label: rule.label,
+      };
+    }
+  }
+  if (buildGenericErrorNameRegexList().some((pattern) => pattern.test(text))) {
+    return {
+      type: "exception",
+      label: "通用异常",
+    };
+  }
+  return null;
 }
 
 function stateFilePath(projectRoot) {
@@ -405,6 +553,27 @@ function createMessagePayload(kind, title, lines, meta) {
     lines: lineList,
     meta: meta && typeof meta === "object" ? { ...meta } : {},
   };
+}
+
+function buildImmediateAbnormalPayload(match, text, options) {
+  const opts = options && typeof options === "object" ? options : {};
+  const statusSnapshot = opts.statusSnapshot && typeof opts.statusSnapshot === "object"
+    ? opts.statusSnapshot
+    : null;
+  const lines = [
+    `异常类型：${match && match.label ? match.label : "通用异常"}`,
+    opts.occurredAt ? `发生时间：${formatDateTime(opts.occurredAt)}` : "",
+    opts.sourceLabel ? `异常来源：${opts.sourceLabel}` : "",
+    `异常详情：${limitText(text, 500)}`,
+    ...buildStatusSummaryLines(statusSnapshot),
+  ].filter(Boolean);
+  return createMessagePayload("abnormal", "农场异常通知", lines, {
+    abnormalType: match && match.type ? match.type : "exception",
+    abnormalLabel: match && match.label ? match.label : "通用异常",
+    abnormalSource: opts.sourceLabel || null,
+    abnormalText: limitText(text, 300),
+    occurredAt: opts.occurredAt || null,
+  });
 }
 
 async function sendToServerChan(config, payload) {
@@ -657,6 +826,10 @@ class MessagePushManager {
     this.running = false;
     this.tickPromise = Promise.resolve();
     this.lastPersistPromise = Promise.resolve();
+    this.statusEventCursorInitialized = false;
+    this.lastStatusEventKey = null;
+    this.abnormalPushArmed = false;
+    this.abnormalPushArmedAt = null;
   }
 
   async init() {
@@ -697,6 +870,8 @@ class MessagePushManager {
         enabled: config.enabled && config.abnormalEnabled,
         channels: pickAvailableChannels(config),
         threshold: config.abnormalTimeoutThreshold,
+        armed: this.abnormalPushArmed,
+        armedAt: this.abnormalPushArmedAt,
         consecutiveTimeouts: this.runtimeState.consecutiveTimeouts,
         alertActive: this.runtimeState.timeoutAlertActive,
         lastTimeoutAt: this.runtimeState.lastTimeoutAt,
@@ -777,13 +952,74 @@ class MessagePushManager {
 
   async _runTick() {
     try {
+      const statusSnapshot = this._getStatusSnapshotSafe();
+      await this._refreshAbnormalPushGate(statusSnapshot);
       await this._scanLogs();
+      await this._scanStatusEvents();
       await this._maybeSendDailySummary();
       this.runtimeState.lastScanAt = new Date().toISOString();
       await this._persistState();
     } finally {
       this._scheduleNextTick(this.config.logScanIntervalSec * 1000);
     }
+  }
+
+  _getStatusSnapshotSafe() {
+    if (typeof this.getStatusSnapshot !== "function") return null;
+    try {
+      return this.getStatusSnapshot();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  _isStatusSnapshotConnected(statusSnapshot) {
+    const runtime = statusSnapshot && statusSnapshot.runtime && typeof statusSnapshot.runtime === "object"
+      ? statusSnapshot.runtime
+      : null;
+    if (!runtime) return false;
+    const configuredTarget = String(runtime.configuredTarget || "").trim().toLowerCase();
+    const resolvedTarget = String(runtime.resolvedTarget || "").trim().toLowerCase();
+    const qqWs = runtime.qqWs && typeof runtime.qqWs === "object" ? runtime.qqWs : null;
+    const cdp = runtime.cdp && typeof runtime.cdp === "object" ? runtime.cdp : null;
+    const qqConnected = !!(qqWs && (qqWs.ready || qqWs.connected));
+    const cdpConnected = !!(cdp && (cdp.contextReady || cdp.transportConnected || cdp.connected));
+    const target = resolvedTarget || configuredTarget;
+    if (target === "qq_ws") return qqConnected;
+    if (target === "cdp") return cdpConnected;
+    if (configuredTarget === "auto") return qqConnected || cdpConnected;
+    return qqConnected || cdpConnected;
+  }
+
+  async _refreshAbnormalPushGate(statusSnapshot) {
+    if (this.abnormalPushArmed) return;
+    if (!this._isStatusSnapshotConnected(statusSnapshot)) return;
+    await this._resetObservationCursors(statusSnapshot);
+    this.abnormalPushArmed = true;
+    this.abnormalPushArmedAt = new Date().toISOString();
+    this.runtimeState.consecutiveTimeouts = 0;
+    this.runtimeState.timeoutAlertActive = false;
+    this.runtimeState.recentTimeoutLines = [];
+  }
+
+  async _resetObservationCursors(statusSnapshot) {
+    for (const filePath of this.logFiles) {
+      const key = path.relative(this.projectRoot, filePath) || filePath;
+      try {
+        const stat = await fs.stat(filePath);
+        this.runtimeState.logFiles[key] = { position: stat.size };
+      } catch (_) {
+        this.runtimeState.logFiles[key] = { position: 0 };
+      }
+      this.partialLineMap.set(key, "");
+    }
+    const recentEvents = Array.isArray(statusSnapshot && statusSnapshot.recentEvents)
+      ? statusSnapshot.recentEvents
+      : [];
+    this.statusEventCursorInitialized = true;
+    this.lastStatusEventKey = recentEvents.length > 0
+      ? this._buildStatusEventKey(recentEvents[recentEvents.length - 1])
+      : null;
   }
 
   async _ensureLogCursorsInitialized() {
@@ -820,14 +1056,69 @@ class MessagePushManager {
       const lastLine = lines.pop();
       this.partialLineMap.set(key, lastLine || "");
       for (const line of lines) {
-        await this._consumeLogLine(line);
+        await this._consumeLogLine(line, key);
       }
     }
   }
 
-  async _consumeLogLine(line) {
-    const text = String(line || "").trim();
+  async _scanStatusEvents() {
+    const snapshot = this._getStatusSnapshotSafe();
+    const recentEvents = Array.isArray(snapshot && snapshot.recentEvents) ? snapshot.recentEvents : [];
+    if (!this.statusEventCursorInitialized) {
+      this.statusEventCursorInitialized = true;
+      this.lastStatusEventKey = recentEvents.length > 0
+        ? this._buildStatusEventKey(recentEvents[recentEvents.length - 1])
+        : null;
+      return;
+    }
+    let startIndex = 0;
+    if (this.lastStatusEventKey) {
+      const index = recentEvents.findIndex((item) => this._buildStatusEventKey(item) === this.lastStatusEventKey);
+      startIndex = index >= 0 ? index + 1 : Math.max(0, recentEvents.length - 10);
+    }
+    for (let i = startIndex; i < recentEvents.length; i += 1) {
+      await this._consumeStatusEvent(recentEvents[i], snapshot);
+    }
+    this.lastStatusEventKey = recentEvents.length > 0
+      ? this._buildStatusEventKey(recentEvents[recentEvents.length - 1])
+      : null;
+  }
+
+  _buildStatusEventKey(event) {
+    const cur = event && typeof event === "object" ? event : {};
+    return [
+      cur.time || "",
+      cur.level || "",
+      cur.cycleId || "",
+      cur.cycleSeq == null ? "" : cur.cycleSeq,
+      cur.category || "",
+      cur.message || "",
+    ].join("|");
+  }
+
+  async _consumeStatusEvent(event, statusSnapshot) {
+    const cur = event && typeof event === "object" ? event : {};
+    const level = String(cur.level || "").trim().toLowerCase();
+    if (!ABNORMAL_EVENT_LEVELS.has(level)) return;
+    const sourceLabel = level === "error" ? "自动农场错误事件" : "自动农场告警事件";
+    await this._consumeObservedText(cur.message, {
+      occurredAt: cur.time || null,
+      sourceLabel,
+      statusSnapshot,
+    });
+  }
+
+  async _consumeLogLine(line, sourceKey) {
+    await this._consumeObservedText(line, {
+      sourceLabel: sourceKey ? `日志监控 ${sourceKey}` : "日志监控",
+    });
+  }
+
+  async _consumeObservedText(line, options) {
+    const text = stripAnsiText(line).trim();
     if (!text) return;
+    const opts = options && typeof options === "object" ? options : {};
+    if (!this.abnormalPushArmed) return;
     if (isTimeoutLogLine(text)) {
       this.runtimeState.consecutiveTimeouts += 1;
       this.runtimeState.lastTimeoutAt = new Date().toISOString();
@@ -844,7 +1135,7 @@ class MessagePushManager {
         const payload = buildAbnormalPayload(
           this.runtimeState,
           this.config.abnormalTimeoutThreshold,
-          this.getStatusSnapshot ? this.getStatusSnapshot() : null,
+          opts.statusSnapshot || (this.getStatusSnapshot ? this.getStatusSnapshot() : null),
         );
         const channels = pickAvailableChannels(this.config);
         if (channels.length > 0) {
@@ -861,7 +1152,21 @@ class MessagePushManager {
       this.runtimeState.timeoutAlertActive = false;
       this.runtimeState.lastRecoveryAt = new Date().toISOString();
       this.runtimeState.recentTimeoutLines = [];
+      return;
     }
+    const abnormalMatch = matchAbnormalLogLine(text);
+    if (!abnormalMatch) return;
+    if (!(this.config.enabled && this.config.abnormalEnabled)) return;
+    const channels = pickAvailableChannels(this.config);
+    if (!channels.length) return;
+    const payload = buildImmediateAbnormalPayload(abnormalMatch, text, {
+      occurredAt: opts.occurredAt || new Date().toISOString(),
+      sourceLabel: opts.sourceLabel || "日志监控",
+      statusSnapshot: opts.statusSnapshot || (this.getStatusSnapshot ? this.getStatusSnapshot() : null),
+    });
+    const result = await this._sendPayload(this.config, channels, payload);
+    this.runtimeState.lastAbnormalNotificationAt = new Date().toISOString();
+    this.runtimeState.lastAbnormalNotificationText = result.summary;
   }
 
   async _maybeSendDailySummary() {
