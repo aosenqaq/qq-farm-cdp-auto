@@ -1,0 +1,51 @@
+# 依赖
+node_modules/
+
+# 日志
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 本地 / 敏感配置（若需示例可另建 farm-config.example.json 并提交）
+data/farm-config.json
+data/auto-fertilizer-state.json
+data/friend-help-exp-cache.json
+data/message-push-state.json
+data/player-profile-cache.json
+data/account-stats/
+.env
+.env.local
+.env.*.local
+
+# 构建与缓存
+dist/
+build/
+out/
+.cache/
+coverage/
+.nyc_output/
+*.tsbuildinfo
+
+# 操作系统
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+# 编辑器与 IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# 旧调试器目录（已合并到 wmpf/，若本地仍有旧目录可删）
+WMPFDebugger/
+logs/
+release/
+*.qq-farm.bak
+
+# 反编译输出与本地笔记（不提交）
+deobfuscated/
+总结.md

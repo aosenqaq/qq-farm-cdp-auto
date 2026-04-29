@@ -1,0 +1,38 @@
+{
+  "source": "https://jsq.gptvip.chat/items/19",
+  "category": "活动货币",
+  "total": 1,
+  "items": [
+    {
+      "category_name": "活动货币",
+      "category_href": "/items/19",
+      "type": 19,
+      "item_id": 1016,
+      "name": "青团",
+      "level": null,
+      "rarity": null,
+      "rarity_color": null,
+      "price": 100,
+      "price_id": 1001,
+      "max_count": 9999,
+      "max_own": 9999999999999,
+      "can_use": null,
+      "duration": null,
+      "asset_name": null,
+      "icon_file": "extraRes/gui/texture/icon/icon_qing.png",
+      "icon_url": "https://jsq.gptvip.chat/images/extraRes/gui/texture/icon/icon_qing.png",
+      "icon_res": "gui/texture/icon/icon_qing/spriteFrame",
+      "desc": "活动特殊货币，可用于参与清明春耕纪活动抽奖，活动结束后可出售为金币。",
+      "effect_desc": "青团",
+      "interaction_type": null,
+      "jumps": "[42]",
+      "layer": null,
+      "target_id": null,
+      "sell_cond": "活动结束后:2026040201",
+      "ware_scale": null,
+      "phase_count": 0,
+      "phase_names": "",
+      "phase_paths": ""
+    }
+  ]
+}
