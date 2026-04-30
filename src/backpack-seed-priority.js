@@ -2,10 +2,6 @@
 
 const { getPlantBySeedId } = require("./game-config");
 
-const NON_PLANTABLE_BACKPACK_SEED_ID_SET = new Set([
-  20046, // 爱心果（2x2）
-]);
-
 function normalizePositiveIntList(value) {
   const source = Array.isArray(value)
     ? value
@@ -39,12 +35,12 @@ function getBackpackSeedPlantability(seedId) {
       message: "无效种子",
     };
   }
-  if (NON_PLANTABLE_BACKPACK_SEED_ID_SET.has(normalizedSeedId)) {
-    const plant = getPlantBySeedId(normalizedSeedId);
+  const plant = getPlantBySeedId(normalizedSeedId);
+  if ((Number(plant && plant.size) || 0) >= 2) {
     return {
       plantable: false,
-      reason: "special_seed_not_supported",
-      message: `${plant && plant.name ? plant.name : "该种子"}为 2x2 作物，当前背包种植策略不支持`,
+      reason: "multi_tile_seed_not_supported",
+      message: `${plant && plant.name ? plant.name : "该种子"}为四格作物，当前背包种植策略不支持`,
     };
   }
   return {
