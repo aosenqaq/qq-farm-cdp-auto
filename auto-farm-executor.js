@@ -979,7 +979,7 @@ function markAutoFertilizerApplied(state, grid, type, opts) {
   return setAutoFertilizerMarkApplied(mark, type, evidence);
 }
 
-function canUseAutoFertilizerOnGrid(grid, opts) {
+function canUseAutoFertilizerOnGridBase(grid, opts) {
   if (!grid || typeof grid !== "object") return false;
   const stageKind = String(grid.stageKind || "").trim().toLowerCase();
   if (stageKind !== "growing") return false;
@@ -989,8 +989,6 @@ function canUseAutoFertilizerOnGrid(grid, opts) {
   if (!Number.isFinite(landId) || landId <= 0) return false;
   const plantId = Number(grid.plantId) || 0;
   if (plantId <= 0) return false;
-  const matureInSec = Number(grid.matureInSec);
-  if (!Number.isFinite(matureInSec) || matureInSec <= 5) return false;
   const allowedLandTypes = Array.isArray(opts && opts.autoFertilizerLandTypes)
     ? opts.autoFertilizerLandTypes.map(normalizeFertilizerLandType)
     : ["gold", "black", "red", "normal"];
@@ -1000,6 +998,18 @@ function canUseAutoFertilizerOnGrid(grid, opts) {
   const currentSeason = getGridCurrentSeason(grid);
   if (totalSeason > 1 && currentSeason > 1 && !(opts && opts.autoFertilizerMultiSeason === true)) return false;
   return true;
+}
+
+function canUseAutoFertilizerOnGrid(grid, opts) {
+  if (!canUseAutoFertilizerOnGridBase(grid, opts)) return false;
+  const matureInSec = Number(grid && grid.matureInSec);
+  return Number.isFinite(matureInSec) && matureInSec > 5;
+}
+
+function canUseAutoFertilizerOnGridForRush(grid, opts) {
+  if (!canUseAutoFertilizerOnGridBase(grid, opts)) return false;
+  const matureInSec = Number(grid && grid.matureInSec);
+  return Number.isFinite(matureInSec) && matureInSec >= 0;
 }
 
 function describeAutoFertilizerPrecheckSkipReason(grid) {
@@ -1036,11 +1046,15 @@ async function refreshAutoFertilizerCandidatesBeforeRun(session, callGameCtl, op
 
   const runnableCandidates = [];
   const skippedActions = [];
+  const isRushPhase = phase === "rush_normal" || phase === "rush_organic";
   for (let i = 0; i < source.length; i += 1) {
     const candidate = source[i];
     const landId = Number(candidate && candidate.landId);
     const liveGrid = liveGridMap.get(landId) || null;
-    if (!canUseAutoFertilizerOnGrid(liveGrid, opts)) {
+    const stillEligible = isRushPhase
+      ? canUseAutoFertilizerOnGridForRush(liveGrid, opts)
+      : canUseAutoFertilizerOnGrid(liveGrid, opts);
+    if (!stillEligible) {
       skippedActions.push(buildAutoFertilizerSkippedAction(candidate, candidate && candidate.fertilizerType, "not_in_growing_stage", {
         phase,
         fertilizerReason: candidate && candidate.fertilizerReason ? candidate.fertilizerReason : null,
@@ -1064,7 +1078,7 @@ async function refreshAutoFertilizerCandidatesBeforeRun(session, callGameCtl, op
 
 function isAutoFertilizerRushReady(grid, rushThresholdSec) {
   const matureInSec = Number(grid && grid.matureInSec);
-  return Number.isFinite(matureInSec) && matureInSec > 5 && matureInSec <= rushThresholdSec;
+  return Number.isFinite(matureInSec) && matureInSec >= 0 && matureInSec <= rushThresholdSec;
 }
 
 function collectAutoFertilizerRushWatchEntries(status, opts) {
@@ -1077,7 +1091,7 @@ function collectAutoFertilizerRushWatchEntries(status, opts) {
     const grid = grids[i];
     const landId = Number(grid && grid.landId);
     if (!Number.isFinite(landId) || landId <= 0 || seen.has(landId)) continue;
-    if (!canUseAutoFertilizerOnGrid(grid, opts)) continue;
+    if (!canUseAutoFertilizerOnGridForRush(grid, opts)) continue;
     if (!isAutoFertilizerRushReady(grid, rushThresholdSec)) continue;
     seen.add(landId);
     entries.push({
@@ -1491,14 +1505,17 @@ function collectAutoFertilizerPlan(status, opts, phaseName) {
   const grids = Array.isArray(status && status.grids) ? status.grids : [];
   const candidates = [];
   const skippedActions = [];
+  const isRushPhase = phaseName === "rush_normal" || phaseName === "rush_organic";
 
   for (let i = 0; i < grids.length; i += 1) {
     const grid = grids[i];
-    if (!canUseAutoFertilizerOnGrid(grid, opts)) continue;
+    const phaseEligible = isRushPhase
+      ? canUseAutoFertilizerOnGridForRush(grid, opts)
+      : canUseAutoFertilizerOnGrid(grid, opts);
+    if (!phaseEligible) continue;
     const mark = getAutoFertilizerMarkForGrid(state, grid);
     if (!mark) continue;
     const rushReady = isAutoFertilizerRushReady(grid, rushThresholdSec);
-    const followUpSeason = isAutoFertilizerFollowUpSeason(grid);
     const seasonStartDecision = phaseName === "season_start"
       ? shouldApplyAutoFertilizerSeasonStart(grid)
       : null;
@@ -1567,7 +1584,6 @@ function collectAutoFertilizerPlan(status, opts, phaseName) {
     } else if (
       phaseName === "rush_organic"
       && (mode === "both" || mode === "both_legacy")
-      && (mark.normalApplied === true || followUpSeason)
       && mark.organicApplied !== true
       && rushReady
     ) {
